@@ -87,6 +87,19 @@ class ConsolidationResult:
 
 
 @dataclass
+class KnownSyllable:
+    """
+    Известный слог с его ID и текущим весом (усвоенностью) — используется
+    babbling-подсистемой (InstinctSystem.generate_babble_response) для
+    взвешенного выбора слогов и последующего трекинга использованных
+    узлов в Reinforcement Loop (Cortex.apply_feedback).
+    """
+    id: int
+    text: str
+    weight: float
+
+
+@dataclass
 class AssociatedNode:
     """Узел, подтянутый через Spreading Activation (ассоциативное ребро)."""
     id: int
@@ -446,12 +459,23 @@ class MemoryGraph:
         """Возвращает количество уникальных освоенных word-узлов."""
         return self.db.count_nodes_by_type("word")
 
-    def get_known_syllables(self, limit: int = 10) -> List[str]:
-        """Возвращает до `limit` случайных известных слогов (для babbling)."""
-        rows = self.db.get_random_nodes_by_type("syllable", limit=limit)
-        return [row["context"] for row in rows]
+    def get_known_syllables(self, limit: Optional[int] = None) -> List[KnownSyllable]:
+        """
+        Возвращает пул известных слогов (id, text, weight) — кандидатов для
+        ВЗВЕШЕННОГО выбора в babbling-подсистеме (InstinctSystem.
+        generate_babble_response). Пул случайный на уровне БД (ORDER BY
+        RANDOM()), но каждый элемент несёт свой реальный вес — взвешенная
+        выборка происходит уже в InstinctSystem, не здесь.
 
-    # ----------------------------------------------------------------------
+        limit по умолчанию берётся из config.BABBLING_SYLLABLE_POOL_SIZE.
+        """
+        effective_limit = limit if limit is not None else config.BABBLING_SYLLABLE_POOL_SIZE
+        rows = self.db.get_random_nodes_by_type("syllable", limit=effective_limit)
+        return [
+            KnownSyllable(id=row["id"], text=row["context"], weight=row["weight"])
+            for row in rows
+        ]
+
 
     # ----------------------------------------------------------------------
     # 1. Сохранение новой связи
