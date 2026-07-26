@@ -1219,6 +1219,7 @@ class MemoryGraph:
         self,
         entries: List["STMEntry"],
         timestamp: Optional[float] = None,
+        already_captured_by_spike: bool = False,
     ) -> ConsolidationResult:
         """
         Оценивает накопленный эпизод кратковременной памяти (STM) и
@@ -1243,6 +1244,23 @@ class MemoryGraph:
         """
         if not entries:
             return ConsolidationResult(decision="routine_noise", reason="STM пуст, нет данных")
+
+        # Защита от дублирования: если этот флеш вызван спайком амигдалы,
+        # который уже создал точный узел LTM для текущего обмена (шаг 10 в
+        # brain_session.py), а STM на момент флеша содержит только этот же
+        # самый обмен (<=2 записи: реплика user + реплика bot), то
+        # консолидация создала бы почти идентичный дубль. В этом случае
+        # пропускаем запись — контент уже сохранён.
+        if already_captured_by_spike and len(entries) <= 2:
+            logger.info(
+                "[CONSOLIDATION] Пропуск: обмен уже сохранён spike-узлом "
+                "(entries=%d)",
+                len(entries),
+            )
+            return ConsolidationResult(
+                decision="routine_noise",
+                reason="Уже сохранён как spike-узел, дублирование пропущено",
+            )
 
         max_emotion = max(e.emotion_score for e in entries)
         avg_perplexity = sum(e.perplexity for e in entries) / len(entries)

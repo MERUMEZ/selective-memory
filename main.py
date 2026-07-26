@@ -329,7 +329,7 @@ def run() -> None:
             perplexity = cortex.calculate_perplexity(user_input)
 
             # 5. Состояние инстинктов
-            stress_state = instincts.get_state()
+            stress_state = instincts.get_state(timestamp=brain_time)
 
             # 6. Amygdala — spike detection
             amygdala_result = amygdala.evaluate(
@@ -338,7 +338,7 @@ def run() -> None:
                 stress_level=stress_state.current_stress,
             )
 
-            instincts.accumulate_stress(emotion_score)
+            instincts.accumulate_stress(emotion_score, timestamp=brain_time)
 
             # 7. Записываем реплику пользователя в STM
             stm.add_message(
@@ -457,7 +457,7 @@ def run() -> None:
             print(f"\nBot > {cortex_response.text}")
 
             # 14. Обновлённое состояние стресса
-            updated_stress_state = instincts.get_state()
+            updated_stress_state = instincts.get_state(timestamp=brain_time)
 
             # 15. Единый системный дебаг-блок (включая REWARD TRACE/EVAL)
             print_debug_block(
