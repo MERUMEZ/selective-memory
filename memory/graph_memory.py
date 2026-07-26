@@ -532,7 +532,7 @@ class MemoryGraph:
             return []
 
         query_keywords = self._extract_keywords(query_normalized)
-        rows = self.db.fetch_all_nodes()
+        rows = self.db.fetch_searchable_nodes()
 
         scored: List[MemoryMatch] = []
 

@@ -196,9 +196,29 @@ class Database:
         return cursor.fetchone()
 
     def fetch_all_nodes(self) -> List[sqlite3.Row]:
-        """Возвращает все узлы памяти."""
+        """Возвращает все узлы памяти (ВСЕ node_type — используется decay/sleep_cycle,
+        где угасание/забывание должно применяться одинаково к любому типу узла)."""
         cursor = self._conn.cursor()
         cursor.execute("SELECT * FROM nodes")
+        return cursor.fetchall()
+
+    def fetch_searchable_nodes(self) -> List[sqlite3.Row]:
+        """
+        Возвращает только узлы, пригодные для семантического поиска
+        диалогового контекста (MemoryGraph.search) — то есть настоящие
+        воспоминания/эпизоды и явно преподанные понятия.
+
+        ИСКЛЮЧАЕТ 'word'/'syllable' (служебные узлы лексического
+        усвоения — у них пустой response, и участие в поиске приводило
+        к ложным MEMORY HIT на любом повторно использованном слове,
+        см. баг: "почему" находило само себя с score=1.0) и
+        'self_model'/'user_model' (мета-узлы, подмешиваются в промпт
+        отдельным механизмом, не через search).
+        """
+        cursor = self._conn.cursor()
+        cursor.execute(
+            "SELECT * FROM nodes WHERE node_type IN ('episodic', 'concept')"
+        )
         return cursor.fetchall()
 
     def update_weight(self, node_id: int, new_weight: float) -> None:
