@@ -33,6 +33,7 @@ from typing import List, Optional, Set, TYPE_CHECKING
 
 import config
 from memory.database import Database
+from services.llm import generate_llm_response
 from storage.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -157,6 +158,20 @@ class PruningReport:
     orphan_nodes_pruned: int
 
 
+@dataclass
+class SelfModelEvolutionResult:
+    """Результат попытки эволюции Self-Model во время фазы сна (Итерация H)."""
+    evolved: bool
+    old_content: str = ""
+    new_content: str = ""
+    source_node_ids: List[int] = None
+    reason: str = ""
+
+    def __post_init__(self):
+        if self.source_node_ids is None:
+            self.source_node_ids = []
+
+
 class MemoryGraph:
     """
     Высокоуровневый интерфейс к графу долгосрочной памяти (LTM).
@@ -225,6 +240,99 @@ class MemoryGraph:
         """Возвращает текущий текст User-Model (fallback на config-дефолт)."""
         row = self.db.get_meta_node("user_model")
         return row["context"] if row is not None else config.DEFAULT_USER_MODEL
+
+    def evolve_self_model(self, timestamp: Optional[float] = None) -> SelfModelEvolutionResult:
+        """
+        Фаза сна (Итерация H): рефлексия и постепенная эволюция Self-Model.
+
+        Собирает "дайджест" значимых узлов LTM, созданных с момента
+        прошлого сна (маркер хранится как отдельный мета-узел
+        'last_sleep_marker' — переиспользуем инфраструктуру мета-узлов,
+        не меняя схему БД), просит LLM ПОСТЕПЕННО скорректировать текущий
+        текст Self-Model с учётом пережитого опыта, и записывает результат.
+
+        Если материала недостаточно (< SELF_MODEL_EVOLUTION_MIN_NODES)
+        ИЛИ LLM недоступна — эволюция пропускается, маркер last_sleep НЕ
+        обновляется (материал продолжит копиться до следующего сна).
+        """
+        ts = timestamp if timestamp is not None else time.time()
+
+        marker_row = self.db.get_meta_node("last_sleep_marker")
+        min_created_at = float(marker_row["context"]) if marker_row is not None else 0.0
+
+        significant_rows = self.db.get_significant_nodes_since(
+            min_created_at, limit=config.SELF_MODEL_EVOLUTION_MAX_NODES
+        )
+
+        if len(significant_rows) < config.SELF_MODEL_EVOLUTION_MIN_NODES:
+            logger.info(
+                "[SELF-MODEL EVOLUTION] Недостаточно опыта для рефлексии "
+                "(%d < %d значимых узлов) -> пропуск",
+                len(significant_rows), config.SELF_MODEL_EVOLUTION_MIN_NODES,
+            )
+            return SelfModelEvolutionResult(
+                evolved=False,
+                reason=f"Недостаточно опыта ({len(significant_rows)} узлов)",
+            )
+
+        current_self = self.get_self_model_content()
+        digest = self._format_significant_nodes_for_prompt(significant_rows)
+        user_message = (
+            f"ТЕКУЩИЙ Self-Model:\n{current_self}\n\n"
+            f"ДАЙДЖЕСТ значимых событий с прошлого сна:\n{digest}"
+        )
+
+        llm_result = generate_llm_response(
+            messages=[{"role": "user", "content": user_message}],
+            system_prompt=config.SELF_MODEL_EVOLUTION_PROMPT,
+        )
+
+        if not llm_result or not llm_result.strip():
+            logger.warning("[SELF-MODEL EVOLUTION] LLM недоступна/пустой ответ -> пропуск")
+            return SelfModelEvolutionResult(
+                evolved=False, reason="LLM недоступна или вернула пустой ответ",
+            )
+
+        new_content = llm_result.strip()[: config.SELF_MODEL_MAX_LENGTH]
+
+        self.db.upsert_meta_node(
+            node_type="self_model",
+            content=new_content,
+            weight=config.META_NODE_WEIGHT,
+            timestamp=ts,
+        )
+        # Маркер обновляем ТОЛЬКО при успешной эволюции — иначе накопленный
+        # с прошлого раза опыт "потерялся" бы без результата.
+        self.db.upsert_meta_node(
+            node_type="last_sleep_marker",
+            content=str(ts),
+            weight=1.0,
+            timestamp=ts,
+        )
+
+        source_ids = [row["id"] for row in significant_rows]
+        logger.info(
+            "[SELF-MODEL EVOLUTION] Self-Model обновлён на основе %d узлов: %r -> %r",
+            len(significant_rows), current_self[:60], new_content[:60],
+        )
+
+        return SelfModelEvolutionResult(
+            evolved=True,
+            old_content=current_self,
+            new_content=new_content,
+            source_node_ids=source_ids,
+            reason="OK",
+        )
+
+    @staticmethod
+    def _format_significant_nodes_for_prompt(rows: List["sqlite3.Row"]) -> str:
+        """Формирует читаемый текстовый дайджест значимых узлов для LLM."""
+        lines = []
+        for row in rows:
+            ctx = (row["context"] or "").strip().replace("\n", " ")[:100]
+            resp = (row["response"] or "").strip().replace("\n", " ")[:100]
+            lines.append(f'- (weight={row["weight"]:.2f}) User: "{ctx}" | Bot: "{resp}"')
+        return "\n".join(lines)
 
     # ----------------------------------------------------------------------
     # CONCEPT EXTRACTION — семантическая концептуализация (Итерация 16)

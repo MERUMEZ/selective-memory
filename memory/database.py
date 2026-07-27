@@ -462,6 +462,33 @@ class Database:
         )
         return cursor.fetchall()
 
+    def get_significant_nodes_since(
+        self, min_created_at: float, limit: int
+    ) -> List[sqlite3.Row]:
+        """
+        Возвращает до `limit` "значимых" узлов LTM (node_type='episodic',
+        is_meta=0 — то есть спайк-узлы, эмоциональные/структурные узлы
+        консолидации и абстрактные узлы сна, но НЕ лексика/концепты/мета-
+        узлы), созданных ПОСЛЕ min_created_at, отсортированных по весу
+        (сильнейшие/самые эмоционально значимые — первыми).
+
+        Используется эволюцией Self-Model во время сна (Итерация H) —
+        строит "дайджест" опыта, накопленного с прошлого сна.
+        """
+        cursor = self._conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM nodes
+            WHERE is_meta = 0
+              AND node_type = 'episodic'
+              AND created_at > ?
+            ORDER BY weight DESC
+            LIMIT ?
+            """,
+            (min_created_at, limit),
+        )
+        return cursor.fetchall()
+
     # ----------------------------------------------------------------------
     # SELF-MODEL & USER-MODEL — мета-узлы самосознания (Итерация 15)
     # ----------------------------------------------------------------------

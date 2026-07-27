@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, TYPE_CHECKING
 
 import config
-from memory.graph_memory import MemoryGraph, HubCluster
+from memory.graph_memory import MemoryGraph, HubCluster, SelfModelEvolutionResult
 from services.llm import generate_llm_response
 from storage.utils.logger import get_logger
 
@@ -72,6 +72,7 @@ class SleepSummary:
     stm_entries_flushed: int = 0
     duration_seconds: float = 0.0
     llm_unavailable: bool = False
+    self_model_evolution: Optional[SelfModelEvolutionResult] = None
 
     @property
     def abstract_nodes_created(self) -> int:
@@ -98,6 +99,18 @@ class SleepSummary:
 
         if self.llm_unavailable:
             lines.append("│ NOTE: LLM недоступна — консолидация пропущена (fallback)")
+
+        if self.self_model_evolution is not None:
+            if self.self_model_evolution.evolved:
+                old_preview = self.self_model_evolution.old_content.strip().replace("\n", " ")[:50]
+                new_preview = self.self_model_evolution.new_content.strip().replace("\n", " ")[:50]
+                lines.append(
+                    f"│ Self-Model evolved     : {old_preview!r} -> {new_preview!r}"
+                )
+            else:
+                lines.append(
+                    f"│ Self-Model evolution   : пропущена ({self.self_model_evolution.reason})"
+                )
 
         lines.append(f"│ Stress reset            : {self.stress_before:.3f} -> {self.stress_after:.3f}")
         lines.append(f"│ STM flushed             : {self.stm_entries_flushed} entries")
@@ -163,6 +176,9 @@ class SleepCycle:
                 summary.abstraction_events.append(event)
             else:
                 summary.llm_unavailable = True
+
+        # --- Шаг 2.5: Эволюция Self-Model (рефлексия над пережитым опытом) ---
+        summary.self_model_evolution = self.memory.evolve_self_model(timestamp=ts)
 
         # --- Шаг 3: Сброс физиологического состояния ---
         if self.instincts is not None:
