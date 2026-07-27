@@ -298,14 +298,28 @@ class Database:
 
         if row is None:
             initial_weight = min(max_weight, max(0.0, weight_boost))
-            cursor.execute(
-                """
-                INSERT INTO edges (node_from, node_to, weight, last_activated)
-                VALUES (?, ?, ?, ?)
-                """,
-                (a, b, initial_weight, ts),
-            )
-            self._conn.commit()
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO edges (node_from, node_to, weight, last_activated)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (a, b, initial_weight, ts),
+                )
+                self._conn.commit()
+            except sqlite3.IntegrityError:
+                # Последний рубеж защиты: один из узлов был удалён между
+                # проверкой существования (MemoryGraph.connect_nodes) и
+                # этой вставкой (крайне узкое окно гонки) — FOREIGN KEY
+                # constraint. Не даём этому уронить весь обработчик
+                # сообщения, просто пропускаем создание ребра.
+                self._conn.rollback()
+                logger.warning(
+                    "[EDGE SKIP] FOREIGN KEY constraint при создании ребра %s <-> %s "
+                    "(узел удалён?) -> пропущено",
+                    a, b,
+                )
+                return 0.0
             logger.info(
                 "[EDGE CREATED] %s <-> %s weight=%.3f", a, b, initial_weight
             )

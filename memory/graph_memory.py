@@ -811,6 +811,18 @@ class MemoryGraph:
         if node_from is None or node_to is None or node_from == node_to:
             return 0.0
 
+        # Защита от гонки: один из узлов мог быть удалён (например, во сне
+        # low-weight syllable-узел попал под orphan pruning) в промежутке
+        # между тем, как его id был запомнён (last_action_trace.node_ids
+        # / связка из STM), и текущим вызовом. FOREIGN KEY на edges иначе
+        # уронит вставку исключением — просто тихо пропускаем ребро.
+        if self.db.get_node(node_from) is None or self.db.get_node(node_to) is None:
+            logger.debug(
+                "[ASSOCIATION SKIP] Узел %s или %s больше не существует (удалён) -> ребро не создано",
+                node_from, node_to,
+            )
+            return 0.0
+
         boost = weight_boost if weight_boost is not None else config.EDGE_BOOST_STEP
         ts = timestamp if timestamp is not None else time.time()
 
