@@ -564,7 +564,26 @@ class MemoryGraph:
         return syllables if syllables else [word]
 
     def get_vocabulary_size(self) -> int:
-        """Возвращает количество уникальных освоенных word-узлов."""
+        """
+        Возвращает количество ЗАКРЕПЛЁННЫХ (усвоенных) слов — word-узлов
+        с weight >= VOCABULARY_MASTERY_MIN_WEIGHT. Слово, услышанное один
+        раз, создаёт узел с низким начальным весом и НЕ считается здесь,
+        пока не будет повторено пользователем ещё несколько раз (см.
+        WORD_NODE_INITIAL_WEIGHT/WORD_NODE_REINFORCE_STEP). Используется
+        для гейтинга стадии речевого развития (Cortex._resolve_speech_stage)
+        и для пользовательского /status — то есть отражает то, что бот
+        реально ОСВОИЛ, а не всё, что когда-либо пролетело через него.
+        """
+        return self.db.count_mastered_words(config.VOCABULARY_MASTERY_MIN_WEIGHT)
+
+    def get_exposed_vocabulary_size(self) -> int:
+        """
+        Общее количество РАЗЛИЧНЫХ слов, которые бот хотя бы раз услышал,
+        независимо от закрепления — "пассивный" словарь. Только для
+        статистики/отладки (например, разница между этим числом и
+        get_vocabulary_size() показывает, сколько слов ещё "на подходе" к
+        усвоению). НЕ используется для гейтинга речевых стадий.
+        """
         return self.db.count_nodes_by_type("word")
 
     def get_known_syllables(self, limit: Optional[int] = None) -> List[KnownSyllable]:
@@ -945,7 +964,15 @@ class MemoryGraph:
                 skipped_meta_count += 1
                 continue
 
-            dt = current_time - row["last_accessed"]
+            # Защита от NULL: если last_decayed_at не проставлен (пропущенный
+            # путь создания/обновления узла) — используем last_accessed как
+            # отсчётную точку, вместо падения с TypeError. На этом же проходе
+            # last_decayed_at будет проставлен через updates[] ниже.
+            last_decayed = row["last_decayed_at"]
+            if last_decayed is None:
+                last_decayed = row["last_accessed"]
+
+            dt = current_time - last_decayed
             if dt <= 0:
                 continue
 
@@ -956,7 +983,11 @@ class MemoryGraph:
             if new_weight < config.FORGET_THRESHOLD:
                 to_forget.append(row["id"])
             else:
-                updates.append({"id": row["id"], "weight": new_weight})
+                updates.append({
+                    "id": row["id"],
+                    "weight": new_weight,
+                    "last_decayed_at": current_time,
+                })
                 decayed_count += 1
 
         if updates:
@@ -988,7 +1019,12 @@ class MemoryGraph:
         decayed_count = 0
 
         for edge in edges:
-            dt = current_time - edge["last_activated"]
+            # Защита от NULL — см. комментарий в _decay_nodes.
+            last_decayed = edge["last_decayed_at"]
+            if last_decayed is None:
+                last_decayed = edge["last_activated"]
+
+            dt = current_time - last_decayed
             if dt <= 0:
                 continue
 
@@ -999,7 +1035,11 @@ class MemoryGraph:
             if new_weight < config.EDGE_FORGET_THRESHOLD:
                 to_forget.append(edge["id"])
             else:
-                updates.append({"id": edge["id"], "weight": new_weight})
+                updates.append({
+                    "id": edge["id"],
+                    "weight": new_weight,
+                    "last_decayed_at": current_time,
+                })
                 decayed_count += 1
 
         if updates:
@@ -1246,7 +1286,14 @@ class MemoryGraph:
         Возвращает None, если в БД вообще нет узлов (вызывающий код
         должен в этом случае сгенерировать fallback-размышление без узла).
         """
-        rows = self.db.fetch_all_nodes()
+        # ИСПРАВЛЕНИЕ: fetch_all_nodes() возвращал ВСЕ node_type, включая
+        # служебные лексические узлы ('word'/'syllable') и мета-узлы
+        # (Self-Model/User-Model) — они могли попасть в проактивное
+        # сообщение как будто это реальное воспоминание (у лексических
+        # узлов context == response == текст слова/слога, что выглядело
+        # бы абсурдно в PROACTIVE_PROMPT_TEMPLATE). fetch_searchable_nodes()
+        # уже корректно ограничен node_type IN ('episodic', 'concept').
+        rows = self.db.fetch_searchable_nodes()
         if not rows:
             logger.info("[PROACTIVE RECALL] LTM пуста — нет кандидатов для проактивного узла")
             return None

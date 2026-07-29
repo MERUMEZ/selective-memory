@@ -86,7 +86,26 @@ ALTER TABLE nodes ADD COLUMN is_meta INTEGER DEFAULT 0;
 ALTER_ADD_NODE_TYPE = """
 ALTER TABLE nodes ADD COLUMN node_type TEXT DEFAULT NULL;
 """
-
+# --------------------------------------------------------------------------
+# Миграция: отдельные "часы" decay (last_decayed_at), НЕ совпадающие с
+# last_accessed/last_activated (фикс компаундинга decay).
+#
+# last_accessed / last_activated = "когда узел/ребро РЕАЛЬНО использовали"
+#   (нужно для proactive cooldown, скоринга релевантности и т.п.)
+# last_decayed_at                = "с какого момента отсчитывать угасание
+#   веса" — чисто техническая метка для формулы decay.
+#
+# Раньше decay считал dt от last_accessed, но apply_decay гоняется на
+# КАЖДОЕ сообщение для ВСЕХ узлов, а last_accessed двигается только при
+# реальном касании — из-за этого угасание накапливалось некорректно
+# (квадратично по числу сообщений вместо линейного по времени).
+# --------------------------------------------------------------------------
+ALTER_ADD_LAST_DECAYED_NODES = """
+ALTER TABLE nodes ADD COLUMN last_decayed_at REAL DEFAULT NULL;
+"""
+ALTER_ADD_LAST_DECAYED_EDGES = """
+ALTER TABLE edges ADD COLUMN last_decayed_at REAL DEFAULT NULL;
+"""
 class Database:
     """
     Тонкая обёртка над SQLite для таблицы `nodes`.
@@ -119,6 +138,7 @@ class Database:
         cursor.execute(UNIQUE_EDGE_PAIR)
         self._conn.commit()
         self._migrate_meta_columns()
+        self._migrate_decay_columns()
         logger.info("[DB INIT] Схема nodes + edges готова (%s)", self.db_path)
 
     def _migrate_meta_columns(self) -> None:
@@ -150,6 +170,40 @@ class Database:
         if migrated_any:
             logger.info("[MIGRATION] Таблица nodes обновлена (is_meta, node_type)")
 
+    def _migrate_decay_columns(self) -> None:
+        """
+        Миграция: добавляет колонку last_decayed_at в nodes и edges —
+        отдельные "часы" для decay, НЕ совпадающие с last_accessed/
+        last_activated (см. комментарий у ALTER_ADD_LAST_DECAYED_*).
+
+        Существующие строки backfill'ятся текущим значением
+        last_accessed/last_activated — decay-часы для них просто
+        начинают тикать с этого момента, без искусственного "долга".
+        """
+        cursor = self._conn.cursor()
+        migrated_any = False
+        try:
+            cursor.execute(ALTER_ADD_LAST_DECAYED_NODES)
+            migrated_any = True
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc):
+                raise
+        try:
+            cursor.execute(ALTER_ADD_LAST_DECAYED_EDGES)
+            migrated_any = True
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc):
+                raise
+        cursor.execute(
+            "UPDATE nodes SET last_decayed_at = last_accessed WHERE last_decayed_at IS NULL"
+        )
+        cursor.execute(
+            "UPDATE edges SET last_decayed_at = last_activated WHERE last_decayed_at IS NULL"
+        )
+        self._conn.commit()
+        if migrated_any:
+            logger.info("[MIGRATION] Таблица nodes/edges обновлена (last_decayed_at)")
+
     # ----------------------------------------------------------------------
     # CRUD операции
     # ----------------------------------------------------------------------
@@ -176,10 +230,10 @@ class Database:
         cursor = self._conn.cursor()
         cursor.execute(
             """
-            INSERT INTO nodes (context, response, weight, created_at, last_accessed, node_type)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO nodes (context, response, weight, created_at, last_accessed, last_decayed_at, node_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (context, response, weight, ts, ts, node_type),
+            (context, response, weight, ts, ts, ts, node_type),
         )
         self._conn.commit()
         node_id = cursor.lastrowid
@@ -231,12 +285,16 @@ class Database:
         self._conn.commit()
 
     def update_last_accessed(self, node_id: int, timestamp: Optional[float] = None) -> None:
-        """Обновляет метку последнего обращения к узлу."""
+        """
+        Обновляет метку последнего обращения к узлу. Также сбрасывает
+        last_decayed_at — реальное использование узла законно "обновляет"
+        и точку отсчёта для decay (см. _migrate_decay_columns).
+        """
         ts = timestamp if timestamp is not None else time.time()
         cursor = self._conn.cursor()
         cursor.execute(
-            "UPDATE nodes SET last_accessed = ? WHERE id = ?",
-            (ts, node_id),
+            "UPDATE nodes SET last_accessed = ?, last_decayed_at = ? WHERE id = ?",
+            (ts, ts, node_id),
         )
         self._conn.commit()
 
@@ -249,12 +307,16 @@ class Database:
 
     def bulk_update_weights(self, updates: List[Dict[str, Any]]) -> None:
         """
-        Массовое обновление весов. updates = [{"id": 1, "weight": 0.4}, ...]
+        Массовое обновление весов. updates = [{"id": 1, "weight": 0.4,
+        "last_decayed_at": 12345.0}, ...]
         Используется decay-циклом для эффективного батч-обновления.
+        Каждая запись ОБЯЗАНА содержать last_decayed_at (новую точку
+        отсчёта decay) — иначе следующий decay-проход пересчитает dt от
+        старой метки и угасание накопится некорректно.
         """
         cursor = self._conn.cursor()
         cursor.executemany(
-            "UPDATE nodes SET weight = :weight WHERE id = :id",
+            "UPDATE nodes SET weight = :weight, last_decayed_at = :last_decayed_at WHERE id = :id",
             updates,
         )
         self._conn.commit()
@@ -301,10 +363,10 @@ class Database:
             try:
                 cursor.execute(
                     """
-                    INSERT INTO edges (node_from, node_to, weight, last_activated)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO edges (node_from, node_to, weight, last_activated, last_decayed_at)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    (a, b, initial_weight, ts),
+                    (a, b, initial_weight, ts, ts),
                 )
                 self._conn.commit()
             except sqlite3.IntegrityError:
@@ -327,8 +389,8 @@ class Database:
 
         new_weight = min(max_weight, row["weight"] + weight_boost)
         cursor.execute(
-            "UPDATE edges SET weight = ?, last_activated = ? WHERE id = ?",
-            (new_weight, ts, row["id"]),
+            "UPDATE edges SET weight = ?, last_activated = ?, last_decayed_at = ? WHERE id = ?",
+            (new_weight, ts, ts, row["id"]),
         )
         self._conn.commit()
         logger.info(
@@ -375,7 +437,7 @@ class Database:
             return
         cursor = self._conn.cursor()
         cursor.executemany(
-            "UPDATE edges SET weight = :weight WHERE id = :id",
+            "UPDATE edges SET weight = :weight, last_decayed_at = :last_decayed_at WHERE id = :id",
             updates,
         )
         self._conn.commit()
@@ -459,9 +521,20 @@ class Database:
         """
         Возвращает узлы, отсортированные по СУММЕ весов их рёбер, где
         каждое учитываемое ребро имеет weight >= min_edge_weight.
+
         Используется для поиска "хабов" — доминантных очагов активности,
         вокруг которых строится звёздная кластеризация (Hub-and-Spoke)
         в фазе сна.
+
+        ВАЖНО: ограничено node_type IN ('episodic', 'concept') и is_meta=0.
+        Без этого фильтра хабами могли становиться служебные лексические
+        узлы ('word'/'syllable') — их рёбра (SYLLABLE_WORD_EDGE_WEIGHT,
+        WORD_COOCCURRENCE_EDGE_WEIGHT) укрепляются очень быстро при
+        повторном употреблении слова и легко перегоняли по hub_score
+        настоящие эпизодические воспоминания, из-за чего семантическая
+        консолидация во сне "обобщала" бессмысленные пары вида
+        User: "привет" | Bot: "привет" (context == response у лексических
+        узлов) вместо реальных диалогов.
 
         Возвращает строки вида: {id, context, response, weight,
         created_at, last_accessed, hub_score}, отсортированные по
@@ -480,6 +553,8 @@ class Database:
                 ), 0) AS strong_edge_count
             FROM nodes n
             LEFT JOIN edges e ON (e.node_from = n.id OR e.node_to = n.id)
+            WHERE n.is_meta = 0
+              AND n.node_type IN ('episodic', 'concept')
             GROUP BY n.id
             HAVING strong_edge_count > 0
             ORDER BY hub_score DESC
@@ -625,10 +700,10 @@ class Database:
         if existing is None:
             cursor.execute(
                 """
-                INSERT INTO nodes (context, response, weight, created_at, last_accessed, node_type)
-                VALUES (?, ?, ?, ?, ?, 'concept')
+                INSERT INTO nodes (context, response, weight, created_at, last_accessed, last_decayed_at, node_type)
+                VALUES (?, ?, ?, ?, ?, ?, 'concept')
                 """,
-                (name, definition, weight, ts, ts),
+                (name, definition, weight, ts, ts, ts),
             )
             self._conn.commit()
             node_id = cursor.lastrowid
@@ -642,10 +717,10 @@ class Database:
         cursor.execute(
             """
             UPDATE nodes
-            SET response = ?, weight = ?, last_accessed = ?
+            SET response = ?, weight = ?, last_accessed = ?, last_decayed_at = ?
             WHERE id = ?
             """,
-            (definition, new_weight, ts, existing["id"]),
+            (definition, new_weight, ts, ts, existing["id"]),
         )
         self._conn.commit()
         logger.info(
@@ -697,10 +772,10 @@ class Database:
         if existing is None:
             cursor.execute(
                 """
-                INSERT INTO nodes (context, response, weight, created_at, last_accessed, node_type)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO nodes (context, response, weight, created_at, last_accessed, last_decayed_at, node_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (text, text, initial_weight, ts, ts, node_type),
+                (text, text, initial_weight, ts, ts, ts, node_type),
             )
             self._conn.commit()
             node_id = cursor.lastrowid
@@ -712,8 +787,8 @@ class Database:
 
         new_weight = min(max_weight, existing["weight"] + reinforce_step)
         cursor.execute(
-            "UPDATE nodes SET weight = ?, last_accessed = ? WHERE id = ?",
-            (new_weight, ts, existing["id"]),
+            "UPDATE nodes SET weight = ?, last_accessed = ?, last_decayed_at = ? WHERE id = ?",
+            (new_weight, ts, ts, existing["id"]),
         )
         self._conn.commit()
         logger.debug(
@@ -726,6 +801,22 @@ class Database:
         """Возвращает количество узлов заданного node_type (например, 'word')."""
         cursor = self._conn.cursor()
         cursor.execute("SELECT COUNT(*) as cnt FROM nodes WHERE node_type = ?", (node_type,))
+        row = cursor.fetchone()
+        return row["cnt"] if row else 0
+
+    def count_mastered_words(self, min_weight: float) -> int:
+        """
+        Возвращает количество word-узлов с weight >= min_weight — то есть
+        слов, которые были ЗАКРЕПЛЕНЫ повторным употреблением, а не просто
+        услышаны один раз. Используется вместо count_nodes_by_type('word')
+        там, где важно честное "усвоение" языка (гейтинг речевых стадий),
+        а не сырой факт разового контакта со словом.
+        """
+        cursor = self._conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) as cnt FROM nodes WHERE node_type = 'word' AND weight >= ?",
+            (min_weight,),
+        )
         row = cursor.fetchone()
         return row["cnt"] if row else 0
 
