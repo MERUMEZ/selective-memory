@@ -122,6 +122,20 @@ class KnownSyllable:
 
 
 @dataclass
+class KnownWord:
+    """
+    Освоенное слово, найденное во входящем сообщении (см.
+    MemoryGraph.get_mastered_words_in). id нужен, чтобы подкрепление
+    (Cortex.apply_feedback) могло усилить именно те СЛОВА, которые бот
+    употребил удачно — раньше в контур подкрепления попадали только слоги
+    лепета.
+    """
+    id: int
+    text: str
+    weight: float
+
+
+@dataclass
 class AssociatedNode:
     """Узел, подтянутый через Spreading Activation (ассоциативное ребро)."""
     id: int
@@ -732,6 +746,42 @@ class MemoryGraph:
         усвоению). НЕ используется для гейтинга речевых стадий.
         """
         return self.db.count_nodes_by_type("word")
+
+    def get_mastered_words_in(self, text: str) -> List[KnownWord]:
+        """
+        Какие слова ВХОДЯЩЕГО сообщения организм действительно освоил —
+        в порядке появления в тексте.
+
+        Это первый случай, когда выученный словарь влияет на то, ЧТО бот
+        говорит, а не только на счётчик, разрешающий говорить. Раньше
+        знание слова existed исключительно как число: бот мог знать
+        "привет" лучше всех своих слов (вес 0.747) и всё равно отвечать
+        на приветствие случайными слогами, потому что до генерации
+        доходил только len(словаря).
+
+        Освоенным считается слово с весом >= VOCABULARY_MASTERY_MIN_WEIGHT,
+        то есть та же планка, что и в get_vocabulary_size — иначе бот
+        произносил бы слова, которые сам же не считает выученными.
+        """
+        tokens = self._tokenize_for_lexicon(text)
+        if not tokens:
+            return []
+
+        rows = self.db.get_lexical_nodes_by_texts("word", list(set(tokens)))
+        known = {
+            row["context"]: (row["id"], row["weight"])
+            for row in rows
+            if row["weight"] >= config.VOCABULARY_MASTERY_MIN_WEIGHT
+        }
+
+        result: List[KnownWord] = []
+        seen: Set[str] = set()
+        for token in tokens:
+            if token in known and token not in seen:
+                seen.add(token)
+                node_id, weight = known[token]
+                result.append(KnownWord(id=node_id, text=token, weight=weight))
+        return result
 
     def get_top_words(self, limit: int = 8) -> List["tuple[str, float]"]:
         """
