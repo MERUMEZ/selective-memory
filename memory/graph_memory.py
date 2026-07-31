@@ -122,6 +122,22 @@ class KnownSyllable:
 
 
 @dataclass
+class RewardSignal:
+    """
+    Результат дофаминового сигнала на одном узле (см. MemoryGraph.apply_reward).
+
+    prediction_error — то самое "неожиданно похвалили": именно эта
+    величина, а не сама валентность, управляет и темпом закрепления, и
+    смещением будущего выбора.
+    """
+    node_id: int
+    valence: float
+    expected: float
+    prediction_error: float
+    new_expectation: float
+
+
+@dataclass
 class KnownWord:
     """
     Освоенное слово, найденное во входящем сообщении (см.
@@ -133,6 +149,10 @@ class KnownWord:
     id: int
     text: str
     weight: float
+    reward_expectation: float = 0.0
+    # По чему организм на самом деле выбирает, что произнести: освоенность
+    # плюс склонность к тому, за что хвалили (см. get_mastered_words_in)
+    preference: float = 0.0
 
 
 @dataclass
@@ -769,7 +789,7 @@ class MemoryGraph:
 
         rows = self.db.get_lexical_nodes_by_texts("word", list(set(tokens)))
         known = {
-            row["context"]: (row["id"], row["weight"])
+            row["context"]: (row["id"], row["weight"], row["reward_expectation"] or 0.0)
             for row in rows
             if row["weight"] >= config.VOCABULARY_MASTERY_MIN_WEIGHT
         }
@@ -779,8 +799,20 @@ class MemoryGraph:
         for token in tokens:
             if token in known and token not in seen:
                 seen.add(token)
-                node_id, weight = known[token]
-                result.append(KnownWord(id=node_id, text=token, weight=weight))
+                node_id, weight, expectation = known[token]
+                result.append(
+                    KnownWord(
+                        id=node_id,
+                        text=token,
+                        weight=weight,
+                        reward_expectation=expectation,
+                        # Предпочтение = освоенность + склонность к тому, за
+                        # что хвалили. Вес остаётся главным критерием, иначе
+                        # организм начнёт говорить редкими, но однажды
+                        # похваленными словами вместо тех, которыми владеет.
+                        preference=weight + expectation * config.REWARD_PREFERENCE_WEIGHT,
+                    )
+                )
         return result
 
     def get_top_words(self, limit: int = 8) -> List["tuple[str, float]"]:
@@ -1740,6 +1772,65 @@ class MemoryGraph:
         self.db.update_weight(node_id, new_weight)
         self.touch_node(node_id, timestamp=timestamp)
         logger.info("[MEMORY REINFORCED] id=%s новый вес=%.3f", node_id, new_weight)
+
+    def apply_reward(
+        self,
+        node_id: int,
+        valence: float,
+        timestamp: Optional[float] = None,
+    ) -> Optional[RewardSignal]:
+        """
+        Дофаминовый сигнал: считает ОШИБКУ ПРЕДСКАЗАНИЯ награды для узла,
+        обновляет его ожидание и возвращает результат.
+
+            rpe = фактическая_валентность - ожидаемая_для_этого_узла
+            ожидание += REWARD_EXPECTATION_LEARNING_RATE * rpe
+
+        Это правило Рескорлы-Вагнера. Смысл поправки: дофамин выделяется
+        не на награду, а на НЕОЖИДАННУЮ награду. Без неё "стремление к
+        одобрению" вырождается — организм нашёл бы одно слово, которое
+        всегда хвалят, и повторял бы его вечно. Здесь же то, что хвалят
+        ВСЕГДА, перестаёт давать сигнал (rpe -> 0), и организм идёт
+        пробовать новое.
+
+        Возвращает None, если узел исчез (мог попасть под прунинг между
+        действием и оценкой).
+        """
+        row = self.db.get_node(node_id)
+        if row is None:
+            return None
+
+        expected = row["reward_expectation"] or 0.0
+        rpe = valence - expected
+        new_expectation = max(-1.0, min(1.0, expected + config.REWARD_EXPECTATION_LEARNING_RATE * rpe))
+
+        self.db.update_reward_expectation(node_id, new_expectation)
+
+        logger.info(
+            "[DOPAMINE] node=%s валентность=%+.2f ожидалось=%+.2f -> rpe=%+.2f "
+            "(новое ожидание %+.2f)",
+            node_id, valence, expected, rpe, new_expectation,
+        )
+        return RewardSignal(
+            node_id=node_id,
+            valence=valence,
+            expected=expected,
+            prediction_error=rpe,
+            new_expectation=new_expectation,
+        )
+
+    @staticmethod
+    def learning_scale(prediction_error: float) -> float:
+        """
+        Во сколько раз ошибка предсказания награды ускоряет закрепление.
+
+        Дофамин модулирует синаптическую пластичность: неожиданный исход
+        закрепляется сильно, полностью предсказанный — почти никак.
+        Нижняя граница (REWARD_MIN_LEARNING_SCALE) не даёт обучению
+        обнулиться совсем, иначе давно освоенный узел перестал бы получать
+        даже поддерживающее подкрепление.
+        """
+        return max(config.REWARD_MIN_LEARNING_SCALE, min(1.0, abs(prediction_error)))
 
     def penalize_node(
         self,

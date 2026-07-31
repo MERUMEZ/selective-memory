@@ -120,6 +120,18 @@ ALTER TABLE edges ADD COLUMN last_decayed_at REAL DEFAULT NULL;
 ALTER_ADD_STABILITY = """
 ALTER TABLE nodes ADD COLUMN stability REAL DEFAULT 1.0;
 """
+# --------------------------------------------------------------------------
+# Миграция: reward_expectation — ожидаемое одобрение за использование узла.
+#
+# Нужна для дофаминового сигнала: дофамин выделяется не на награду, а на
+# НЕОЖИДАННУЮ награду, поэтому организму нужно с чем-то сравнивать
+# фактическую оценку пользователя. Обновляется правилом Рескорлы-Вагнера
+# (см. MemoryGraph.apply_reward), диапазон тот же, что у валентности:
+# [-1.0, 1.0].
+# --------------------------------------------------------------------------
+ALTER_ADD_REWARD_EXPECTATION = """
+ALTER TABLE nodes ADD COLUMN reward_expectation REAL DEFAULT 0.0;
+"""
 class Database:
     """
     Тонкая обёртка над SQLite для таблицы `nodes`.
@@ -230,12 +242,13 @@ class Database:
         """
         cursor = self._conn.cursor()
         migrated = False
-        try:
-            cursor.execute(ALTER_ADD_STABILITY)
-            migrated = True
-        except sqlite3.OperationalError as exc:
-            if "duplicate column name" not in str(exc):
-                raise
+        for statement in (ALTER_ADD_STABILITY, ALTER_ADD_REWARD_EXPECTATION):
+            try:
+                cursor.execute(statement)
+                migrated = True
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc):
+                    raise
 
         # Явный backfill: страхует и от NULL-ов, если колонка когда-то
         # появилась без DEFAULT.
@@ -243,10 +256,13 @@ class Database:
             "UPDATE nodes SET stability = ? WHERE stability IS NULL",
             (config.STABILITY_INITIAL,),
         )
+        cursor.execute(
+            "UPDATE nodes SET reward_expectation = 0.0 WHERE reward_expectation IS NULL"
+        )
         self._conn.commit()
 
         if migrated:
-            logger.info("[MIGRATION] Таблица nodes обновлена (stability)")
+            logger.info("[MIGRATION] Таблица nodes обновлена (stability, reward_expectation)")
 
     # ----------------------------------------------------------------------
     # CRUD операции
@@ -365,6 +381,21 @@ class Database:
                 config.STABILITY_GROWTH_FACTOR,
                 node_id,
             ),
+        )
+        self._conn.commit()
+
+    def update_reward_expectation(self, node_id: int, expectation: float) -> None:
+        """
+        Записывает новое ожидаемое одобрение за использование узла.
+
+        Намеренно НЕ трогает last_accessed/last_decayed_at: получение
+        оценки — не то же самое, что вспоминание. Иначе любая реакция
+        пользователя продлевала бы жизнь узлу, включая ругань.
+        """
+        cursor = self._conn.cursor()
+        cursor.execute(
+            "UPDATE nodes SET reward_expectation = ? WHERE id = ?",
+            (expectation, node_id),
         )
         self._conn.commit()
 
