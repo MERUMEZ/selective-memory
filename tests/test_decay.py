@@ -90,16 +90,25 @@ def test_touch_node_resets_decay_clock(mg):
     assert row["last_decayed_at"] == 1000.0
     assert row["weight"] == weight_after_first_decay  # touch не меняет вес
 
+    # Вспоминание не только сдвигает часы, но и УПРОЧНЯЕТ память —
+    # эффект распределённого повторения (см. блок 7 ниже).
+    stability_after_touch = row["stability"]
+    assert stability_after_touch == pytest.approx(
+        config.STABILITY_INITIAL * config.STABILITY_GROWTH_FACTOR
+    )
+
     # dt=0 сразу после touch -> decay не должен ничего изменить
     mg.apply_decay(now=1000.0)
     row = mg.db.get_node(node_id)
     assert row["weight"] == weight_after_first_decay
 
     # инкрементальный decay должен считаться ОТ touch (1000), а не от
-    # исходного создания узла (0)
+    # исходного создания узла (0), и по УПРОЧНЁННОЙ шкале времени
     mg.apply_decay(now=1100.0)
     row = mg.db.get_node(node_id)
-    expected = weight_after_first_decay * math.exp(-config.DECAY_RATE * 100.0 / config.AGE_T0)
+    expected = weight_after_first_decay * math.exp(
+        -config.DECAY_RATE * 100.0 / (config.AGE_T0 * stability_after_touch)
+    )
     assert row["weight"] == pytest.approx(expected, rel=1e-6)
 
 # ---------------------------------------------------------------------------
@@ -266,6 +275,108 @@ def test_lexical_nodes_survive_synaptic_pruning(mg, node_type):
     )
     assert mg.db.get_node(weak_episodic) is None, "контроль: слабый эпизод-сирота должен быть удалён"
     assert report.orphan_nodes_pruned >= 1
+
+
+# ---------------------------------------------------------------------------
+# 7. STABILITY — сопротивление забыванию растёт от вспоминания.
+#
+# Контекст: у живой памяти два параметра, а не один. weight — насколько
+# ярко помнится сейчас, stability — насколько медленно забывается. Раньше
+# был только weight, поэтому ВСЕ эпизоды старели по одной шкале AGE_T0=1час
+# независимо от востребованности: замер показывал 11 эпизодических узлов до
+# ночной паузы и 1-2 после. Это не забывание, а амнезия.
+# ---------------------------------------------------------------------------
+def test_new_node_starts_with_initial_stability(mg):
+    node_id = mg.db.insert_node(
+        context="x", response="y", weight=0.8, timestamp=0.0, node_type="episodic"
+    )
+    assert mg.db.get_node(node_id)["stability"] == pytest.approx(config.STABILITY_INITIAL)
+
+
+def test_recall_grows_stability_up_to_the_cap(mg):
+    node_id = mg.db.insert_node(
+        context="x", response="y", weight=0.8, timestamp=0.0, node_type="episodic"
+    )
+
+    previous = mg.db.get_node(node_id)["stability"]
+    for i in range(1, 6):
+        mg.touch_node(node_id, timestamp=float(i))
+        current = mg.db.get_node(node_id)["stability"]
+        assert current > previous, "каждое вспоминание должно упрочнять память"
+        previous = current
+
+    # Потолок: вечной памяти у организма быть не должно
+    for i in range(100):
+        mg.touch_node(node_id, timestamp=float(100 + i))
+    assert mg.db.get_node(node_id)["stability"] == pytest.approx(config.STABILITY_MAX)
+
+
+def test_recalled_memory_outlives_forgotten_one():
+    """
+    Главное свойство: два одинаковых эпизода расходятся в судьбе только
+    потому, что к одному организм возвращался, а к другому нет.
+    """
+    two_weeks = 14 * 86400.0
+
+    forgotten = MemoryGraph(db=Database(db_path=":memory:"))
+    cold_id = forgotten.db.insert_node(
+        context="x", response="y", weight=0.8, timestamp=0.0, node_type="episodic"
+    )
+    forgotten.apply_decay(now=two_weeks)
+
+    recalled = MemoryGraph(db=Database(db_path=":memory:"))
+    warm_id = recalled.db.insert_node(
+        context="x", response="y", weight=0.8, timestamp=0.0, node_type="episodic"
+    )
+    for i in range(10):
+        recalled.touch_node(warm_id, timestamp=float(i))
+    recalled.apply_decay(now=two_weeks)
+
+    assert forgotten.db.get_node(cold_id) is None, (
+        "невостребованный эпизод обязан забыться — экономия памяти это суть проекта"
+    )
+    warm_row = recalled.db.get_node(warm_id)
+    assert warm_row is not None, "эпизод, к которому возвращались 10 раз, не должен исчезнуть"
+    assert warm_row["weight"] > config.FORGET_THRESHOLD
+
+
+def test_stability_survives_null_for_legacy_rows(mg):
+    """Узлы из БД, созданных до миграции, не должны ронять decay."""
+    node_id = mg.db.insert_node(
+        context="x", response="y", weight=0.8, timestamp=0.0, node_type="episodic"
+    )
+    cursor = mg.db._conn.cursor()
+    cursor.execute("UPDATE nodes SET stability = NULL WHERE id = ?", (node_id,))
+    mg.db._conn.commit()
+
+    mg.apply_decay(now=3600.0)  # не должно бросить TypeError
+
+    assert mg.db.get_node(node_id)["weight"] < 0.8
+
+
+# ---------------------------------------------------------------------------
+# 8. Триггер автосна считает воспоминания, а не лексику.
+#
+# Раньше здесь стоял подсчёт ВСЕХ узлов, а словарь набирает сотни узлов за
+# первый десяток сообщений — порог пробивался на 9-м сообщении, и сон
+# запускался на каждое следующее: STM очищался каждое сообщение, стресс
+# сбрасывался, а в проде уходило два вызова LLM на сообщение.
+# ---------------------------------------------------------------------------
+def test_memory_node_count_ignores_lexical_infrastructure(mg):
+    mg.db.insert_node(context="разговор", response="ответ", weight=0.8,
+                      timestamp=0.0, node_type="episodic")
+    mg.db.upsert_concept_node("кошка", "животное", weight=0.7, timestamp=0.0)
+    mg.ensure_self_and_user_nodes()
+    for token in ("мама", "мыла", "раму", "папа", "чинил"):
+        mg.db.upsert_lexical_node("word", token, initial_weight=0.12,
+                                  reinforce_step=0.04, timestamp=0.0)
+        mg.db.upsert_lexical_node("syllable", token[:2], initial_weight=0.10,
+                                  reinforce_step=0.03, timestamp=0.0)
+
+    assert mg.db.count_memory_nodes() == 2, (
+        "считаться должны только эпизод и понятие: лексика и мета-узлы — не воспоминания"
+    )
+    assert mg.count_nodes() > 10, "контроль: всего узлов в графе заметно больше"
 
 
 def test_reinforce_paths_update_last_decayed_at(mg):

@@ -106,6 +106,20 @@ ALTER TABLE nodes ADD COLUMN last_decayed_at REAL DEFAULT NULL;
 ALTER_ADD_LAST_DECAYED_EDGES = """
 ALTER TABLE edges ADD COLUMN last_decayed_at REAL DEFAULT NULL;
 """
+# --------------------------------------------------------------------------
+# Миграция: stability — сопротивление узла забыванию.
+#
+# weight    = "насколько ярко помнится сейчас"
+# stability = "насколько медленно забывается" (множитель к AGE_T0)
+#
+# Раньше был только weight, и все эпизоды старели по одной шкале
+# независимо от востребованности. Теперь стабильность растёт при каждом
+# вспоминании (см. update_last_accessed), поэтому пригодившееся живёт
+# долго, а случайное уходит за сутки.
+# --------------------------------------------------------------------------
+ALTER_ADD_STABILITY = """
+ALTER TABLE nodes ADD COLUMN stability REAL DEFAULT 1.0;
+"""
 class Database:
     """
     Тонкая обёртка над SQLite для таблицы `nodes`.
@@ -139,6 +153,7 @@ class Database:
         self._conn.commit()
         self._migrate_meta_columns()
         self._migrate_decay_columns()
+        self._migrate_stability_column()
         logger.info("[DB INIT] Схема nodes + edges готова (%s)", self.db_path)
 
     def _migrate_meta_columns(self) -> None:
@@ -203,6 +218,35 @@ class Database:
         self._conn.commit()
         if migrated_any:
             logger.info("[MIGRATION] Таблица nodes/edges обновлена (last_decayed_at)")
+
+    def _migrate_stability_column(self) -> None:
+        """
+        Миграция: добавляет nodes.stability — множитель к характерному
+        времени жизни узла (см. комментарий у ALTER_ADD_STABILITY).
+
+        Существующие узлы получают STABILITY_INITIAL: они не наказываются
+        за то, что были созданы до появления механизма, но и не получают
+        незаслуженного бессмертия — дальше всё решает востребованность.
+        """
+        cursor = self._conn.cursor()
+        migrated = False
+        try:
+            cursor.execute(ALTER_ADD_STABILITY)
+            migrated = True
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc):
+                raise
+
+        # Явный backfill: страхует и от NULL-ов, если колонка когда-то
+        # появилась без DEFAULT.
+        cursor.execute(
+            "UPDATE nodes SET stability = ? WHERE stability IS NULL",
+            (config.STABILITY_INITIAL,),
+        )
+        self._conn.commit()
+
+        if migrated:
+            logger.info("[MIGRATION] Таблица nodes обновлена (stability)")
 
     # ----------------------------------------------------------------------
     # CRUD операции
@@ -286,15 +330,41 @@ class Database:
 
     def update_last_accessed(self, node_id: int, timestamp: Optional[float] = None) -> None:
         """
-        Обновляет метку последнего обращения к узлу. Также сбрасывает
-        last_decayed_at — реальное использование узла законно "обновляет"
-        и точку отсчёта для decay (см. _migrate_decay_columns).
+        Регистрирует ВСПОМИНАНИЕ узла. Делает три вещи одним запросом:
+
+            1. last_accessed    — когда узел реально использовали
+                                  (нужно для proactive cooldown и скоринга);
+            2. last_decayed_at  — точка отсчёта угасания сдвигается вперёд
+                                  (см. _migrate_decay_columns);
+            3. stability        — РАСТЁТ мультипликативно, до STABILITY_MAX.
+
+        Пункт 3 — это эффект распределённого повторения: каждое успешное
+        обращение к памяти делает её не только свежее, но и ПРОЧНЕЕ, то
+        есть увеличивает эффективное время жизни (AGE_T0 * stability).
+        Благодаря этому случайный обмен репликами уходит за сутки, а то,
+        к чему организм действительно возвращался, живёт месяцами.
+
+        Один UPDATE вместо чтения-записи выбран намеренно: touch_node
+        вызывается на каждое совпадение поиска и на каждый узел,
+        подтянутый распространением активации.
         """
         ts = timestamp if timestamp is not None else time.time()
         cursor = self._conn.cursor()
         cursor.execute(
-            "UPDATE nodes SET last_accessed = ?, last_decayed_at = ? WHERE id = ?",
-            (ts, ts, node_id),
+            """
+            UPDATE nodes
+            SET last_accessed = ?,
+                last_decayed_at = ?,
+                stability = MIN(?, COALESCE(stability, ?) * ?)
+            WHERE id = ?
+            """,
+            (
+                ts, ts,
+                config.STABILITY_MAX,
+                config.STABILITY_INITIAL,
+                config.STABILITY_GROWTH_FACTOR,
+                node_id,
+            ),
         )
         self._conn.commit()
 
@@ -806,6 +876,30 @@ class Database:
             node_type, existing["id"], text, existing["weight"], new_weight,
         )
         return existing["id"], False
+
+    def count_memory_nodes(self) -> int:
+        """
+        Количество узлов, которые являются ВОСПОМИНАНИЯМИ — эпизоды и
+        понятия. Исключает лексическую инфраструктуру ('word'/'syllable')
+        и мета-узлы.
+
+        Нужен для триггера автоматической фазы сна. Раньше там стоял
+        count_nodes() по ВСЕМ узлам, а лексика набирает сотни узлов за
+        первый десяток сообщений — из-за чего порог
+        SLEEP_AUTO_TRIGGER_NODE_COUNT=150 пробивался уже на 9-м сообщении
+        и сон запускался НА КАЖДОЕ последующее. Последствия были тяжёлые:
+        STM очищался каждое сообщение (бот терял нить разговора), стресс
+        сбрасывался каждое сообщение, прунинг гонялся каждое сообщение, а
+        в проде на каждое сообщение уходило ДВА вызова LLM (консолидация
+        кластера + эволюция Self-Model).
+        """
+        cursor = self._conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) as cnt FROM nodes "
+            "WHERE is_meta = 0 AND node_type IN ('episodic', 'concept')"
+        )
+        row = cursor.fetchone()
+        return row["cnt"] if row else 0
 
     def count_nodes_by_type(self, node_type: str) -> int:
         """Возвращает количество узлов заданного node_type (например, 'word')."""

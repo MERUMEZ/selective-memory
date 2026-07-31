@@ -1150,7 +1150,13 @@ class MemoryGraph:
                 continue
 
             old_weight = row["weight"]
-            decay_factor = math.exp(-config.DECAY_RATE * dt / self._age_t0_for(row["node_type"]))
+            # Эффективное время жизни = базовое для типа узла * стабильность.
+            # Стабильность растёт при каждом вспоминании (см. Database.
+            # update_last_accessed), поэтому востребованная память
+            # сопротивляется времени, а невостребованная уходит быстро.
+            stability = row["stability"] if row["stability"] else config.STABILITY_INITIAL
+            effective_t0 = self._age_t0_for(row["node_type"]) * max(1e-9, stability)
+            decay_factor = math.exp(-config.DECAY_RATE * dt / effective_t0)
             new_weight = old_weight * decay_factor
 
             if new_weight < config.FORGET_THRESHOLD:
