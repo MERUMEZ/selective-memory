@@ -47,6 +47,7 @@ from storage.utils.logger import get_logger
 if TYPE_CHECKING:
     from memory.working_memory import WorkingMemory
     from core.instincts import InstinctSystem
+    from core.mood import Mood
 
 logger = get_logger(__name__)
 
@@ -132,10 +133,14 @@ class SleepCycle:
         memory: MemoryGraph,
         stm: Optional["WorkingMemory"] = None,
         instincts: Optional["InstinctSystem"] = None,
+        mood: Optional["Mood"] = None,
     ):
         self.memory = memory
         self.stm = stm
         self.instincts = instincts
+        # Сон сбрасывает возбуждение — единую ось нагрузки, которая
+        # теперь живёт в Mood, а не в InstinctSystem
+        self.mood = mood
 
     # ----------------------------------------------------------------------
     # Точка входа: полный цикл фазы сна
@@ -181,10 +186,10 @@ class SleepCycle:
         summary.self_model_evolution = self.memory.evolve_self_model(timestamp=ts)
 
         # --- Шаг 3: Сброс физиологического состояния ---
-        if self.instincts is not None:
-            summary.stress_before = self.instincts.current_stress
-            self.instincts.current_stress = 0.0
-            self.instincts._last_update = ts
+        if self.mood is not None:
+            summary.stress_before = self.mood.get_state().arousal if self.mood else 0.0
+            if self.mood is not None:
+                self.mood.arousal = config.MOOD_BASELINE_AROUSAL
             summary.stress_after = 0.0
             logger.info(
                 "[SLEEP RESET] Стресс сброшен: %.3f -> 0.0",
