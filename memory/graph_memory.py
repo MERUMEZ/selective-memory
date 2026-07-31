@@ -33,6 +33,7 @@ from typing import List, Optional, Set, TYPE_CHECKING
 
 import config
 from memory.database import Database
+from services import embeddings
 from services.llm import generate_llm_response
 from storage.utils.logger import get_logger
 
@@ -954,6 +955,11 @@ class MemoryGraph:
 
         scored: List[MemoryMatch] = []
 
+        # Вектор запроса считается ОДИН раз на весь поиск. None означает,
+        # что семантика недоступна (нет модели/библиотеки) — тогда работают
+        # только строковые составляющие, как раньше.
+        query_vector = embeddings.encode(query)
+
         for row in rows:
             context_normalized = row["context"].strip().lower()
             context_keywords = self._extract_keywords(context_normalized)
@@ -961,9 +967,16 @@ class MemoryGraph:
             keyword_score = self._keyword_overlap(query_keywords, context_keywords)
             fuzzy_score = self._compute_fuzzy_similarity(query_normalized, context_normalized)
 
+            semantic_score = 0.0
+            if query_vector is not None:
+                semantic_score = max(
+                    0.0, embeddings.cosine(query_vector, self._node_vector(row))
+                )
+
             combined_score = (
                 keyword_score * config.MEMORY_KEYWORD_WEIGHT
                 + fuzzy_score * config.MEMORY_FUZZY_WEIGHT
+                + semantic_score * config.MEMORY_SEMANTIC_WEIGHT
                 + row["weight"] * config.MEMORY_WEIGHT_INFLUENCE
             )
             combined_score = min(1.0, combined_score)
@@ -1063,6 +1076,30 @@ class MemoryGraph:
     ) -> List[MemoryMatch]:
         """Обратная совместимость со старым API (чистое нечёткое сходство)."""
         return self.search(query, threshold=threshold, top_k=top_k, timestamp=timestamp)
+
+    def _node_vector(self, row):
+        """
+        Вектор смысла узла, с ЛЕНИВЫМ досчётом.
+
+        Узлы, созданные до появления модели (или до этой правки вообще),
+        приходят с embedding=NULL. Вместо разовой тяжёлой миграции всей
+        базы вектор считается при первом же обращении к узлу и тут же
+        сохраняется — дальше он просто читается.
+
+        Смысл узла берётся из ОБЕИХ его половин: пользователь мог спросить
+        одними словами, а суть оказаться в ответе бота.
+        """
+        vector = embeddings.from_blob(row["embedding"])
+        if vector is not None:
+            return vector
+
+        text = f"{row['context'] or ''} {row['response'] or ''}".strip()
+        vector = embeddings.encode(text)
+        if vector is None:
+            return None
+
+        self.db.update_embedding(row["id"], embeddings.to_blob(vector))
+        return vector
 
     @staticmethod
     def _extract_keywords(text: str) -> Set[str]:

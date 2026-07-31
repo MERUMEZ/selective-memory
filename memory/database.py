@@ -132,6 +132,17 @@ ALTER TABLE nodes ADD COLUMN stability REAL DEFAULT 1.0;
 ALTER_ADD_REWARD_EXPECTATION = """
 ALTER TABLE nodes ADD COLUMN reward_expectation REAL DEFAULT 0.0;
 """
+# --------------------------------------------------------------------------
+# Миграция: embedding — вектор смысла узла для семантического поиска.
+#
+# Хранится BLOB-ом (float32), заполняется лениво: узлы, созданные до
+# появления модели, получают вектор при первом же поиске. NULL — законное
+# значение и означает "семантики для этого узла пока нет", поиск в таком
+# случае опирается на строковое сходство.
+# --------------------------------------------------------------------------
+ALTER_ADD_EMBEDDING = """
+ALTER TABLE nodes ADD COLUMN embedding BLOB DEFAULT NULL;
+"""
 class Database:
     """
     Тонкая обёртка над SQLite для таблицы `nodes`.
@@ -242,7 +253,8 @@ class Database:
         """
         cursor = self._conn.cursor()
         migrated = False
-        for statement in (ALTER_ADD_STABILITY, ALTER_ADD_REWARD_EXPECTATION):
+        for statement in (ALTER_ADD_STABILITY, ALTER_ADD_REWARD_EXPECTATION,
+                          ALTER_ADD_EMBEDDING):
             try:
                 cursor.execute(statement)
                 migrated = True
@@ -262,7 +274,9 @@ class Database:
         self._conn.commit()
 
         if migrated:
-            logger.info("[MIGRATION] Таблица nodes обновлена (stability, reward_expectation)")
+            logger.info(
+                "[MIGRATION] Таблица nodes обновлена (stability, reward_expectation, embedding)"
+            )
 
     # ----------------------------------------------------------------------
     # CRUD операции
@@ -382,6 +396,16 @@ class Database:
                 node_id,
             ),
         )
+        self._conn.commit()
+
+    def update_embedding(self, node_id: int, blob: Optional[bytes]) -> None:
+        """
+        Записывает вектор смысла узла. Отдельным методом, а не при
+        вставке: узлы, созданные до появления модели, досчитываются
+        лениво при первом поиске.
+        """
+        cursor = self._conn.cursor()
+        cursor.execute("UPDATE nodes SET embedding = ? WHERE id = ?", (blob, node_id))
         self._conn.commit()
 
     def update_reward_expectation(self, node_id: int, expectation: float) -> None:
