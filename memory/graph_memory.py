@@ -286,6 +286,33 @@ class MemoryGraph:
 
         return self_node_id, user_node_id
 
+    def get_or_create_brain_epoch(self) -> float:
+        """
+        Точка отсчёта субъективного времени, ПЕРЕЖИВАЮЩАЯ перезагрузку.
+
+        Без неё BrainSession при каждом запуске ставил brain_time =
+        time.time(), и часы прыгали назад относительно last_decayed_at,
+        сохранённых разогнанной шкалой. Забывание после этого молча
+        выключалось (в _decay_nodes стоит `if dt <= 0: continue`) — после
+        разговора на 100 сообщений ещё на 2.3 часа.
+
+        Хранится тем же механизмом мета-узлов, что и last_sleep_marker:
+        отдельная таблица ради одного числа не нужна.
+        """
+        row = self.db.get_meta_node("brain_epoch")
+        if row is not None:
+            try:
+                return float(row["context"])
+            except (TypeError, ValueError):
+                logger.warning("[BRAIN EPOCH] Повреждённое значение — ставлю заново")
+
+        epoch = time.time()
+        self.db.upsert_meta_node(
+            node_type="brain_epoch", content=str(epoch), weight=1.0, timestamp=epoch,
+        )
+        logger.info("[BRAIN EPOCH] Точка отсчёта субъективного времени: %.0f", epoch)
+        return epoch
+
     def get_self_model_content(self) -> str:
         """Возвращает текущий текст Self-Model (fallback на config-дефолт)."""
         row = self.db.get_meta_node("self_model")

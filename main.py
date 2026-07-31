@@ -214,7 +214,7 @@ def run() -> None:
     boredom_drive = BoredomDrive()
 
     session_start_real = time.time()
-    clock = SharedBrainClock(initial_brain_time=session_start_real)
+    clock = SharedBrainClock(epoch=memory.get_or_create_brain_epoch())
     async_console = AsyncConsole(brain_clock=clock)
 
     # Потокобезопасный контейнер last_active_node_id + окно со-активации STM
@@ -266,7 +266,7 @@ def run() -> None:
             # переводит состояние в AWAKE). Делается под тем же логическим
             # порядком, что и продвижение времени, чтобы избежать гонки с
             # фоновым потоком, который может засыпать/будить систему.
-            brain_time = clock.register_user_message(TICK_SECONDS)
+            brain_time = clock.register_user_message()
             boredom_drive.on_user_message(brain_time)
 
             if user_input.lower() in SLEEP_COMMANDS:
@@ -523,7 +523,7 @@ def _idle_sleep_background_loop(
     while not stop_event.is_set():
         time.sleep(config.IDLE_THREAD_REAL_INTERVAL_SECONDS)
 
-        brain_time = clock.advance_by(config.IDLE_THREAD_REAL_INTERVAL_SECONDS)
+        brain_time = clock.get_brain_time()
         idle_seconds = clock.seconds_since_last_activity()
 
         if boredom_drive.is_awake() and idle_seconds >= config.IDLE_SLEEP_THRESHOLD_SECONDS:

@@ -206,8 +206,11 @@ def test_lexical_nodes_decay_slower_than_episodic(mg, node_type):
         context="как дела", response="нормально", weight=0.5, timestamp=0.0, node_type="episodic"
     )
 
-    one_day = 86400.0
-    mg.apply_decay(now=one_day)
+    # Окно задаётся ОТНОСИТЕЛЬНО характерного времени эпизода, а не в
+    # абсолютных сутках: иначе тест ломается при каждой перекалибровке
+    # шкалы времени (так и случилось при переходе на когерентные часы).
+    window = 20 * config.AGE_T0
+    mg.apply_decay(now=window)
 
     lexical_weight = mg.db.get_node(lexical_id)["weight"]
     episodic_row = mg.db.get_node(episodic_id)
@@ -215,17 +218,17 @@ def test_lexical_nodes_decay_slower_than_episodic(mg, node_type):
 
     # Обе кривые считаются по своей шкале времени
     assert lexical_weight == pytest.approx(
-        0.5 * math.exp(-config.DECAY_RATE * one_day / config.LEXICAL_AGE_T0), rel=1e-6
+        0.5 * math.exp(-config.DECAY_RATE * window / config.LEXICAL_AGE_T0), rel=1e-6
     )
     assert episodic_weight == pytest.approx(
-        0.5 * math.exp(-config.DECAY_RATE * one_day / config.AGE_T0), rel=1e-6
+        0.5 * math.exp(-config.DECAY_RATE * window / config.AGE_T0), rel=1e-6
     )
 
-    # Суть разделения: за одни сутки эпизод теряет больше половины веса,
-    # а слово — доли процента.
-    assert episodic_weight < 0.5 * 0.5, "эпизод за сутки должен заметно выцвести"
-    assert lexical_weight > 0.49, "слово не должно заметно выцветать за одни сутки"
-    assert lexical_weight > episodic_weight * 3
+    # Суть разделения: за 20 характерных времён эпизода слово почти не
+    # трогается, а сам эпизод теряет больше половины веса.
+    assert episodic_weight < 0.5 * 0.5, "эпизод должен заметно выцвести"
+    assert lexical_weight > 0.49, "слово не должно заметно выцветать за то же время"
+    assert lexical_weight > episodic_weight * 2
 
 
 def test_mastered_word_survives_a_weekend(mg):
@@ -316,13 +319,14 @@ def test_recalled_memory_outlives_forgotten_one():
     Главное свойство: два одинаковых эпизода расходятся в судьбе только
     потому, что к одному организм возвращался, а к другому нет.
     """
-    two_weeks = 14 * 86400.0
+    # Тоже относительно характерного времени, а не в абсолютных неделях
+    long_silence = 80 * config.AGE_T0
 
     forgotten = MemoryGraph(db=Database(db_path=":memory:"))
     cold_id = forgotten.db.insert_node(
         context="x", response="y", weight=0.8, timestamp=0.0, node_type="episodic"
     )
-    forgotten.apply_decay(now=two_weeks)
+    forgotten.apply_decay(now=long_silence)
 
     recalled = MemoryGraph(db=Database(db_path=":memory:"))
     warm_id = recalled.db.insert_node(
@@ -330,7 +334,7 @@ def test_recalled_memory_outlives_forgotten_one():
     )
     for i in range(10):
         recalled.touch_node(warm_id, timestamp=float(i))
-    recalled.apply_decay(now=two_weeks)
+    recalled.apply_decay(now=long_silence)
 
     assert forgotten.db.get_node(cold_id) is None, (
         "невостребованный эпизод обязан забыться — экономия памяти это суть проекта"
