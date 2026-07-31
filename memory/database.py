@@ -484,16 +484,26 @@ class Database:
         и не удаляются, даже без связей). Мета-узлы (is_meta=1) полностью
         иммунны и никогда не попадают в этот запрос.
 
-        node_type='word' ТАКЖЕ иммунен: словарный запас — это медленно
-        растущая инфраструктура (vocabulary_size), а не транзиентное
-        эпизодическое воспоминание. Свежесозданный word-узел почти всегда
-        технически "осиротевший" на границе EDGE_ACTIVATION_THRESHOLD сразу
-        после первого decay-тика (SYLLABLE_WORD_EDGE_WEIGHT граничит с этим
-        порогом) — без иммунитета слово удалялось бы до того, как успеет
-        повториться и закрепиться, и vocabulary_size никогда бы не рос.
-        Естественное забывание для word-узлов всё равно происходит — через
-        обычный decay до FORGET_THRESHOLD (медленнее и мягче, чем orphan-
-        прунинг сна).
+        ЛЕКСИЧЕСКИЕ узлы ('word' И 'syllable') иммунны: словарный запас —
+        это медленно растущая инфраструктура (vocabulary_size), а не
+        транзиентное эпизодическое воспоминание. Свежесозданный word-узел
+        почти всегда технически "осиротевший" на границе
+        EDGE_ACTIVATION_THRESHOLD сразу после первого decay-тика
+        (SYLLABLE_WORD_EDGE_WEIGHT граничит с этим порогом) — без иммунитета
+        слово удалялось бы до того, как успеет повториться и закрепиться,
+        и vocabulary_size никогда бы не рос.
+
+        'syllable' раньше в иммунитет НЕ входил, хотя должен был по той же
+        логике: слог держится ребром SYLLABLE_WORD_EDGE_WEIGHT=0.45, но
+        рёбра угасают быстрее узлов (EDGE_DECAY_RATE=0.08 против
+        DECAY_RATE=0.05), поэтому связь рано или поздно проседает ниже
+        EDGE_ACTIVATION_THRESHOLD=0.3 — и слог удалялся во сне, подмывая
+        субстрат лепета, из которого вообще строится довербальная речь.
+
+        Естественное забывание для лексики всё равно происходит — через
+        обычный decay до FORGET_THRESHOLD, но на своей шкале времени
+        (config.LEXICAL_AGE_T0, ~30 суток), а не через жёсткий orphan-
+        прунинг сна.
 
         Используется при синаптическом прунинге фазы сна для удаления
         "мусорных" узлов, которые не входят ни в один ассоциативный кластер
@@ -505,7 +515,7 @@ class Database:
             SELECT n.*
             FROM nodes n
             WHERE n.is_meta = 0
-              AND n.node_type != 'word'
+              AND n.node_type NOT IN ('word', 'syllable')
               AND n.weight < ?
               AND NOT EXISTS (
                   SELECT 1 FROM edges e
@@ -819,6 +829,21 @@ class Database:
         )
         row = cursor.fetchone()
         return row["cnt"] if row else 0
+
+    def get_top_nodes_by_type(self, node_type: str, limit: int) -> List[sqlite3.Row]:
+        """
+        Возвращает до `limit` узлов заданного node_type, отсортированных по
+        весу убывающе — то есть самые ОСВОЕННЫЕ слова/слоги. В отличие от
+        get_random_nodes_by_type (случайный пул для лепета), здесь нужен
+        именно топ: команда /status показывает учителю, что бот выучил
+        лучше всего.
+        """
+        cursor = self._conn.cursor()
+        cursor.execute(
+            "SELECT * FROM nodes WHERE node_type = ? ORDER BY weight DESC LIMIT ?",
+            (node_type, limit),
+        )
+        return cursor.fetchall()
 
     def get_random_nodes_by_type(self, node_type: str, limit: int) -> List[sqlite3.Row]:
         """

@@ -586,6 +586,14 @@ class MemoryGraph:
         """
         return self.db.count_nodes_by_type("word")
 
+    def get_top_words(self, limit: int = 8) -> List["tuple[str, float]"]:
+        """
+        Самые освоенные слова (текст, вес) — для команды /status.
+        Показывает учителю, что реально закрепилось в языке бота.
+        """
+        rows = self.db.get_top_nodes_by_type("word", limit=limit)
+        return [(row["context"], row["weight"]) for row in rows]
+
     def get_known_syllables(self, limit: Optional[int] = None) -> List[KnownSyllable]:
         """
         Возвращает пул известных слогов (id, text, weight) — кандидатов для
@@ -950,6 +958,24 @@ class MemoryGraph:
 
         return decayed_count
 
+    # Лексические узлы — инфраструктура языка, а не эпизоды разговора,
+    # поэтому живут на своей (много более длинной) шкале времени.
+    LEXICAL_NODE_TYPES = frozenset({"word", "syllable"})
+
+    @staticmethod
+    def _age_t0_for(node_type: Optional[str]) -> float:
+        """
+        Характерное время жизни узла для формулы decay. Словарь угасает
+        по LEXICAL_AGE_T0 (~30 суток), всё остальное — по AGE_T0 (~1 час).
+
+        Без этого разделения освоенное слово теряло статус за ночь, а за
+        сутки с небольшим удалялось из БД — словарь не мог накопиться в
+        принципе (см. комментарий у config.LEXICAL_AGE_T0).
+        """
+        if node_type in MemoryGraph.LEXICAL_NODE_TYPES:
+            return config.LEXICAL_AGE_T0
+        return config.AGE_T0
+
     def _decay_nodes(self, current_time: float) -> int:
         """Экспоненциальное угасание веса узлов (старая логика apply_decay)."""
         rows = self.db.fetch_all_nodes()
@@ -977,7 +1003,7 @@ class MemoryGraph:
                 continue
 
             old_weight = row["weight"]
-            decay_factor = math.exp(-config.DECAY_RATE * dt / config.AGE_T0)
+            decay_factor = math.exp(-config.DECAY_RATE * dt / self._age_t0_for(row["node_type"]))
             new_weight = old_weight * decay_factor
 
             if new_weight < config.FORGET_THRESHOLD:

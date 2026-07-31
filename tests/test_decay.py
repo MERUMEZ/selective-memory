@@ -178,6 +178,96 @@ def test_meta_node_decay_is_skipped_regardless_of_null(mg):
     assert row["weight"] == 0.95
 
 
+# ---------------------------------------------------------------------------
+# 5. ЛЕКСИКА ЖИВЁТ НА СВОЕЙ ШКАЛЕ ВРЕМЕНИ (config.LEXICAL_AGE_T0).
+#
+# Контекст: с единым AGE_T0=1час освоенное слово (weight 0.20) падало ниже
+# порога освоения за 6 часов паузы и УДАЛЯЛОСЬ из БД за ~28 часов. То есть
+# бот забывал весь выученный язык за ночь, а за выходные — безвозвратно.
+# Замер стендом: в режиме "20 сообщений + ночная пауза" словарь колебался
+# 5->1, 13->3, 17->4 и не рос никогда, Stage 0 не проходился в принципе.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("node_type", ["word", "syllable"])
+def test_lexical_nodes_decay_slower_than_episodic(mg, node_type):
+    """Лексический узел при том же dt должен терять существенно меньше веса."""
+    lexical_id, _ = mg.db.upsert_lexical_node(
+        node_type, "кошка", initial_weight=0.5, reinforce_step=0.04, timestamp=0.0
+    )
+    episodic_id = mg.db.insert_node(
+        context="как дела", response="нормально", weight=0.5, timestamp=0.0, node_type="episodic"
+    )
+
+    one_day = 86400.0
+    mg.apply_decay(now=one_day)
+
+    lexical_weight = mg.db.get_node(lexical_id)["weight"]
+    episodic_row = mg.db.get_node(episodic_id)
+    episodic_weight = episodic_row["weight"] if episodic_row is not None else 0.0
+
+    # Обе кривые считаются по своей шкале времени
+    assert lexical_weight == pytest.approx(
+        0.5 * math.exp(-config.DECAY_RATE * one_day / config.LEXICAL_AGE_T0), rel=1e-6
+    )
+    assert episodic_weight == pytest.approx(
+        0.5 * math.exp(-config.DECAY_RATE * one_day / config.AGE_T0), rel=1e-6
+    )
+
+    # Суть разделения: за одни сутки эпизод теряет больше половины веса,
+    # а слово — доли процента.
+    assert episodic_weight < 0.5 * 0.5, "эпизод за сутки должен заметно выцвести"
+    assert lexical_weight > 0.49, "слово не должно заметно выцветать за одни сутки"
+    assert lexical_weight > episodic_weight * 3
+
+
+def test_mastered_word_survives_a_weekend(mg):
+    """
+    Регрессия на главный баг: слово, освоенное тремя повторениями, обязано
+    остаться освоенным после паузы в выходные. Раньше оно удалялось из БД.
+    """
+    for i in range(3):
+        word_id, _ = mg.db.upsert_lexical_node(
+            "word", "мама",
+            initial_weight=config.WORD_NODE_INITIAL_WEIGHT,
+            reinforce_step=config.WORD_NODE_REINFORCE_STEP,
+            timestamp=float(i),
+        )
+    assert mg.get_vocabulary_size() == 1, "три повторения должны давать освоенное слово"
+
+    mg.apply_decay(now=48 * 3600.0)  # ушёл на выходные
+
+    assert mg.db.get_node(word_id) is not None, "слово не должно исчезнуть из БД за выходные"
+    assert mg.get_vocabulary_size() == 1, "слово должно остаться ОСВОЕННЫМ после паузы"
+
+
+# ---------------------------------------------------------------------------
+# 6. Слоги иммунны к orphan-прунингу сна наравне со словами.
+#
+# Слог держится ребром SYLLABLE_WORD_EDGE_WEIGHT=0.45, но рёбра угасают
+# быстрее узлов (EDGE_DECAY_RATE > DECAY_RATE), поэтому связь рано или
+# поздно проседает ниже EDGE_ACTIVATION_THRESHOLD — и слог удалялся,
+# подмывая субстрат лепета.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("node_type", ["word", "syllable"])
+def test_lexical_nodes_survive_synaptic_pruning(mg, node_type):
+    lexical_id, _ = mg.db.upsert_lexical_node(
+        node_type, "ма", initial_weight=0.10, reinforce_step=0.03, timestamp=0.0
+    )
+    # Слабый эпизодический узел без связей — законная жертва прунинга,
+    # нужен как контроль, что прунинг вообще работает.
+    weak_episodic = mg.db.insert_node(
+        context="шум", response="шум", weight=0.10, timestamp=0.0, node_type="episodic"
+    )
+
+    report = mg.run_synaptic_pruning()
+
+    assert mg.db.get_node(lexical_id) is not None, (
+        f"{node_type}-узел не должен удаляться orphan-прунингом: "
+        "лексика — инфраструктура языка, а не эпизод"
+    )
+    assert mg.db.get_node(weak_episodic) is None, "контроль: слабый эпизод-сирота должен быть удалён"
+    assert report.orphan_nodes_pruned >= 1
+
+
 def test_reinforce_paths_update_last_decayed_at(mg):
     """
     Повторное создание concept-узла (ветка UPDATE/reinforce) тоже должно
