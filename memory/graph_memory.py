@@ -1067,16 +1067,6 @@ class MemoryGraph:
 
         return top_matches
 
-    def find_similar_context(
-        self,
-        query: str,
-        threshold: float = 0.35,
-        top_k: int = 1,
-        timestamp: Optional[float] = None,
-    ) -> List[MemoryMatch]:
-        """Обратная совместимость со старым API (чистое нечёткое сходство)."""
-        return self.search(query, threshold=threshold, top_k=top_k, timestamp=timestamp)
-
     def _node_vector(self, row):
         """
         Вектор смысла узла, с ЛЕНИВЫМ досчётом.
