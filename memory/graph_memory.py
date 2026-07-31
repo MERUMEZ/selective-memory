@@ -67,6 +67,27 @@ class LexicalProcessingResult:
 
 
 @dataclass
+class SurpriseResult:
+    """
+    Ошибка предсказания организма на входящем тексте — СОБСТВЕННОЕ
+    удивление, посчитанное по его же графу, а не статистика строки.
+
+    total      — итог [0..1], идёт в спайк-гейт, уверенность, консолидацию
+    lexical    — доля новизны от незнакомых СЛОВ
+    structural — доля новизны от непривычных СОЧЕТАНИЙ соседних слов
+    known_words / total_words — сколько слов входа организм уже знает
+    known_pairs / total_pairs — то же для пар соседних слов
+    """
+    total: float
+    lexical: float
+    structural: float
+    known_words: int
+    total_words: int
+    known_pairs: int
+    total_pairs: int
+
+
+@dataclass
 class MemoryMatch:
     """Результат поиска похожего контекста в графе памяти."""
     id: int
@@ -476,10 +497,9 @@ class MemoryGraph:
 
         ts = timestamp if timestamp is not None else time.time()
 
-        tokens = [
-            w.lower() for w in WORD_PATTERN.findall(text)
-            if len(w) >= config.LEXICAL_MIN_TOKEN_LENGTH
-        ][: config.LEXICAL_MAX_TOKENS_PER_INPUT]
+        # Та же токенизация, что и в compute_surprise — см. комментарий там:
+        # организм обязан удивляться ровно тем единицам, которым учится.
+        tokens = self._tokenize_for_lexicon(text)
 
         if not tokens:
             return LexicalProcessingResult(0, 0, 0, 0)
@@ -537,6 +557,133 @@ class MemoryGraph:
             new_words=new_words,
             new_syllables=new_syllables,
         )
+
+    # ----------------------------------------------------------------------
+    # SURPRISE — собственная ошибка предсказания организма
+    # ----------------------------------------------------------------------
+
+    def compute_surprise(self, text: str) -> SurpriseResult:
+        """
+        Считает, насколько входящий текст НЕОЖИДАНЕН для этого конкретного
+        организма — по его собственному накопленному графу языка.
+
+        Раньше эту роль играла энтропия Шеннона по символам
+        (Cortex.calculate_perplexity): она измеряла свойство строки и была
+        полностью слепа к опыту — пустой мозг и мозг после 50 повторений
+        фразы выдавали одинаковое число. Спайк-гейт, уверенность,
+        структурная консолидация и любопытство — все четыре механизма
+        управлялись величиной, которая никогда не менялась от обучения.
+
+        Две составляющие ошибки предсказания:
+
+            лексическая  — знакомы ли САМИ СЛОВА. Знакомость слова растёт
+                           с его весом (частота = освоенность) и насыщается
+                           на VOCABULARY_MASTERY_MIN_WEIGHT.
+            структурная  — привычны ли СОЧЕТАНИЯ соседних слов. Знакомость
+                           пары растёт с весом ребра со-встречаемости и
+                           насыщается на EDGE_ACTIVATION_THRESHOLD.
+
+        ВАЖНОЕ ОГРАНИЧЕНИЕ: рёбра хранятся ненаправленно — upsert_edge
+        нормализует пару по возрастанию id. Поэтому структурная часть
+        отвечает на вопрос «встречались ли эти слова рядом», а НЕ «идёт ли
+        одно за другим». Это не языковая модель и называть её так нельзя;
+        для ошибки предсказания такого разрешения достаточно.
+
+        Токенизация намеренно совпадает с process_language_input — организм
+        обязан удивляться ровно тем единицам, которым он учится.
+
+        Краевые случаи:
+            пустой текст / нет токенов -> 0.0 (удивляться нечему)
+            один токен (пар нет)       -> только лексическая часть
+            пустой граф                -> 1.0 (новорождённому всё ново)
+        """
+        tokens = self._tokenize_for_lexicon(text)
+        if not tokens:
+            return SurpriseResult(0.0, 0.0, 0.0, 0, 0, 0, 0)
+
+        # --- Лексическая новизна: знакомы ли сами слова ---
+        rows = self.db.get_lexical_nodes_by_texts("word", list(set(tokens)))
+        known = {row["context"]: (row["id"], row["weight"]) for row in rows}
+
+        mastery = max(1e-9, config.VOCABULARY_MASTERY_MIN_WEIGHT)
+        familiarities = [
+            min(1.0, known[t][1] / mastery) if t in known else 0.0
+            for t in tokens
+        ]
+        lexical_surprise = 1.0 - (sum(familiarities) / len(familiarities))
+
+        # --- Структурная новизна: привычны ли сочетания соседних слов ---
+        token_ids = [known[t][0] for t in tokens if t in known]
+        edge_weights = {}
+        for edge in self.db.get_edges_between(list(set(token_ids))):
+            # Пара хранится ненаправленно -> кладём в оба порядка, чтобы
+            # искать по фактическому порядку слов во входящем тексте.
+            a, b, w = edge["node_from"], edge["node_to"], edge["weight"]
+            edge_weights[(a, b)] = w
+            edge_weights[(b, a)] = w
+
+        activation = max(1e-9, config.EDGE_ACTIVATION_THRESHOLD)
+        pair_familiarities: List[float] = []
+        for left, right in zip(tokens, tokens[1:]):
+            if left in known and right in known:
+                weight = edge_weights.get((known[left][0], known[right][0]), 0.0)
+                pair_familiarities.append(min(1.0, weight / activation))
+            else:
+                # Хотя бы одно слово пары незнакомо -> сочетание тем более
+                pair_familiarities.append(0.0)
+
+        known_words = sum(1 for f in familiarities if f > 0.0)
+        known_pairs = sum(1 for f in pair_familiarities if f > 0.0)
+
+        if not pair_familiarities:
+            # Один токен: структурной информации нет вообще, поэтому итог
+            # определяется только лексикой (перенормировка вместо того,
+            # чтобы фиктивно засчитывать структурное удивление как 0 или 1).
+            total = lexical_surprise
+            structural_surprise = 0.0
+        else:
+            structural_surprise = 1.0 - (sum(pair_familiarities) / len(pair_familiarities))
+            total = (
+                config.SURPRISE_LEXICAL_WEIGHT * lexical_surprise
+                + config.SURPRISE_STRUCTURAL_WEIGHT * structural_surprise
+            )
+            weight_sum = config.SURPRISE_LEXICAL_WEIGHT + config.SURPRISE_STRUCTURAL_WEIGHT
+            if weight_sum > 0:
+                total /= weight_sum
+
+        total = max(0.0, min(1.0, total))
+
+        logger.debug(
+            "[SURPRISE] text=%r total=%.3f (lex=%.3f structural=%.3f) "
+            "known_words=%d/%d known_pairs=%d/%d",
+            text[:40], total, lexical_surprise, structural_surprise,
+            known_words, len(tokens), known_pairs, len(pair_familiarities),
+        )
+
+        return SurpriseResult(
+            total=total,
+            lexical=lexical_surprise,
+            structural=structural_surprise,
+            known_words=known_words,
+            total_words=len(tokens),
+            known_pairs=known_pairs,
+            total_pairs=len(pair_familiarities),
+        )
+
+    @staticmethod
+    def _tokenize_for_lexicon(text: str) -> List[str]:
+        """
+        Единая токенизация для лексического слоя. Используется И при
+        обучении (process_language_input), И при расчёте удивления
+        (compute_surprise) — организм должен удивляться ровно тем единицам,
+        которые он потом запоминает, иначе измеряется не то, чему учатся.
+        """
+        if not text or not text.strip():
+            return []
+        return [
+            w.lower() for w in WORD_PATTERN.findall(text)
+            if len(w) >= config.LEXICAL_MIN_TOKEN_LENGTH
+        ][: config.LEXICAL_MAX_TOKENS_PER_INPUT]
 
     @staticmethod
     def _split_into_syllables(word: str) -> List[str]:

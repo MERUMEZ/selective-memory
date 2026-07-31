@@ -830,6 +830,54 @@ class Database:
         row = cursor.fetchone()
         return row["cnt"] if row else 0
 
+    def get_lexical_nodes_by_texts(self, node_type: str, texts: List[str]) -> List[sqlite3.Row]:
+        """
+        Возвращает лексические узлы для СПИСКА текстов одним запросом.
+
+        Нужен для расчёта удивления (MemoryGraph.compute_surprise): там на
+        каждое входящее сообщение проверяется знакомость всех его слов, и
+        поштучный get_lexical_node дал бы до LEXICAL_MAX_TOKENS_PER_INPUT
+        обращений к SQLite — на каждое сообщение, дважды (perplexity
+        считается и в brain_session, и в cortex).
+
+        Дубликаты в texts допустимы: SQL всё равно вернёт по одной строке
+        на узел, вызывающий код сам раскладывает результат в словарь.
+        """
+        if not texts:
+            return []
+
+        placeholders = ",".join("?" for _ in texts)
+        cursor = self._conn.cursor()
+        cursor.execute(
+            f"SELECT * FROM nodes WHERE node_type = ? AND context IN ({placeholders})",
+            (node_type, *texts),
+        )
+        return cursor.fetchall()
+
+    def get_edges_between(self, node_ids: List[int]) -> List[sqlite3.Row]:
+        """
+        Возвращает все рёбра, ОБА конца которых лежат в node_ids — одним
+        запросом. Используется расчётом удивления для проверки, насколько
+        привычны сочетания соседних слов входящего сообщения.
+
+        Направление в таблице не хранится (см. upsert_edge — пара
+        нормализуется по возрастанию id), поэтому вызывающий код должен
+        искать пару в обоих порядках.
+        """
+        if len(node_ids) < 2:
+            return []
+
+        placeholders = ",".join("?" for _ in node_ids)
+        cursor = self._conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT node_from, node_to, weight FROM edges
+            WHERE node_from IN ({placeholders}) AND node_to IN ({placeholders})
+            """,
+            (*node_ids, *node_ids),
+        )
+        return cursor.fetchall()
+
     def get_top_nodes_by_type(self, node_type: str, limit: int) -> List[sqlite3.Row]:
         """
         Возвращает до `limit` узлов заданного node_type, отсортированных по
