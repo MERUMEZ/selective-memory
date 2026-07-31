@@ -783,15 +783,42 @@ class MemoryGraph:
         то есть та же планка, что и в get_vocabulary_size — иначе бот
         произносил бы слова, которые сам же не считает выученными.
         """
+        return self._words_in(text, mastered=True)
+
+    def get_emerging_words_in(self, text: str) -> List[KnownWord]:
+        """
+        Слова входящей фразы, которые организм УЖЕ СЛЫШАЛ, но ещё НЕ
+        ОСВОИЛ — его зона ближайшего развития.
+
+        Это кандидаты на ИССЛЕДОВАНИЕ. До сих пор в архитектуре не было
+        вообще никакого механизма попробовать неосвоенное: организм только
+        эксплуатировал уже выученное, а всё остальное превращал в лепет.
+        Чисто эксплуатирующая система не развивается — она сходится и
+        застывает.
+
+        Именно такие слова, а не совсем незнакомые: пробовать то, что
+        далеко за пределами текущей компетенции, бессмысленно — попытка
+        провалится и ничему не научит. Учение происходит на границе
+        освоенного.
+        """
+        return self._words_in(text, mastered=False)
+
+    def _words_in(self, text: str, mastered: bool) -> List[KnownWord]:
+        """
+        Общая выборка слов входящей фразы по порогу освоенности.
+        mastered=True  -> вес >= VOCABULARY_MASTERY_MIN_WEIGHT (свои слова)
+        mastered=False -> вес <  порога (услышанные, но ещё не закреплённые)
+        """
         tokens = self._tokenize_for_lexicon(text)
         if not tokens:
             return []
 
+        threshold = config.VOCABULARY_MASTERY_MIN_WEIGHT
         rows = self.db.get_lexical_nodes_by_texts("word", list(set(tokens)))
         known = {
             row["context"]: (row["id"], row["weight"], row["reward_expectation"] or 0.0)
             for row in rows
-            if row["weight"] >= config.VOCABULARY_MASTERY_MIN_WEIGHT
+            if (row["weight"] >= threshold) is mastered
         }
 
         result: List[KnownWord] = []
