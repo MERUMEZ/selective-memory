@@ -408,6 +408,16 @@ class Database:
         cursor.execute("UPDATE nodes SET embedding = ? WHERE id = ?", (blob, node_id))
         self._conn.commit()
 
+    def update_stability(self, node_id: int, stability: float) -> None:
+        """
+        Задаёт сопротивление узла забыванию напрямую. Нужно вытеснению
+        противоречий: устаревшая версия факта возвращается в разряд
+        забываемых, а не удаляется.
+        """
+        cursor = self._conn.cursor()
+        cursor.execute("UPDATE nodes SET stability = ? WHERE id = ?", (stability, node_id))
+        self._conn.commit()
+
     def update_reward_expectation(self, node_id: int, expectation: float) -> None:
         """
         Записывает новое ожидаемое одобрение за использование узла.

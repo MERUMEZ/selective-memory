@@ -1,0 +1,183 @@
+"""
+Тесты вытеснения устаревших фактов.
+
+Контекст: память копила взаимоисключающие узлы и отдавала случайный.
+Замер до правки — "мою собаку зовут Рекс", позже "мою собаку зовут Бобик":
+
+    как зовут мою собаку?
+        0.906  'мою собаку зовут Рекс'    <- УСТАРЕВШИЙ ВЫИГРЫВАЛ
+        0.875  'мою собаку зовут Бобик'
+
+Порядок выдачи решало сходство строк, а не время, поэтому бот уверенно
+называл неверное имя.
+
+ГЛАВНОЕ РЕШЕНИЕ: устаревшее ОСЛАБЛЯЕТСЯ, а не удаляется. Ложное
+срабатывание тогда стоит дёшево и исправляется само — если факт остался
+верным, пользователь упомянет его снова и узел восстановится. Половина
+тестов здесь именно про то, чтобы механизм НЕ срабатывал где не надо.
+"""
+import pytest
+
+import config
+from memory.database import Database
+from memory.graph_memory import MemoryGraph
+from services import embeddings
+
+requires_model = pytest.mark.skipif(
+    not embeddings.is_available(),
+    reason="вытеснение опирается на семантику; без модели оно отключено",
+)
+
+
+@pytest.fixture
+def mg():
+    return MemoryGraph(db=Database(db_path=":memory:"))
+
+
+def remember(graph, text, timestamp=0.0):
+    return graph.save_connection(text, "запомнил", weight=0.8, timestamp=timestamp)
+
+
+# ---------------------------------------------------------------------------
+# Срабатывает там, где надо
+# ---------------------------------------------------------------------------
+@requires_model
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("мою собаку зовут Рекс", "мою собаку зовут Бобик"),
+        ("я живу в Москве", "я живу в Питере"),
+    ],
+    ids=["другое имя", "другой город"],
+)
+def test_new_version_supersedes_the_old(mg, old, new):
+    remember(mg, old)
+    assert mg.find_superseded(new), f"{new!r} должно вытеснять {old!r}"
+
+
+@requires_model
+def test_correction_puts_the_new_fact_first(mg):
+    """Ровно тот случай, который наблюдался: устаревший факт выигрывал."""
+    remember(mg, "мою собаку зовут Рекс", timestamp=0.0)
+    remember(mg, "мою собаку зовут Бобик", timestamp=1000.0)
+
+    found = mg.search("как зовут мою собаку", top_k=2, timestamp=2000.0,
+                      with_associations=False)
+
+    assert found, "хоть что-то должно найтись"
+    assert "Бобик" in found[0].context, (
+        f"первым обязан идти актуальный факт, а вернулось {found[0].context!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# НЕ срабатывает там, где не надо — этих тестов намеренно больше
+# ---------------------------------------------------------------------------
+@requires_model
+def test_repetition_is_not_a_contradiction(mg):
+    """Повтор того же самого обязан подкреплять, а не вытеснять."""
+    remember(mg, "мою собаку зовут Рекс")
+    assert mg.find_superseded("мою собаку зовут Рекс") == []
+
+
+@requires_model
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("у меня есть кошка", "у меня есть собака"),
+        ("я живу в Москве", "я работаю программистом"),
+        ("мою собаку зовут Рекс", "сегодня хорошая погода"),
+    ],
+    ids=["оба могут быть верны", "независимый факт", "другая тема"],
+)
+def test_independent_facts_are_left_alone(mg, old, new):
+    """
+    Самый опасный класс ошибок: ослабить воспоминание, которое осталось
+    верным. Порог темы держится высоким именно ради этого.
+    """
+    remember(mg, old)
+    assert mg.find_superseded(new) == [], (
+        f"{new!r} не должно трогать {old!r} — это не поправка"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Ослабление, а не удаление
+# ---------------------------------------------------------------------------
+@requires_model
+def test_superseded_node_is_weakened_not_deleted(mg):
+    node_id = remember(mg, "мою собаку зовут Рекс", timestamp=0.0)
+    before = mg.db.get_node(node_id)["weight"]
+
+    remember(mg, "мою собаку зовут Бобик", timestamp=1000.0)
+
+    row = mg.db.get_node(node_id)
+    assert row is not None, "вытесненный узел не должен удаляться"
+    assert row["weight"] < before
+    assert row["stability"] <= config.STABILITY_INITIAL * 2
+
+
+@requires_model
+def test_false_positive_heals_itself(mg):
+    """
+    Если факт на самом деле остался верным, повторные упоминания
+    возвращают его в оборот. Ради этого свойства и выбрано ослабление
+    вместо удаления.
+    """
+    node_id = remember(mg, "мою собаку зовут Рекс", timestamp=0.0)
+    remember(mg, "мою собаку зовут Бобик", timestamp=1000.0)
+
+    weakened = mg.db.get_node(node_id)["stability"]
+    for i in range(4):
+        mg.touch_node(node_id, timestamp=2000.0 + i)
+
+    assert mg.db.get_node(node_id)["stability"] > weakened * 2
+
+
+@requires_model
+def test_time_separates_stale_from_current(mg):
+    """
+    Настоящее разделение делает не штраф веса, а сброшенная стабильность:
+    вытесненный угасает быстро, актуальный держится.
+    """
+    stale_id = remember(mg, "мою собаку зовут Рекс", timestamp=0.0)
+    fresh_id = remember(mg, "мою собаку зовут Бобик", timestamp=100.0)
+    for i in range(3):
+        mg.touch_node(fresh_id, timestamp=200.0 + i)
+
+    mg.apply_decay(now=300.0 + 3 * 86400 * config.TIME_ACCELERATION)
+
+    assert mg.db.get_node(stale_id) is None, "устаревший факт должен забыться"
+    assert mg.db.get_node(fresh_id) is not None, "актуальный должен остаться"
+
+
+# ---------------------------------------------------------------------------
+# Явная поправка и деградация
+# ---------------------------------------------------------------------------
+@requires_model
+def test_explicit_correction_lowers_the_bar(mg):
+    """
+    Когда пользователь явно поправил ("нет", "неправильно"), это сильное
+    свидетельство — порог темы снижается.
+    """
+    remember(mg, "мою собаку зовут Рекс")
+
+    strict = len(mg.find_superseded("собака Бобик", explicit_correction=False))
+    lenient = len(mg.find_superseded("собака Бобик", explicit_correction=True))
+
+    assert lenient >= strict
+
+
+def test_without_embeddings_nothing_is_superseded(mg, monkeypatch):
+    """
+    Без семантики отличить "другую версию" от "другой темы" нечем:
+    строковое сходство одинаково высоко и там, и там. Молча ничего не
+    вытесняем, а не гадаем.
+    """
+    monkeypatch.setattr(embeddings, "encode", lambda text: None)
+    remember(mg, "мою собаку зовут Рекс")
+    assert mg.find_superseded("мою собаку зовут Бобик") == []
+
+
+def test_supersede_survives_missing_node(mg):
+    mg.supersede_node(999999)  # не должно бросить

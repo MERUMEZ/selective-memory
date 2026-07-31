@@ -139,6 +139,21 @@ class RewardSignal:
 
 
 @dataclass
+class SupersededNode:
+    """
+    Воспоминание, вытесненное более новой версией того же факта
+    (см. MemoryGraph.find_superseded).
+
+    word_overlap хранится для отладки: по нему видно, почему узел сочли
+    другой версией, а не повтором.
+    """
+    id: int
+    context: str
+    similarity: float
+    word_overlap: float
+
+
+@dataclass
 class KnownWord:
     """
     Освоенное слово, найденное во входящем сообщении (см.
@@ -900,14 +915,123 @@ class MemoryGraph:
     # 1. Сохранение новой связи
     # ----------------------------------------------------------------------
 
+    def find_superseded(
+        self,
+        text: str,
+        exclude_id: Optional[int] = None,
+        explicit_correction: bool = False,
+    ) -> List["SupersededNode"]:
+        """
+        Какие существующие воспоминания ВЫТЕСНЯЕТ новое.
+
+        Без этого память копила взаимоисключающие факты и отдавала
+        случайный: "мою собаку зовут Рекс", позже "мою собаку зовут Бобик" —
+        оба узла равноправны, причём устаревший находился ЛУЧШЕ (0.906
+        против 0.875), потому что порядок решает сходство строк, а не время.
+
+        Признак вытеснения — два условия сразу:
+          1. высокая СЕМАНТИЧЕСКАЯ близость: речь об одном и том же;
+          2. НЕПОЛНОЕ словесное совпадение: значит это другая версия, а не
+             повтор. Чистый повтор обязан просто подкреплять узел.
+
+        explicit_correction — пользователь явно поправил ("нет",
+        "неправильно"). Это сильное свидетельство, поэтому порог темы
+        снижается: без маркера мы осторожничаем, с маркером доверяем.
+
+        Порог намеренно высокий. Ошибиться в сторону "пропустил
+        противоречие" дешевле, чем ослабить независимое воспоминание —
+        хотя и второе не катастрофа, потому что узлы ослабляются, а не
+        удаляются (см. supersede_node).
+        """
+        query_vector = embeddings.encode(text)
+        if query_vector is None:
+            # Без семантики отличить "другую версию" от "другой темы"
+            # нечем: строковое сходство одинаково высоко и для "зовут
+            # Рекс"/"зовут Бобик", и для "зовут Рекс"/"зовут Рекс".
+            return []
+
+        threshold = config.CONTRADICTION_TOPIC_THRESHOLD
+        if explicit_correction:
+            threshold -= config.CONTRADICTION_CORRECTION_RELIEF
+
+        new_words = self._extract_keywords(text.lower())
+        found: List[SupersededNode] = []
+
+        for row in self.db.fetch_searchable_nodes():
+            if row["id"] == exclude_id or row["is_meta"]:
+                continue
+
+            # Сравниваем ТОЛЬКО реплики пользователя, без ответов бота.
+            # _node_vector считает вектор по паре "вопрос + ответ", и это
+            # правильно для поиска, но не здесь: факт живёт в том, что
+            # сказал ЧЕЛОВЕК, а реплика бота ("запомнил", "ага") — шум,
+            # который сдвигает вектор и решает исход сравнения.
+            similarity = embeddings.cosine(
+                query_vector, embeddings.encode(row["context"] or "")
+            )
+            if similarity < threshold:
+                continue
+
+            old_words = self._extract_keywords((row["context"] or "").lower())
+            overlap = self._keyword_overlap(new_words, old_words)
+            if overlap >= config.CONTRADICTION_REPEAT_THRESHOLD:
+                continue  # это повтор, а не новая версия
+
+            found.append(
+                SupersededNode(
+                    id=row["id"],
+                    context=row["context"],
+                    similarity=similarity,
+                    word_overlap=overlap,
+                )
+            )
+
+        return found
+
+    def supersede_node(self, node_id: int, timestamp: Optional[float] = None) -> None:
+        """
+        Помечает воспоминание как вытесненное: снижает вес и СБРАСЫВАЕТ
+        стабильность, то есть возвращает узел в разряд забываемых.
+
+        Именно ослабление, а не удаление. Если факт на самом деле остался
+        верным (сработали ложно — "у меня есть кошка" против "у меня есть
+        собака"), пользователь упомянет его снова, узел получит touch_node,
+        и стабильность отрастёт. Удаление было бы необратимым, а здесь
+        ошибка стоит дёшево и исправляется сама.
+        """
+        row = self.db.get_node(node_id)
+        if row is None:
+            return
+
+        new_weight = max(0.0, row["weight"] - config.CONTRADICTION_WEIGHT_PENALTY)
+        stability = (row["stability"] or config.STABILITY_INITIAL)
+        new_stability = max(
+            config.STABILITY_INITIAL, stability * config.CONTRADICTION_STABILITY_FACTOR
+        )
+
+        self.db.update_weight(node_id, new_weight)
+        self.db.update_stability(node_id, new_stability)
+
+        logger.info(
+            "[SUPERSEDED] Узел %s вытеснен новой версией: вес %.3f -> %.3f, "
+            "стабильность %.1f -> %.1f",
+            node_id, row["weight"], new_weight, stability, new_stability,
+        )
+
     def save_connection(
         self,
         context: str,
         response: str,
         weight: Optional[float] = None,
         timestamp: Optional[float] = None,
+        explicit_correction: bool = False,
     ) -> int:
-        """Сохраняет новую связь context -> response с начальным весом."""
+        """
+        Сохраняет новую связь context -> response с начальным весом.
+
+        explicit_correction — пользователь явно поправил ("нет",
+        "неправильно"). Снижает порог вытеснения устаревших версий.
+        """
         initial_weight = weight if weight is not None else config.BASE_PLASTICITY_THRESHOLD
 
         node_id = self.db.insert_node(
@@ -916,6 +1040,17 @@ class MemoryGraph:
             weight=initial_weight,
             timestamp=timestamp,
         )
+
+        # Новая версия факта вытесняет старую: иначе память копит
+        # взаимоисключающие узлы и отдаёт случайный из них.
+        for stale in self.find_superseded(
+            context, exclude_id=node_id, explicit_correction=explicit_correction
+        ):
+            logger.info(
+                "[CONTRADICTION] %r вытесняет %r (близость %.2f, общих слов %.2f)",
+                context[:40], stale.context[:40], stale.similarity, stale.word_overlap,
+            )
+            self.supersede_node(stale.id, timestamp=timestamp)
 
         logger.info(
             "[SPIKE DETECTED] Новая связь сохранена id=%s weight=%.3f",
