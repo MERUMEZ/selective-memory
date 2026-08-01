@@ -26,8 +26,8 @@ from decaymem import Memory, MemorySettings
 YEAR = 365 * 86400
 
 
-def _run(praises: int, floor: float = 0.25):
-    """Запоминает факт, хвалит его N раз за ВСПОМИНАНИЕ, ждёт год."""
+def _run(praises: int, floor: float = 0.25, years: float = 1.0):
+    """Запоминает факт, хвалит его N раз за ВСПОМИНАНИЕ, ждёт."""
     now = [1_700_000_000.0]
     memory = Memory(":memory:", clock=lambda: now[0],
                     settings=MemorySettings(memory_floor_max=floor))
@@ -40,7 +40,7 @@ def _run(praises: int, floor: float = 0.25):
         memory.feedback(+1.0, timestamp=now[0])
         now[0] += 300
 
-    memory.forget(now=now[0] + YEAR)
+    memory.forget(now=now[0] + years * YEAR)
     row = memory.graph.db.get_node(obs.node_id)
     memory.close()
     return row
@@ -93,10 +93,22 @@ def test_floor_never_raises_weight():
 
 def test_floor_can_be_switched_off():
     """
-    Нулевой пол возвращает прежнее поведение. Компромисс должен быть в
-    руках вызывающего: кому нужна память, забывающая всё, тот её получит.
+    Нулевой пол возвращает прежнее поведение: подкреплённое живёт дольше
+    рутины, но конечное время.
+
+    Горизонт здесь ТРИ года, а не один, и это не придирка. Похвала теперь
+    реально усиливает вспомненный узел (вес плюс продвинутая метка
+    доступа), поэтому за год он не успевает угаснуть даже без пола.
+    Замер: без пола 0.196 через год и забыт через три; с полом 0.326
+    через год, 0.171 через три, 0.164 через десять — то есть сходится к
+    полу и не исчезает никогда.
+
+    Первая версия теста проверяла годовой горизонт и упала, когда
+    подкрепление стало доходить до вспомненного. Она кодировала прежнее,
+    сломанное поведение.
     """
-    assert _run(praises=3, floor=0.0) is None
+    assert _run(praises=3, floor=0.0, years=3) is None
+    assert _run(praises=3, floor=0.25, years=3) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -146,4 +158,54 @@ def test_praise_reaches_both_written_and_recalled():
     assert new.written, "второй факт должен был записаться"
     assert (memory.graph.db.get_node(old.node_id)["reward_expectation"] or 0.0) > 0.0
     assert (memory.graph.db.get_node(new.node_id)["reward_expectation"] or 0.0) > 0.0
+    memory.close()
+
+
+def test_praise_boosts_the_weight_of_recalled_nodes():
+    """
+    Похвала должна не только делать вспомненное ДОЛГОВЕЧНЕЕ (через пол),
+    но и ЯРЧЕ прямо сейчас — то есть поднимать вес.
+
+    Этот тест появился потому, что первую правку я сделал наполовину.
+    Починил "либо-либо" в начислении ожидания награды и не заметил, что
+    точно такое же "либо-либо" стоит в применении эффекта: прибавка веса
+    доставалась только записанному узлу. Замер показал вес вспомненного
+    0.500 -> 0.500 при похвале, хотя ожидание при этом росло.
+    """
+    now = [1_700_000_000.0]
+    memory = Memory(":memory:", clock=lambda: now[0])
+
+    obs = memory.observe("мой телефон восемь девятьсот двенадцать", timestamp=now[0])
+    now[0] += 300
+    before = memory.graph.db.get_node(obs.node_id)["weight"]
+
+    memory.observe("какой у меня телефон", timestamp=now[0])
+    memory.recall("телефон", timestamp=now[0])
+    memory.feedback(+1.0, timestamp=now[0])
+
+    after = memory.graph.db.get_node(obs.node_id)["weight"]
+    assert after > before, f"вес вспомненного не вырос: {before:.3f} -> {after:.3f}"
+    memory.close()
+
+
+def test_blame_reaches_recalled_nodes_too():
+    """
+    Симметрия обязательна. Если организм вспомнил не то и получил
+    порицание, штраф должен дойти до вспомненного — иначе он повторит
+    ошибку.
+    """
+    now = [1_700_000_000.0]
+    memory = Memory(":memory:", clock=lambda: now[0])
+
+    obs = memory.observe("мой телефон восемь девятьсот двенадцать", timestamp=now[0])
+    now[0] += 300
+    before = memory.graph.db.get_node(obs.node_id)["weight"]
+
+    memory.observe("какой у меня адрес", timestamp=now[0])
+    memory.recall("телефон", timestamp=now[0])
+    memory.feedback(-1.0, timestamp=now[0])
+
+    row = memory.graph.db.get_node(obs.node_id)
+    assert row["weight"] < before, "штраф не дошёл до вспомненного"
+    assert (row["reward_expectation"] or 0.0) < 0.0
     memory.close()

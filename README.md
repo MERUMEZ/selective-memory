@@ -219,7 +219,7 @@ memory = Memory("brain.db", settings=MemorySettings(decay_rate=0.02, age_t0=3600
 decaymem/   пакет памяти — единственное, что ставится через pip
 core/       витрина: персонаж, настроение, речевые стадии
 tools/      стенды и инспектор памяти
-tests/      282 тестов
+tests/      284 тестов
 AUDIT.md    что измерено, что опровергнуто, что не сделано
 ```
 

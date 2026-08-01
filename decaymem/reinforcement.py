@@ -251,51 +251,53 @@ class ReinforcementLoop:
             retrospective=retrospective,
         )
 
+    def _involved_nodes(self, trace) -> List[int]:
+        """
+        Все узлы, задействованные в действии: записанный плюс те, на
+        которые действие опиралось.
+
+        Раньше здесь было "либо-либо" — если ход что-то записал, до
+        вспомненного оценка не доходила. Это молча теряло главный случай
+        ассистента: похвала относится к хорошему ответу ПО ПАМЯТИ, то
+        есть подкреплять надо именно вспомненное.
+        """
+        return list(dict.fromkeys(
+            ([trace.node_id] if trace.node_id is not None else [])
+            + list(trace.node_ids or [])
+        ))
+
     def _apply_effect(self, trace, valence, learning_scale, timestamp):
         """Усиливает или штрафует задействованные узлы."""
+        nodes = self._involved_nodes(trace)
+        if not nodes:
+            return "neutral", 0.0
+
         if valence > 0:
             boost = valence * self.settings.reward_positive_boost * learning_scale
-
-            if trace.node_id is not None:
-                self.memory.reinforce_node(trace.node_id, boost=boost, timestamp=timestamp)
-                # Продвигаем метку доступа вперёд: узел выглядит свежее, чем
-                # есть, и будет угасать медленнее.
+            for node_id in nodes:
+                self.memory.reinforce_node(node_id, boost=boost, timestamp=timestamp)
+                # Метка доступа продвигается вперёд: узел выглядит свежее,
+                # чем есть, и угасает медленнее.
                 if timestamp is not None:
                     self.memory.touch_node(
-                        trace.node_id,
+                        node_id,
                         timestamp=timestamp + self.settings.reward_positive_freshness_bonus,
                     )
-                logger.info("[REWARD] +%.2f -> узел %s", valence, trace.node_id)
-                return "rewarded", boost
-
-            if trace.node_ids:
+            if len(nodes) > 1:
                 # Удачная комбинация усиливается целиком, а связи МЕЖДУ её
                 # частями укрепляются: так из повторяющегося удачного набора
                 # выкристаллизовывается устойчивая связка.
-                for node_id in trace.node_ids:
-                    self.memory.reinforce_node(node_id, boost=boost, timestamp=timestamp)
                 self.memory.reinforce_coactivation(
-                    trace.node_ids, weight_boost=boost, timestamp=timestamp
+                    nodes, weight_boost=boost, timestamp=timestamp
                 )
-                logger.info("[REWARD] +%.2f -> узлы %s", valence, trace.node_ids)
-                return "rewarded", boost
-
-            return "neutral", 0.0
+            logger.info("[REWARD] +%.2f -> узлы %s", valence, nodes)
+            return "rewarded", boost
 
         penalty = abs(valence) * self.settings.reward_negative_penalty * learning_scale
-
-        if trace.node_id is not None:
-            self.memory.penalize_node(trace.node_id, penalty=penalty, timestamp=timestamp)
-            logger.info("[REWARD] %.2f -> штраф узлу %s", valence, trace.node_id)
-            return "penalized", -penalty
-
-        if trace.node_ids:
-            for node_id in trace.node_ids:
-                self.memory.penalize_node(node_id, penalty=penalty, timestamp=timestamp)
-            logger.info("[REWARD] %.2f -> штраф узлам %s", valence, trace.node_ids)
-            return "penalized", -penalty
-
-        return "neutral", 0.0
+        for node_id in nodes:
+            self.memory.penalize_node(node_id, penalty=penalty, timestamp=timestamp)
+        logger.info("[REWARD] %.2f -> штраф узлам %s", valence, nodes)
+        return "penalized", -penalty
 
     # ----------------------------------------------------------------------
     # Ретроспективная коррекция
