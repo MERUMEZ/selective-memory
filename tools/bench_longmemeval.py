@@ -1,0 +1,231 @@
+"""
+================================================================================
+ TOOLS/BENCH_LONGMEMEVAL.PY — Внешний бенчмарк: recall@k на LongMemEval
+================================================================================
+Все числа проекта до сих пор получены на СВОЁМ корпусе. Это честно
+измерено, но стоит ровно столько, сколько доверия к автору корпуса.
+LongMemEval — внешний набор: 500 вопросов, у каждого «стог сена» из
+сессий переписки с датами, внутри которого спрятаны реплики-улики.
+
+МЕРЯЕТСЯ RECALL@K, а не правильность ответа. Так дешевле (LLM не
+нужна вовсе) и так сопоставимо с тем, что публикуют соседи: Dhee
+отчитывается R@1/R@3/R@5/R@10 на этом же наборе.
+
+ЧЕГО ЖДАТЬ ЧЕСТНО. Бенчмарк меряет ПОЛНОТУ извлечения из стога — то
+есть ровно тот режим, где мы уже измерили проигрыш случайной выборке
+(87.2% против 88.8%, tools/compare_memory.py). Вдобавок наша память
+забывает, а спайк-гейт часть стога вообще не записывает. Поэтому голое
+число здесь бессмысленно, и стенд считает ТРИ конфигурации:
+
+    lexical   без кодировщика — то, что получит человек после
+              обычного pip install
+    semantic  с кодировщиком (английская модель на английском наборе)
+    archive   семантика + забывание выключено + пишем всё
+              — это «мы как чистый поисковик»
+
+Разница между semantic и archive и есть ЦЕНА нашей политики забывания,
+выраженная числом. Без неё слабый общий результат нечем объяснить.
+
+ORACLE ПРОТИВ S. В варианте oracle стог состоит ТОЛЬКО из сессий-улик,
+поэтому recall там завышен и годится лишь для отладки. Сопоставимое с
+соседями число даёт longmemeval_s, где улики спрятаны среди ~40 сессий.
+
+Запуск:
+    python tools/bench_longmemeval.py --limit 50
+    python tools/bench_longmemeval.py --data storage/bench/longmemeval_s.json
+    python tools/bench_longmemeval.py --mode archive --encoder potion
+================================================================================
+"""
+
+import argparse
+import json
+import os
+import sys
+from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+if "--logs" not in sys.argv:
+    os.environ["LOG_LEVEL"] = "ERROR"
+
+DEFAULT_DATA = "storage/bench/longmemeval_oracle.json"
+KS = (1, 3, 5, 10)
+
+
+def parse_date(value: str) -> float:
+    """Дата сессии -> unix-время. Непарсимое — ноль, счёт всё равно относительный."""
+    for fmt in ("%Y/%m/%d (%a) %H:%M", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt).timestamp()
+        except (ValueError, TypeError):
+            continue
+    return 0.0
+
+
+def build_encoder(kind: str):
+    """Кодировщик для стенда. None означает «только совпадение слов»."""
+    if kind == "none":
+        return lambda text: None
+    if kind == "builtin":
+        return None                      # navec, как в пакете по умолчанию
+    if kind == "potion":
+        from model2vec import StaticModel
+        model = StaticModel.from_pretrained("minishlab/potion-base-8M")
+        return lambda text: model.encode([text])[0]
+    raise SystemExit(f"неизвестный кодировщик: {kind}")
+
+
+def run_instance(instance: Dict, encoder, mode: str, settings_kwargs: Dict) -> Optional[Dict]:
+    """
+    Прогоняет один вопрос: скармливает стог, спрашивает, считает попадания.
+
+    Возвращает словарь с флагами попадания для каждого k, либо None, если
+    у инстанции нет размеченных улик.
+    """
+    from selectivemem import Memory, MemorySettings
+
+    evidence_sessions = set(instance.get("answer_session_ids") or [])
+    if not evidence_sessions:
+        return None
+
+    sessions = instance["haystack_sessions"]
+    session_ids = instance["haystack_session_ids"]
+    dates = instance.get("haystack_dates") or []
+
+    memory = Memory(":memory:", settings=MemorySettings(**settings_kwargs), encoder=encoder)
+    node_session: Dict[int, str] = {}
+
+    for index, session in enumerate(sessions):
+        session_id = session_ids[index]
+        when = parse_date(dates[index]) if index < len(dates) else float(index * 86400)
+
+        # Реплики идут парами «пользователь -> ассистент»: узел памяти и
+        # хранит обе половины, как в обычной работе библиотеки.
+        pending_user = None
+        for turn in session:
+            content = (turn.get("content") or "").strip()
+            if not content:
+                continue
+            if turn.get("role") == "user":
+                pending_user = content
+                continue
+
+            if pending_user is None:
+                continue
+            if mode == "archive":
+                # «Мы как чистый поисковик»: гейт обойдён, пишем всё.
+                node_id = memory.graph.save_connection(
+                    context=pending_user, response=content, weight=0.6, timestamp=when,
+                )
+            else:
+                node_id = memory.observe(
+                    pending_user, response=content, timestamp=when,
+                ).node_id
+            if node_id is not None:
+                node_session[node_id] = session_id
+            pending_user = None
+
+    # Вопрос задаётся ПОСЛЕ всего стога, датой вопроса
+    asked_at = parse_date(instance.get("question_date", "")) or (
+        max((parse_date(d) for d in dates), default=0.0) + 86400
+    )
+    if mode != "archive":
+        memory.forget(now=asked_at)
+
+    found = memory.recall(
+        instance["question"], top_k=max(KS), timestamp=asked_at, with_associations=False,
+    )
+    ranked_sessions = [node_session.get(m.id) for m in found]
+
+    result = {
+        "type": instance["question_type"],
+        "stored": len(node_session),
+        "turns": sum(len(s) for s in sessions),
+    }
+    for k in KS:
+        result[f"r@{k}"] = any(s in evidence_sessions for s in ranked_sessions[:k])
+    memory.close()
+    return result
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="LongMemEval: recall@k")
+    parser.add_argument("--data", default=DEFAULT_DATA)
+    parser.add_argument("--limit", type=int, default=0, help="0 = все инстансы")
+    parser.add_argument("--mode", choices=("normal", "archive"), default="normal")
+    parser.add_argument("--encoder", choices=("none", "builtin", "potion"), default="none")
+    parser.add_argument("--threshold", type=float, default=None,
+                        help="порог поиска; по умолчанию из настроек")
+    parser.add_argument("--shuffle", type=int, default=0,
+                        help="перемешать с этим сидом: набор отсортирован по типам")
+    parser.add_argument("--logs", action="store_true")
+    args = parser.parse_args()
+
+    path = Path(args.data)
+    if not path.exists():
+        sys.exit(
+            f"Нет файла {path}. Скачать:\n"
+            "  curl -sL https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned"
+            "/resolve/main/longmemeval_oracle.json -o storage/bench/longmemeval_oracle.json"
+        )
+
+    data = json.loads(path.read_text())
+    if args.shuffle:
+        # Набор отсортирован по типам вопросов: первые сорок инстансов —
+        # сплошь temporal-reasoning. Без перемешивания срез по --limit
+        # меряет одну способность и выдаёт её за общую.
+        import random
+        random.Random(args.shuffle).shuffle(data)
+    if args.limit:
+        data = data[: args.limit]
+
+    encoder = build_encoder(args.encoder)
+    settings_kwargs = {}
+    if args.threshold is not None:
+        settings_kwargs["memory_search_threshold"] = args.threshold
+    if args.mode == "archive":
+        # Забывание практически выключено: узлы живут тысячелетия.
+        settings_kwargs.update({"age_t0": 1e12, "decay_rate": 1e-9})
+
+    totals = {f"r@{k}": 0 for k in KS}
+    by_type: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    stored = turns = counted = 0
+
+    for index, instance in enumerate(data, start=1):
+        outcome = run_instance(instance, encoder, args.mode, settings_kwargs)
+        if outcome is None:
+            continue
+        counted += 1
+        stored += outcome["stored"]
+        turns += outcome["turns"]
+        for k in KS:
+            totals[f"r@{k}"] += outcome[f"r@{k}"]
+            by_type[outcome["type"]][f"r@{k}"] += outcome[f"r@{k}"]
+        by_type[outcome["type"]]["n"] += 1
+        if index % 25 == 0:
+            print(f"  ...{index}/{len(data)}", file=sys.stderr)
+
+    print("=" * 78)
+    print(f" LONGMEMEVAL — {path.name}, режим {args.mode}, кодировщик {args.encoder}")
+    print("=" * 78)
+    print(f" Вопросов: {counted}  |  реплик в стогах: {turns}  |  записано узлов: {stored}")
+    if turns:
+        print(f" Записано {stored / turns:.1%} реплик — остальное отсеял гейт")
+    print("-" * 78)
+    print("  " + "  ".join(f"R@{k}" for k in KS))
+    print("  " + "  ".join(f"{totals[f'r@{k}'] / max(1, counted):>4.1%}" for k in KS))
+    print("-" * 78)
+    print(f" {'тип вопроса':<28} {'n':>4}  " + "  ".join(f"R@{k}" for k in KS))
+    for question_type in sorted(by_type):
+        row = by_type[question_type]
+        n = row["n"]
+        cells = "  ".join(f"{row[f'r@{k}'] / max(1, n):>4.0%}" for k in KS)
+        print(f" {question_type:<28} {n:>4}  {cells}")
+    print("=" * 78)
+
+
+if __name__ == "__main__":
+    main()
