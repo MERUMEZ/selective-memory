@@ -29,7 +29,7 @@ import re
 import time
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import List, Optional, Set, TYPE_CHECKING
+from typing import Any, Callable, List, Optional, Set, TYPE_CHECKING
 
 from decaymem.database import Database
 from decaymem.settings import MemorySettings
@@ -236,6 +236,7 @@ class MemoryGraph:
         self,
         db: Optional[Database] = None,
         settings: Optional[MemorySettings] = None,
+        encoder: Optional[Callable[[str], Any]] = None,
     ):
         # Параметры приходят извне: ядро не должно знать про глобальный
         # config приложения, иначе его нельзя вынести в отдельный пакет.
@@ -244,6 +245,25 @@ class MemoryGraph:
         # раньше.
         self.settings = settings or MemorySettings()
         self.db = db or Database(settings=self.settings)
+
+        # КОДИРОВЩИК СМЫСЛА ПОДКЛЮЧАЕМЫЙ. Встроенный — navec, русские
+        # статические векторы: он лёгкий и не тянет torch, но он русский.
+        # Для английского (и любого другого языка) сюда передаётся своя
+        # функция text -> вектор: sentence-transformers, эмбеддинги через
+        # API, fastText — что угодно, лишь бы возвращало последовательность
+        # чисел или None.
+        #
+        # Библиотека НЕ ВОЗИТ С СОБОЙ МОДЕЛЬ и не выбирает её за
+        # пользователя. Это же и снимает вопрос "а на каком языке
+        # работает decaymem": на том, на котором работает переданный
+        # кодировщик.
+        # Хранится ИМЕННО переданное значение, а не embeddings.encode по
+        # умолчанию: связать функцию здесь — значит намертво прибить
+        # ссылку, и подмена embeddings.encode снаружи (тесты, стенды,
+        # отключение семантики на ходу) перестанет действовать. Ровно на
+        # это уже наступали с заглушкой LLM.
+        self.encoder = encoder
+        self._vector_dim: Optional[int] = None
         self.last_activation_traces: List[ActivationTrace] = []
 
     # ----------------------------------------------------------------------
@@ -801,7 +821,7 @@ class MemoryGraph:
         хотя и второе не катастрофа, потому что узлы ослабляются, а не
         удаляются (см. supersede_node).
         """
-        query_vector = embeddings.encode(text)
+        query_vector = self._encode(text)
         if query_vector is None:
             # Без семантики отличить "другую версию" от "другой темы"
             # нечем: строковое сходство одинаково высоко и для "зовут
@@ -825,7 +845,7 @@ class MemoryGraph:
             # сказал ЧЕЛОВЕК, а реплика бота ("запомнил", "ага") — шум,
             # который сдвигает вектор и решает исход сравнения.
             similarity = embeddings.cosine(
-                query_vector, embeddings.encode(row["context"] or "")
+                query_vector, self._encode(row["context"] or "")
             )
             if similarity < threshold:
                 continue
@@ -920,6 +940,68 @@ class MemoryGraph:
     # 2. Поиск похожего контекста (ключевые слова + нечёткое сходство)
     # ----------------------------------------------------------------------
 
+    def _prefilter(self, rows, query_keywords, query_vector, top_k: int):
+        """
+        Дешёвый отбор кандидатов: ключевые слова, семантика, вес.
+
+        Возвращает список (row, keyword_score, semantic_score) — уже
+        посчитанные величины передаются дальше, чтобы не считать их
+        дважды.
+
+        КОСИНУСЫ СЧИТАЮТСЯ ОДНОЙ МАТРИЦЕЙ. Поштучный вызов на каждый узел
+        тратил больше времени на вызовы numpy, чем на саму арифметику;
+        одно матричное умножение делает ту же работу разом. Если numpy
+        недоступен или у узлов нет векторов, семантическая часть просто
+        обнуляется, и отбор идёт по ключевым словам и весу — та же мягкая
+        деградация, что и во всём остальном модуле.
+        """
+        candidate_limit = max(
+            top_k * self.settings.search_candidate_multiplier,
+            self.settings.search_candidate_minimum,
+        )
+
+        keyword_scores = [
+            self._keyword_overlap(query_keywords, self._extract_keywords(
+                row["context"].strip().lower()
+            ))
+            for row in rows
+        ]
+
+        semantic_scores = [0.0] * len(rows)
+        if query_vector is not None and rows:
+            try:
+                import numpy as np
+
+                vectors = [self._node_vector(row) for row in rows]
+                known = [i for i, v in enumerate(vectors) if v is not None]
+                if known:
+                    matrix = np.asarray([vectors[i] for i in known], dtype=np.float32)
+                    q = np.asarray(query_vector, dtype=np.float32)
+                    norms = np.linalg.norm(matrix, axis=1) * float(np.linalg.norm(q))
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        sims = np.where(norms > 0.0, matrix @ q / norms, 0.0)
+                    for position, index in enumerate(known):
+                        semantic_scores[index] = max(0.0, float(sims[position]))
+            except ImportError:
+                pass
+
+        if len(rows) <= candidate_limit:
+            return list(zip(rows, keyword_scores, semantic_scores))
+
+        # Порядок отбора повторяет итоговую формулу, но без нечёткой
+        # составляющей — иначе кандидаты выбирались бы не по тому, по чему
+        # потом ранжируются.
+        ranked = sorted(
+            range(len(rows)),
+            key=lambda i: (
+                keyword_scores[i] * self.settings.memory_keyword_weight
+                + semantic_scores[i] * self.settings.memory_semantic_weight
+                + rows[i]["weight"] * self.settings.memory_weight_influence
+            ),
+            reverse=True,
+        )[:candidate_limit]
+        return [(rows[i], keyword_scores[i], semantic_scores[i]) for i in ranked]
+
     def search(
         self,
         query: str,
@@ -951,20 +1033,31 @@ class MemoryGraph:
         # Вектор запроса считается ОДИН раз на весь поиск. None означает,
         # что семантика недоступна (нет модели/библиотеки) — тогда работают
         # только строковые составляющие, как раньше.
-        query_vector = embeddings.encode(query)
+        query_vector = self._encode(query)
 
-        for row in rows:
+        # ------------------------------------------------------------------
+        # ОТБОР КАНДИДАТОВ. Дорогое сравнение — только по выжившим.
+        #
+        # Замер профилировщиком на 10 000 узлов: SequenceMatcher съедал 82%
+        # времени поиска (4.49 с из 5.44), семантика — 6%. То есть дороже
+        # всего обходилась ровно та составляющая, из-за которой когда-то
+        # "кожа" обыгрывала "кота", — посимвольное сходство.
+        #
+        # Поэтому сначала по ВСЕМ узлам считаются дешёвые признаки
+        # (пересечение ключевых слов, косинус, вес), а нечёткое сходство —
+        # только для лучших кандидатов. Оно и по смыслу так работает: не
+        # находит новое, а уточняет порядок среди уже правдоподобного.
+        #
+        # Запас кандидатов намеренно щедрый (в 20 раз больше запрошенного,
+        # но не меньше пятидесяти): узкий отбор экономил бы копейки и
+        # рисковал бы выкинуть узел, который вытянул бы себя нечётким
+        # сходством.
+        # ------------------------------------------------------------------
+        prefiltered = self._prefilter(rows, query_keywords, query_vector, top_k)
+
+        for row, keyword_score, semantic_score in prefiltered:
             context_normalized = row["context"].strip().lower()
-            context_keywords = self._extract_keywords(context_normalized)
-
-            keyword_score = self._keyword_overlap(query_keywords, context_keywords)
             fuzzy_score = self._compute_fuzzy_similarity(query_normalized, context_normalized)
-
-            semantic_score = 0.0
-            if query_vector is not None:
-                semantic_score = max(
-                    0.0, embeddings.cosine(query_vector, self._node_vector(row))
-                )
 
             combined_score = (
                 keyword_score * self.settings.memory_keyword_weight
@@ -1073,15 +1166,32 @@ class MemoryGraph:
         одними словами, а суть оказаться в ответе бота.
         """
         vector = embeddings.from_blob(row["embedding"])
-        if vector is not None:
+        # РАЗМЕРНОСТЬ ПРОВЕРЯЕТСЯ, и это не педантизм. Кодировщик
+        # подключаемый, значит базу, набитую векторами одной модели,
+        # однажды откроют с другой. BLOB читается как массив float32
+        # без всякой разметки, поэтому чужой вектор не вызовет ошибку —
+        # он молча даст бессмысленную близость. Такое расхождение
+        # проявляется не падением, а тем, что поиск начинает находить не
+        # то, и ловится только замером.
+        if vector is not None and (
+            self._vector_dim is None or len(vector) == self._vector_dim
+        ):
             return vector
 
         text = f"{row['context'] or ''} {row['response'] or ''}".strip()
-        vector = embeddings.encode(text)
+        vector = self._encode(text)
         if vector is None:
             return None
 
         self.db.update_embedding(row["id"], embeddings.to_blob(vector))
+        return vector
+
+    def _encode(self, text: str):
+        """Вектор смысла через подключённый кодировщик, либо None."""
+        encode = self.encoder if self.encoder is not None else embeddings.encode
+        vector = encode(text)
+        if vector is not None and self._vector_dim is None:
+            self._vector_dim = len(vector)
         return vector
 
     def _extract_keywords(self, text: str) -> Set[str]:

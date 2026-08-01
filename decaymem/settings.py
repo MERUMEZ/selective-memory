@@ -86,6 +86,13 @@ class MemorySettings:
     stability_growth_factor: float = 1.5
     stability_initial: float = 1.0
     plasticity_stress_modifier: float = 0.25
+    # Запас кандидатов для нечёткого сравнения. Нечёткое сходство стоит
+    # дорого (замер: 82% времени поиска), поэтому считается не по всем
+    # узлам, а по лучшим из дешёвого отбора. Поставить минимум заведомо
+    # больше числа узлов — значит вернуться к полному перебору; так этот
+    # компромисс и проверяется тестом.
+    search_candidate_multiplier: int = 20
+    search_candidate_minimum: int = 50
     stability_max: float = 40.0
     stm_capacity: int = 16
     stm_emotional_threshold: float = 0.6

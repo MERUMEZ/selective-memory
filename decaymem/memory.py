@@ -33,18 +33,28 @@
 теста. Забывание считается по этой шкале, поэтому она обязана быть одна
 и монотонная.
 
-ЯЗЫК. Ядро не знает ни одного слова оценки: valence в feedback() —
-число, которое приложение получает откуда угодно (кнопка, эмодзи,
-классификатор, разбор реплики). Семантический поиск опирается на
-навешиваемую модель эмбеддингов и деградирует до строкового сходства,
-если её нет.
+ЯЗЫК ЗАДАЁТСЯ КОДИРОВЩИКОМ, а не библиотекой. Встроенный — navec,
+русские статические векторы: лёгкий, без torch. Для английского или
+любого другого языка передаётся своя функция:
+
+    from sentence_transformers import SentenceTransformer
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+    memory = Memory("brain.db", encoder=lambda text: model.encode(text))
+
+Кодировщиком может быть что угодно, возвращающее последовательность
+чисел или None: локальная модель, вызов API, fastText. Библиотека не
+возит модель с собой и не выбирает её за вас.
+
+Ядро не знает и ни одного слова оценки: valence в feedback() — число,
+которое приложение получает откуда угодно (кнопка, эмодзи,
+классификатор, разбор реплики).
 ================================================================================
 """
 
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from typing import Any, Callable, List, Optional
 
 from decaymem.database import Database
 from decaymem.graph_memory import MemoryGraph, MemoryMatch
@@ -105,12 +115,14 @@ class Memory:
         db_path: Optional[str] = None,
         settings: Optional[MemorySettings] = None,
         clock: Optional[Callable[[], float]] = None,
+        encoder: Optional[Callable[[str], Any]] = None,
     ):
         self.settings = settings or MemorySettings()
         self.clock = clock or time.time
         self.graph = MemoryGraph(
             db=Database(db_path=db_path, settings=self.settings),
             settings=self.settings,
+            encoder=encoder,
         )
         self.gate = PlasticityGate(settings=self.settings)
         # amygdala=None: контур подкрепления обращается к ней только ради
