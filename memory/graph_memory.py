@@ -31,8 +31,8 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import List, Optional, Set, TYPE_CHECKING
 
-import config
 from memory.database import Database
+from memory.settings import MemorySettings
 from services import embeddings
 from services.llm import generate_llm_response
 from storage.utils.logger import get_logger
@@ -233,8 +233,18 @@ class MemoryGraph:
         result = graph.consolidate_from_stm(stm_entries, timestamp=brain_time)
     """
 
-    def __init__(self, db: Optional[Database] = None):
-        self.db = db or Database()
+    def __init__(
+        self,
+        db: Optional[Database] = None,
+        settings: Optional[MemorySettings] = None,
+    ):
+        # Параметры приходят извне: ядро не должно знать про глобальный
+        # config приложения, иначе его нельзя вынести в отдельный пакет.
+        # Умолчания в MemorySettings — те же значения, что откалиброваны
+        # замерами, поэтому MemoryGraph() без аргументов ведёт себя как
+        # раньше.
+        self.settings = settings or MemorySettings()
+        self.db = db or Database(settings=self.settings)
         self.last_activation_traces: List[ActivationTrace] = []
 
     # ----------------------------------------------------------------------
@@ -273,7 +283,7 @@ class MemoryGraph:
     def get_user_model_content(self) -> str:
         """Возвращает текущий текст User-Model (fallback на config-дефолт)."""
         row = self.db.get_meta_node("user_model")
-        return row["context"] if row is not None else config.DEFAULT_USER_MODEL
+        return row["context"] if row is not None else self.settings.default_user_model
 
 
 
@@ -310,7 +320,7 @@ class MemoryGraph:
         concept_node_id, was_created = self.db.upsert_concept_node(
             name=normalized_name,
             definition=definition.strip(),
-            weight=config.CONCEPT_NODE_WEIGHT,
+            weight=self.settings.concept_node_weight,
             timestamp=ts,
         )
 
@@ -320,7 +330,7 @@ class MemoryGraph:
             self.connect_nodes(
                 concept_node_id,
                 user_row["id"],
-                weight_boost=config.CONCEPT_USER_EDGE_WEIGHT,
+                weight_boost=self.settings.concept_user_edge_weight,
                 timestamp=ts,
             )
 
@@ -329,7 +339,7 @@ class MemoryGraph:
             self.connect_nodes(
                 concept_node_id,
                 source_node_id,
-                weight_boost=config.EDGE_INITIAL_WEIGHT,
+                weight_boost=self.settings.edge_initial_weight,
                 timestamp=ts,
             )
 
@@ -359,8 +369,8 @@ class MemoryGraph:
         query_text = f"{name} {definition}"
         matches = self.search(
             query_text,
-            threshold=config.CONCEPT_SIMILARITY_LINK_THRESHOLD,
-            top_k=config.CONCEPT_MAX_SIMILAR_LINKS + 1,  # +1 запас на случай самосовпадения
+            threshold=self.settings.concept_similarity_link_threshold,
+            top_k=self.settings.concept_max_similar_links + 1,  # +1 запас на случай самосовпадения
             timestamp=timestamp,
             with_associations=False,
         )
@@ -369,13 +379,13 @@ class MemoryGraph:
         for match in matches:
             if match.id == concept_node_id:
                 continue
-            if linked_count >= config.CONCEPT_MAX_SIMILAR_LINKS:
+            if linked_count >= self.settings.concept_max_similar_links:
                 break
 
             self.connect_nodes(
                 concept_node_id,
                 match.id,
-                weight_boost=config.CONCEPT_SIMILARITY_EDGE_WEIGHT,
+                weight_boost=self.settings.concept_similarity_edge_weight,
                 timestamp=timestamp,
             )
             linked_count += 1
@@ -414,7 +424,7 @@ class MemoryGraph:
         Если LEXICAL_ACQUISITION_ENABLED=False — сразу возвращает нулевой
         результат без обращений к БД.
         """
-        if not config.LEXICAL_ACQUISITION_ENABLED or not text or not text.strip():
+        if not self.settings.lexical_acquisition_enabled or not text or not text.strip():
             return LexicalProcessingResult(0, 0, 0, 0)
 
         ts = timestamp if timestamp is not None else time.time()
@@ -436,8 +446,8 @@ class MemoryGraph:
             word_id, word_was_created = self.db.upsert_lexical_node(
                 node_type="word",
                 text=token,
-                initial_weight=config.WORD_NODE_INITIAL_WEIGHT,
-                reinforce_step=config.WORD_NODE_REINFORCE_STEP,
+                initial_weight=self.settings.word_node_initial_weight,
+                reinforce_step=self.settings.word_node_reinforce_step,
                 timestamp=ts,
             )
             words_processed += 1
@@ -447,8 +457,8 @@ class MemoryGraph:
                 syllable_id, syll_was_created = self.db.upsert_lexical_node(
                     node_type="syllable",
                     text=syllable,
-                    initial_weight=config.SYLLABLE_NODE_INITIAL_WEIGHT,
-                    reinforce_step=config.SYLLABLE_NODE_REINFORCE_STEP,
+                    initial_weight=self.settings.syllable_node_initial_weight,
+                    reinforce_step=self.settings.syllable_node_reinforce_step,
                     timestamp=ts,
                 )
                 syllables_processed += 1
@@ -456,14 +466,14 @@ class MemoryGraph:
 
                 self.connect_nodes(
                     syllable_id, word_id,
-                    weight_boost=config.SYLLABLE_WORD_EDGE_WEIGHT,
+                    weight_boost=self.settings.syllable_word_edge_weight,
                     timestamp=ts,
                 )
 
             if previous_word_id is not None:
                 self.connect_nodes(
                     previous_word_id, word_id,
-                    weight_boost=config.WORD_COOCCURRENCE_EDGE_WEIGHT,
+                    weight_boost=self.settings.word_cooccurrence_edge_weight,
                     timestamp=ts,
                 )
             previous_word_id = word_id
@@ -527,7 +537,7 @@ class MemoryGraph:
         rows = self.db.get_lexical_nodes_by_texts("word", list(set(tokens)))
         known = {row["context"]: (row["id"], row["weight"]) for row in rows}
 
-        mastery = max(1e-9, config.VOCABULARY_MASTERY_MIN_WEIGHT)
+        mastery = max(1e-9, self.settings.vocabulary_mastery_min_weight)
         familiarities = [
             min(1.0, known[t][1] / mastery) if t in known else 0.0
             for t in tokens
@@ -544,7 +554,7 @@ class MemoryGraph:
             edge_weights[(a, b)] = w
             edge_weights[(b, a)] = w
 
-        activation = max(1e-9, config.EDGE_ACTIVATION_THRESHOLD)
+        activation = max(1e-9, self.settings.edge_activation_threshold)
         pair_familiarities: List[float] = []
         for left, right in zip(tokens, tokens[1:]):
             if left in known and right in known:
@@ -566,10 +576,10 @@ class MemoryGraph:
         else:
             structural_surprise = 1.0 - (sum(pair_familiarities) / len(pair_familiarities))
             total = (
-                config.SURPRISE_LEXICAL_WEIGHT * lexical_surprise
-                + config.SURPRISE_STRUCTURAL_WEIGHT * structural_surprise
+                self.settings.surprise_lexical_weight * lexical_surprise
+                + self.settings.surprise_structural_weight * structural_surprise
             )
-            weight_sum = config.SURPRISE_LEXICAL_WEIGHT + config.SURPRISE_STRUCTURAL_WEIGHT
+            weight_sum = self.settings.surprise_lexical_weight + self.settings.surprise_structural_weight
             if weight_sum > 0:
                 total /= weight_sum
 
@@ -592,8 +602,7 @@ class MemoryGraph:
             total_pairs=len(pair_familiarities),
         )
 
-    @staticmethod
-    def _tokenize_for_lexicon(text: str) -> List[str]:
+    def _tokenize_for_lexicon(self, text: str) -> List[str]:
         """
         Единая токенизация для лексического слоя. Используется И при
         обучении (process_language_input), И при расчёте удивления
@@ -604,8 +613,8 @@ class MemoryGraph:
             return []
         return [
             w.lower() for w in WORD_PATTERN.findall(text)
-            if len(w) >= config.LEXICAL_MIN_TOKEN_LENGTH
-        ][: config.LEXICAL_MAX_TOKENS_PER_INPUT]
+            if len(w) >= self.settings.lexical_min_token_length
+        ][: self.settings.lexical_max_tokens_per_input]
 
     @staticmethod
     def _split_into_syllables(word: str) -> List[str]:
@@ -643,7 +652,7 @@ class MemoryGraph:
         и для пользовательского /status — то есть отражает то, что бот
         реально ОСВОИЛ, а не всё, что когда-либо пролетело через него.
         """
-        return self.db.count_mastered_words(config.VOCABULARY_MASTERY_MIN_WEIGHT)
+        return self.db.count_mastered_words(self.settings.vocabulary_mastery_min_weight)
 
     def get_exposed_vocabulary_size(self) -> int:
         """
@@ -701,7 +710,7 @@ class MemoryGraph:
         if not tokens:
             return []
 
-        threshold = config.VOCABULARY_MASTERY_MIN_WEIGHT
+        threshold = self.settings.vocabulary_mastery_min_weight
         rows = self.db.get_lexical_nodes_by_texts("word", list(set(tokens)))
         known = {
             row["context"]: (row["id"], row["weight"], row["reward_expectation"] or 0.0)
@@ -725,7 +734,7 @@ class MemoryGraph:
                         # что хвалили. Вес остаётся главным критерием, иначе
                         # организм начнёт говорить редкими, но однажды
                         # похваленными словами вместо тех, которыми владеет.
-                        preference=weight + expectation * config.REWARD_PREFERENCE_WEIGHT,
+                        preference=weight + expectation * self.settings.reward_preference_weight,
                     )
                 )
         return result
@@ -746,9 +755,9 @@ class MemoryGraph:
         RANDOM()), но каждый элемент несёт свой реальный вес — взвешенная
         выборка происходит уже в InstinctSystem, не здесь.
 
-        limit по умолчанию берётся из config.BABBLING_SYLLABLE_POOL_SIZE.
+        limit по умолчанию берётся из self.settings.babbling_syllable_pool_size.
         """
-        effective_limit = limit if limit is not None else config.BABBLING_SYLLABLE_POOL_SIZE
+        effective_limit = limit if limit is not None else self.settings.babbling_syllable_pool_size
         rows = self.db.get_random_nodes_by_type("syllable", limit=effective_limit)
         return [
             KnownSyllable(id=row["id"], text=row["context"], weight=row["weight"])
@@ -795,9 +804,9 @@ class MemoryGraph:
             # Рекс"/"зовут Бобик", и для "зовут Рекс"/"зовут Рекс".
             return []
 
-        threshold = config.CONTRADICTION_TOPIC_THRESHOLD
+        threshold = self.settings.contradiction_topic_threshold
         if explicit_correction:
-            threshold -= config.CONTRADICTION_CORRECTION_RELIEF
+            threshold -= self.settings.contradiction_correction_relief
 
         new_words = self._extract_keywords(text.lower())
         found: List[SupersededNode] = []
@@ -819,7 +828,7 @@ class MemoryGraph:
 
             old_words = self._extract_keywords((row["context"] or "").lower())
             overlap = self._keyword_overlap(new_words, old_words)
-            if overlap >= config.CONTRADICTION_REPEAT_THRESHOLD:
+            if overlap >= self.settings.contradiction_repeat_threshold:
                 continue  # это повтор, а не новая версия
 
             found.append(
@@ -848,10 +857,10 @@ class MemoryGraph:
         if row is None:
             return
 
-        new_weight = max(0.0, row["weight"] - config.CONTRADICTION_WEIGHT_PENALTY)
-        stability = (row["stability"] or config.STABILITY_INITIAL)
+        new_weight = max(0.0, row["weight"] - self.settings.contradiction_weight_penalty)
+        stability = (row["stability"] or self.settings.stability_initial)
         new_stability = max(
-            config.STABILITY_INITIAL, stability * config.CONTRADICTION_STABILITY_FACTOR
+            self.settings.stability_initial, stability * self.settings.contradiction_stability_factor
         )
 
         self.db.update_weight(node_id, new_weight)
@@ -877,7 +886,7 @@ class MemoryGraph:
         explicit_correction — пользователь явно поправил ("нет",
         "неправильно"). Снижает порог вытеснения устаревших версий.
         """
-        initial_weight = weight if weight is not None else config.BASE_PLASTICITY_THRESHOLD
+        initial_weight = weight if weight is not None else self.settings.base_plasticity_threshold
 
         node_id = self.db.insert_node(
             context=context,
@@ -924,7 +933,7 @@ class MemoryGraph:
         Ассоциативные узлы подмешиваются в результат как MemoryMatch с
         similarity = activation_score (ослабленной относительно источника).
         """
-        effective_threshold = threshold if threshold is not None else config.MEMORY_SEARCH_THRESHOLD
+        effective_threshold = threshold if threshold is not None else self.settings.memory_search_threshold
 
         query_normalized = query.strip().lower()
         if not query_normalized:
@@ -954,10 +963,10 @@ class MemoryGraph:
                 )
 
             combined_score = (
-                keyword_score * config.MEMORY_KEYWORD_WEIGHT
-                + fuzzy_score * config.MEMORY_FUZZY_WEIGHT
-                + semantic_score * config.MEMORY_SEMANTIC_WEIGHT
-                + row["weight"] * config.MEMORY_WEIGHT_INFLUENCE
+                keyword_score * self.settings.memory_keyword_weight
+                + fuzzy_score * self.settings.memory_fuzzy_weight
+                + semantic_score * self.settings.memory_semantic_weight
+                + row["weight"] * self.settings.memory_weight_influence
             )
             combined_score = min(1.0, combined_score)
 
@@ -1001,8 +1010,8 @@ class MemoryGraph:
             for source_match in top_matches:
                 associated = self.get_associated_nodes(
                     source_match.id,
-                    min_weight=config.EDGE_ACTIVATION_THRESHOLD,
-                    limit=config.EDGE_MAX_HOP_NODES,
+                    min_weight=self.settings.edge_activation_threshold,
+                    limit=self.settings.edge_max_hop_nodes,
                     timestamp=timestamp,
                 )
 
@@ -1012,7 +1021,7 @@ class MemoryGraph:
 
                     activation_score = min(
                         1.0,
-                        source_match.similarity * config.EDGE_ACTIVATION_DECAY * assoc.edge_weight,
+                        source_match.similarity * self.settings.edge_activation_decay * assoc.edge_weight,
                     )
 
                     logger.info(
@@ -1071,12 +1080,11 @@ class MemoryGraph:
         self.db.update_embedding(row["id"], embeddings.to_blob(vector))
         return vector
 
-    @staticmethod
-    def _extract_keywords(text: str) -> Set[str]:
+    def _extract_keywords(self, text: str) -> Set[str]:
         words = WORD_PATTERN.findall(text)
         return {
             w for w in words
-            if len(w) >= config.MEMORY_MIN_KEYWORD_LENGTH and w not in STOP_WORDS
+            if len(w) >= self.settings.memory_min_keyword_length and w not in STOP_WORDS
         }
 
     @staticmethod
@@ -1140,7 +1148,7 @@ class MemoryGraph:
             )
             return 0.0
 
-        boost = weight_boost if weight_boost is not None else config.EDGE_BOOST_STEP
+        boost = weight_boost if weight_boost is not None else self.settings.edge_boost_step
         ts = timestamp if timestamp is not None else time.time()
 
         new_weight = self.db.upsert_edge(
@@ -1174,7 +1182,7 @@ class MemoryGraph:
         if len(unique_ids) < 2:
             return
 
-        boost = weight_boost if weight_boost is not None else config.EDGE_BOOST_STEP
+        boost = weight_boost if weight_boost is not None else self.settings.edge_boost_step
         ts = timestamp if timestamp is not None else time.time()
 
         for i in range(len(unique_ids)):
@@ -1199,7 +1207,7 @@ class MemoryGraph:
 
         Используется в search() для Spreading Activation (Multi-hop RAG).
         """
-        effective_min_weight = min_weight if min_weight is not None else config.EDGE_ACTIVATION_THRESHOLD
+        effective_min_weight = min_weight if min_weight is not None else self.settings.edge_activation_threshold
 
         edge_rows = self.db.get_edges_for_node(node_id)
         strong_edges = [row for row in edge_rows if row["weight"] >= effective_min_weight]
@@ -1252,19 +1260,18 @@ class MemoryGraph:
     # поэтому живут на своей (много более длинной) шкале времени.
     LEXICAL_NODE_TYPES = frozenset({"word", "syllable"})
 
-    @staticmethod
-    def _age_t0_for(node_type: Optional[str]) -> float:
+    def _age_t0_for(self, node_type: Optional[str]) -> float:
         """
         Характерное время жизни узла для формулы decay. Словарь угасает
         по LEXICAL_AGE_T0 (~30 суток), всё остальное — по AGE_T0 (~1 час).
 
         Без этого разделения освоенное слово теряло статус за ночь, а за
         сутки с небольшим удалялось из БД — словарь не мог накопиться в
-        принципе (см. комментарий у config.LEXICAL_AGE_T0).
+        принципе (см. комментарий у self.settings.lexical_age_t0).
         """
         if node_type in MemoryGraph.LEXICAL_NODE_TYPES:
-            return config.LEXICAL_AGE_T0
-        return config.AGE_T0
+            return self.settings.lexical_age_t0
+        return self.settings.age_t0
 
     def _decay_nodes(self, current_time: float) -> int:
         """Экспоненциальное угасание веса узлов (старая логика apply_decay)."""
@@ -1297,12 +1304,12 @@ class MemoryGraph:
             # Стабильность растёт при каждом вспоминании (см. Database.
             # update_last_accessed), поэтому востребованная память
             # сопротивляется времени, а невостребованная уходит быстро.
-            stability = row["stability"] if row["stability"] else config.STABILITY_INITIAL
+            stability = row["stability"] if row["stability"] else self.settings.stability_initial
             effective_t0 = self._age_t0_for(row["node_type"]) * max(1e-9, stability)
-            decay_factor = math.exp(-config.DECAY_RATE * dt / effective_t0)
+            decay_factor = math.exp(-self.settings.decay_rate * dt / effective_t0)
             new_weight = old_weight * decay_factor
 
-            if new_weight < config.FORGET_THRESHOLD:
+            if new_weight < self.settings.forget_threshold:
                 to_forget.append(row["id"])
             else:
                 updates.append({
@@ -1351,10 +1358,10 @@ class MemoryGraph:
                 continue
 
             old_weight = edge["weight"]
-            decay_factor = math.exp(-config.EDGE_DECAY_RATE * dt / config.AGE_T0)
+            decay_factor = math.exp(-self.settings.edge_decay_rate * dt / self.settings.age_t0)
             new_weight = old_weight * decay_factor
 
-            if new_weight < config.EDGE_FORGET_THRESHOLD:
+            if new_weight < self.settings.edge_forget_threshold:
                 to_forget.append(edge["id"])
             else:
                 updates.append({
@@ -1395,7 +1402,7 @@ class MemoryGraph:
 
         Возвращает количество удалённых рёбер.
         """
-        threshold = min_weight if min_weight is not None else config.EDGE_FORGET_THRESHOLD
+        threshold = min_weight if min_weight is not None else self.settings.edge_forget_threshold
         deleted = self.db.delete_edges_below_weight(threshold)
         return deleted
 
@@ -1413,10 +1420,10 @@ class MemoryGraph:
         Возвращает количество удалённых узлов.
         """
         effective_edge_weight = (
-            min_edge_weight if min_edge_weight is not None else config.EDGE_ACTIVATION_THRESHOLD
+            min_edge_weight if min_edge_weight is not None else self.settings.edge_activation_threshold
         )
         effective_node_weight = (
-            max_node_weight if max_node_weight is not None else config.SLEEP_ORPHAN_WEIGHT_THRESHOLD
+            max_node_weight if max_node_weight is not None else self.settings.sleep_orphan_weight_threshold
         )
 
         orphans = self.db.get_orphan_nodes(
@@ -1472,13 +1479,13 @@ class MemoryGraph:
         сильных соседей (иначе это не "кластер", а просто пара узлов).
         """
         effective_edge_weight = (
-            min_edge_weight if min_edge_weight is not None else config.SLEEP_HUB_MIN_EDGE_WEIGHT
+            min_edge_weight if min_edge_weight is not None else self.settings.sleep_hub_min_edge_weight
         )
         effective_min_spokes = (
-            min_spokes if min_spokes is not None else config.SLEEP_MIN_CLUSTER_SPOKES
+            min_spokes if min_spokes is not None else self.settings.sleep_min_cluster_spokes
         )
         effective_max_spokes = (
-            max_spokes if max_spokes is not None else config.SLEEP_MAX_CLUSTER_SPOKES
+            max_spokes if max_spokes is not None else self.settings.sleep_max_cluster_spokes
         )
 
         hub_rows = self.db.get_hub_candidates(min_edge_weight=effective_edge_weight)
@@ -1551,7 +1558,7 @@ class MemoryGraph:
 
         Возвращает id нового абстрактного узла.
         """
-        effective_weight = weight if weight is not None else config.SLEEP_ABSTRACT_NODE_WEIGHT
+        effective_weight = weight if weight is not None else self.settings.sleep_abstract_node_weight
         ts = timestamp if timestamp is not None else time.time()
 
         abstract_node_id = self.db.insert_node(
@@ -1566,10 +1573,10 @@ class MemoryGraph:
             if source_row is None:
                 continue
 
-            archived_weight = source_row["weight"] * config.SLEEP_ARCHIVE_WEIGHT_MULTIPLIER
+            archived_weight = source_row["weight"] * self.settings.sleep_archive_weight_multiplier
             self.db.update_weight(source_id, archived_weight)
 
-            self.connect_nodes(abstract_node_id, source_id, weight_boost=config.EDGE_INITIAL_WEIGHT, timestamp=ts)
+            self.connect_nodes(abstract_node_id, source_id, weight_boost=self.settings.edge_initial_weight, timestamp=ts)
 
         logger.info(
             "[SLEEP CONSOLIDATION] Абстрактный узел id=%s (weight=%.2f) создан из кластера %s",
@@ -1641,7 +1648,7 @@ class MemoryGraph:
         packed_context, packed_response = self._pack_episode(entries)
 
         # --- a) Эмоциональный узел (приоритет выше структурного) ---
-        if max_emotion >= config.STM_EMOTIONAL_THRESHOLD:
+        if max_emotion >= self.settings.stm_emotional_threshold:
             node_id = self.save_connection(
                 context=packed_context,
                 response=packed_response,
@@ -1656,26 +1663,26 @@ class MemoryGraph:
                 decision="emotional_node",
                 node_id=node_id,
                 weight=max_emotion,
-                reason=f"max_emotion={max_emotion:.3f} >= {config.STM_EMOTIONAL_THRESHOLD}",
+                reason=f"max_emotion={max_emotion:.3f} >= {self.settings.stm_emotional_threshold}",
             )
 
         # --- b) Структурный узел ---
-        if avg_perplexity >= config.STM_STRUCTURAL_THRESHOLD:
+        if avg_perplexity >= self.settings.stm_structural_threshold:
             node_id = self.save_connection(
                 context=packed_context,
                 response=packed_response,
-                weight=config.STM_STRUCTURAL_WEIGHT,
+                weight=self.settings.stm_structural_weight,
                 timestamp=timestamp,
             )
             logger.info(
                 "[CONSOLIDATION] Структурный узел id=%s weight=%.3f (avg_perplexity=%.3f)",
-                node_id, config.STM_STRUCTURAL_WEIGHT, avg_perplexity,
+                node_id, self.settings.stm_structural_weight, avg_perplexity,
             )
             return ConsolidationResult(
                 decision="structural_node",
                 node_id=node_id,
-                weight=config.STM_STRUCTURAL_WEIGHT,
-                reason=f"avg_perplexity={avg_perplexity:.3f} >= {config.STM_STRUCTURAL_THRESHOLD}",
+                weight=self.settings.stm_structural_weight,
+                reason=f"avg_perplexity={avg_perplexity:.3f} >= {self.settings.stm_structural_threshold}",
             )
 
         # --- c) Рутинный шум — отбрасываем без записи в БД ---
@@ -1747,7 +1754,7 @@ class MemoryGraph:
 
         expected = row["reward_expectation"] or 0.0
         rpe = valence - expected
-        new_expectation = max(-1.0, min(1.0, expected + config.REWARD_EXPECTATION_LEARNING_RATE * rpe))
+        new_expectation = max(-1.0, min(1.0, expected + self.settings.reward_expectation_learning_rate * rpe))
 
         self.db.update_reward_expectation(node_id, new_expectation)
 
@@ -1764,8 +1771,7 @@ class MemoryGraph:
             new_expectation=new_expectation,
         )
 
-    @staticmethod
-    def learning_scale(prediction_error: float) -> float:
+    def learning_scale(self, prediction_error: float) -> float:
         """
         Во сколько раз ошибка предсказания награды ускоряет закрепление.
 
@@ -1775,7 +1781,7 @@ class MemoryGraph:
         обнулиться совсем, иначе давно освоенный узел перестал бы получать
         даже поддерживающее подкрепление.
         """
-        return max(config.REWARD_MIN_LEARNING_SCALE, min(1.0, abs(prediction_error)))
+        return max(self.settings.reward_min_learning_scale, min(1.0, abs(prediction_error)))
 
     def penalize_node(
         self,

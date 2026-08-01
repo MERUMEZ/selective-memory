@@ -23,7 +23,6 @@
 
 import sqlite3
 import time
-import config
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from storage.utils.logger import get_logger
@@ -153,8 +152,15 @@ class Database:
         rows = db.fetch_all_nodes()
     """
 
-    def __init__(self, db_path: Optional[str] = None):
-        self.db_path = db_path or config.BRAIN_DB_PATH
+    def __init__(
+        self,
+        db_path: Optional[str] = None,
+        settings: Optional["MemorySettings"] = None,
+    ):
+        from memory.settings import MemorySettings
+
+        self.settings = settings or MemorySettings()
+        self.db_path = db_path or self.settings.db_path
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
@@ -266,7 +272,7 @@ class Database:
         # появилась без DEFAULT.
         cursor.execute(
             "UPDATE nodes SET stability = ? WHERE stability IS NULL",
-            (config.STABILITY_INITIAL,),
+            (self.settings.stability_initial,),
         )
         cursor.execute(
             "UPDATE nodes SET reward_expectation = 0.0 WHERE reward_expectation IS NULL"
@@ -390,9 +396,9 @@ class Database:
             """,
             (
                 ts, ts,
-                config.STABILITY_MAX,
-                config.STABILITY_INITIAL,
-                config.STABILITY_GROWTH_FACTOR,
+                self.settings.stability_max,
+                self.settings.stability_initial,
+                self.settings.stability_growth_factor,
                 node_id,
             ),
         )
@@ -637,7 +643,7 @@ class Database:
 
         Естественное забывание для лексики всё равно происходит — через
         обычный decay до FORGET_THRESHOLD, но на своей шкале времени
-        (config.LEXICAL_AGE_T0, ~30 суток), а не через жёсткий orphan-
+        (self.settings.lexical_age_t0, ~30 суток), а не через жёсткий orphan-
         прунинг сна.
 
         Используется при синаптическом прунинге фазы сна для удаления

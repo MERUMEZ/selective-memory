@@ -36,7 +36,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-import config
+from memory.settings import MemorySettings
 from storage.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -112,14 +112,17 @@ class ReinforcementLoop:
         outcome = loop.apply(valence=0.8, timestamp=brain_time)
     """
 
-    def __init__(self, memory, amygdala):
+    def __init__(self, memory, amygdala, settings: Optional[MemorySettings] = None):
         self.memory = memory
+        # По умолчанию берём настройки самой памяти: контур подкрепления и
+        # граф обязаны жить по одним и тем же константам.
+        self.settings = settings or getattr(memory, "settings", None) or MemorySettings()
         # Нужна ТА ЖЕ инстанция амигдалы, что детектирует маркеры: штрафы и
         # реабилитация доверия должны влиять на последующие разборы реплик.
         self.amygdala = amygdala
         self.last_action_trace: Optional[ActionTrace] = None
         self.feedback_history: "deque[FeedbackHistoryEntry]" = deque(
-            maxlen=config.RETROSPECTIVE_WINDOW_SIZE
+            maxlen=self.settings.retrospective_window_size
         )
 
     # ----------------------------------------------------------------------
@@ -229,7 +232,7 @@ class ReinforcementLoop:
     def _apply_effect(self, trace, valence, learning_scale, timestamp):
         """Усиливает или штрафует задействованные узлы."""
         if valence > 0:
-            boost = valence * config.REWARD_POSITIVE_BOOST * learning_scale
+            boost = valence * self.settings.reward_positive_boost * learning_scale
 
             if trace.node_id is not None:
                 self.memory.reinforce_node(trace.node_id, boost=boost, timestamp=timestamp)
@@ -238,7 +241,7 @@ class ReinforcementLoop:
                 if timestamp is not None:
                     self.memory.touch_node(
                         trace.node_id,
-                        timestamp=timestamp + config.REWARD_POSITIVE_FRESHNESS_BONUS,
+                        timestamp=timestamp + self.settings.reward_positive_freshness_bonus,
                     )
                 logger.info("[REWARD] +%.2f -> узел %s", valence, trace.node_id)
                 return "rewarded", boost
@@ -257,7 +260,7 @@ class ReinforcementLoop:
 
             return "neutral", 0.0
 
-        penalty = abs(valence) * config.REWARD_NEGATIVE_PENALTY * learning_scale
+        penalty = abs(valence) * self.settings.reward_negative_penalty * learning_scale
 
         if trace.node_id is not None:
             self.memory.penalize_node(trace.node_id, penalty=penalty, timestamp=timestamp)
@@ -286,7 +289,7 @@ class ReinforcementLoop:
         усиленной коррекцией и понижает доверие к маркерам, которые к нему
         привели.
         """
-        if not config.RETROSPECTIVE_CORRECTION_ENABLED:
+        if not self.settings.retrospective_correction_enabled:
             return RetrospectiveCorrectionResult(triggered=False)
         if timestamp is None or valence == 0.0:
             return RetrospectiveCorrectionResult(triggered=False)
@@ -298,12 +301,12 @@ class ReinforcementLoop:
                 continue
 
             elapsed = timestamp - entry.timestamp
-            if elapsed < 0 or elapsed > config.RETROSPECTIVE_TIME_WINDOW_SECONDS:
+            if elapsed < 0 or elapsed > self.settings.retrospective_time_window_seconds:
                 continue
 
             # Подтверждённая ложная оценка — куда более сильный обучающий
             # сигнал, чем обычный однократный фидбэк, отсюда множитель.
-            reversal = -entry.applied_delta * config.RETROSPECTIVE_REVERSAL_STRENGTH
+            reversal = -entry.applied_delta * self.settings.retrospective_reversal_strength
             if reversal > 0:
                 self.memory.reinforce_node(entry.node_id, boost=reversal, timestamp=timestamp)
             elif reversal < 0:

@@ -17,7 +17,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque, List, Optional
 
-import config
+from memory.settings import MemorySettings
 
 
 @dataclass
@@ -43,8 +43,13 @@ class WorkingMemory:
             episode = stm.consume_all()  # забрать всё и очистить буфер
     """
 
-    def __init__(self, capacity: Optional[int] = None):
-        self.capacity = capacity if capacity is not None else config.STM_CAPACITY
+    def __init__(
+        self,
+        capacity: Optional[int] = None,
+        settings: Optional[MemorySettings] = None,
+    ):
+        self.settings = settings or MemorySettings()
+        self.capacity = capacity if capacity is not None else self.settings.stm_capacity
         self._buffer: Deque[STMEntry] = deque(maxlen=self.capacity)
 
     def add_message(
