@@ -14,13 +14,13 @@
 
 import pytest
 
-from engram.engram import Engram
-from engram.settings import MemorySettings
+from decaymem import Memory
+from decaymem.settings import MemorySettings
 
 
 @pytest.fixture
 def memory():
-    m = Engram(":memory:")
+    m = Memory(":memory:")
     yield m
     m.close()
 
@@ -103,7 +103,7 @@ def test_time_comes_from_outside():
     навязывает свою шкалу времени всему приложению.
     """
     now = [1000.0]
-    m = Engram(":memory:", clock=lambda: now[0])
+    m = Memory(":memory:", clock=lambda: now[0])
 
     m.observe("важное событие", emotion=0.9)
     now[0] += 30 * 86400.0          # месяц молчания
@@ -119,7 +119,7 @@ def test_recall_resists_forgetting():
     Это эффект интервального повторения, ради него всё и затевалось.
     """
     now = [1000.0]
-    m = Engram(":memory:", clock=lambda: now[0])
+    m = Memory(":memory:", clock=lambda: now[0])
 
     used = m.observe("телефон восемь девятьсот", emotion=0.9)
     unused = m.observe("случайная реплика про дождь", emotion=0.9)
@@ -167,7 +167,7 @@ def test_feedback_needs_no_language(memory):
 
 def test_settings_change_behaviour():
     """Параметры реально доезжают до поведения, а не лежат мёртвым грузом."""
-    strict = Engram(":memory:", settings=MemorySettings(base_plasticity_threshold=0.95))
+    strict = Memory(":memory:", settings=MemorySettings(base_plasticity_threshold=0.95))
     obs = strict.observe("новое событие", emotion=0.3)
     assert not obs.written, "при пороге 0.95 записываться почти ничего не должно"
     strict.close()
@@ -182,7 +182,7 @@ def test_stats_reports_state(memory):
 
 
 def test_context_manager_closes():
-    with Engram(":memory:") as m:
+    with Memory(":memory:") as m:
         m.observe("проверка", emotion=0.9)
     # Закрытие не должно бросать; повторное — тоже
     m.close()

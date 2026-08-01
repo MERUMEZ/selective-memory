@@ -40,7 +40,7 @@ EMBEDDINGS_ENABLED=false — encode() возвращает None, а MemoryGraph.
 import threading
 from typing import List, Optional, Sequence
 
-from engram.settings import MemorySettings
+from decaymem.settings import MemorySettings
 import logging
 
 logger = logging.getLogger(__name__)

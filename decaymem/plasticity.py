@@ -36,7 +36,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from engram.settings import MemorySettings
+from decaymem.settings import MemorySettings
 
 logger = logging.getLogger(__name__)
 

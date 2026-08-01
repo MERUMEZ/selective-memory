@@ -31,13 +31,13 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import List, Optional, Set, TYPE_CHECKING
 
-from engram.database import Database
-from engram.settings import MemorySettings
-from engram import embeddings
+from decaymem.database import Database
+from decaymem.settings import MemorySettings
+from decaymem import embeddings
 import logging
 
 if TYPE_CHECKING:
-    from engram.working_memory import STMEntry
+    from decaymem.working_memory import STMEntry
 
 logger = logging.getLogger(__name__)
 

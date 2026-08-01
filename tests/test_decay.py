@@ -21,8 +21,8 @@ import math
 import pytest
 
 import config
-from engram.database import Database
-from engram.graph_memory import MemoryGraph
+from decaymem.database import Database
+from decaymem.graph_memory import MemoryGraph
 
 
 @pytest.fixture

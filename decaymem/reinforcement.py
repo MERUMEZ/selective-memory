@@ -36,7 +36,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from engram.settings import MemorySettings
+from decaymem.settings import MemorySettings
 import logging
 
 logger = logging.getLogger(__name__)

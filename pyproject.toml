@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "engram-memory"
+name = "decay-memory"
 version = "0.1.0"
 description = "Динамическая память: пишет избирательно, забывает со временем, укрепляет то, что пригодилось"
 readme = "README.md"
@@ -35,10 +35,10 @@ Source = "https://github.com/MERUMEZ/mindnumbness"
 Commercial = "https://github.com/MERUMEZ/mindnumbness/blob/master/COMMERCIAL.md"
 
 [tool.setuptools]
-# Пакет — только engram/. Всё остальное в репозитории (бот, персонаж,
+# Пакет — только decaymem/. Всё остальное в репозитории (бот, персонаж,
 # речевые стадии, мини-апп) это ДЕМОНСТРАЦИЯ памяти, а не сама память,
 # и в дистрибутив не едет.
-packages = ["engram"]
+packages = ["decaymem"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

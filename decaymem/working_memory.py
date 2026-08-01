@@ -17,7 +17,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque, List, Optional
 
-from engram.settings import MemorySettings
+from decaymem.settings import MemorySettings
 
 
 @dataclass

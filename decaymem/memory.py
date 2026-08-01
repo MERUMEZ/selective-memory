@@ -1,10 +1,10 @@
 """
 ================================================================================
- ENGRAM.PY — Публичный фасад динамической памяти
+ MEMORY.PY — Публичный фасад динамической памяти
 ================================================================================
 Пять действий, которых достаточно для работы:
 
-    memory = Engram("brain.db")
+    memory = Memory("brain.db")
 
     obs = memory.observe("меня зовут Паша", "приятно познакомиться")
     memory.feedback(+1.0)                      # "молодец" — закрепить
@@ -46,11 +46,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
-from engram.database import Database
-from engram.graph_memory import MemoryGraph, MemoryMatch
-from engram.plasticity import PlasticityDecision, PlasticityGate
-from engram.reinforcement import ReinforcementLoop, ReinforcementOutcome
-from engram.settings import MemorySettings
+from decaymem.database import Database
+from decaymem.graph_memory import MemoryGraph, MemoryMatch
+from decaymem.plasticity import PlasticityDecision, PlasticityGate
+from decaymem.reinforcement import ReinforcementLoop, ReinforcementOutcome
+from decaymem.settings import MemorySettings
 
 logger = logging.getLogger(__name__)
 
@@ -90,12 +90,12 @@ class MemoryStats:
     threshold: float
 
 
-class Engram:
+class Memory:
     """
     Динамическая память: пишет избирательно, забывает со временем,
     укрепляет то, что пригодилось.
 
-        memory = Engram("brain.db")
+        memory = Memory("brain.db")
         memory.observe("у меня есть кот", "расскажи про него")
         memory.recall("кот")
     """
@@ -269,7 +269,7 @@ class Engram:
     def close(self) -> None:
         self.graph.close()
 
-    def __enter__(self) -> "Engram":
+    def __enter__(self) -> "Memory":
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:

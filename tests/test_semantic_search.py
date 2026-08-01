@@ -20,9 +20,9 @@ SequenceMatcher по целым строкам. Замер на реальном
 import pytest
 
 import config
-from engram.database import Database
-from engram.graph_memory import MemoryGraph
-from engram import embeddings
+from decaymem.database import Database
+from decaymem.graph_memory import MemoryGraph
+from decaymem import embeddings
 
 requires_model = pytest.mark.skipif(
     not embeddings.is_available(),
