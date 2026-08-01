@@ -22,9 +22,9 @@ import random
 
 import pytest
 
-from decaymem.database import Database
-from decaymem.graph_memory import MemoryGraph
-from decaymem.settings import MemorySettings
+from selectivemem.database import Database
+from selectivemem.graph_memory import MemoryGraph
+from selectivemem.settings import MemorySettings
 
 WORDS = (
     "кот собака дом работа книга город море еда музыка друг "
@@ -108,7 +108,7 @@ def test_search_survives_without_embeddings(monkeypatch):
     необязательна, и поиск обязан продолжать работать — иначе обещание
     "ставится куда угодно" неверно.
     """
-    from decaymem import embeddings
+    from selectivemem import embeddings
 
     monkeypatch.setattr(embeddings, "encode", lambda text: None)
 

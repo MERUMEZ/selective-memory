@@ -68,11 +68,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional
 
-from decaymem.database import Database
-from decaymem.graph_memory import MemoryGraph, MemoryMatch
-from decaymem.plasticity import PlasticityDecision, PlasticityGate
-from decaymem.reinforcement import ReinforcementLoop, ReinforcementOutcome
-from decaymem.settings import MemorySettings
+from selectivemem.database import Database
+from selectivemem.graph_memory import MemoryGraph, MemoryMatch
+from selectivemem.plasticity import PlasticityDecision, PlasticityGate
+from selectivemem.reinforcement import ReinforcementLoop, ReinforcementOutcome
+from selectivemem.settings import MemorySettings
 
 logger = logging.getLogger(__name__)
 

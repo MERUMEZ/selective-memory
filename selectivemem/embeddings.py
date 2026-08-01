@@ -71,7 +71,7 @@ EMBEDDINGS_ENABLED=false — encode() возвращает None, а MemoryGraph.
 import threading
 from typing import List, Optional, Sequence
 
-from decaymem.settings import MemorySettings
+from selectivemem.settings import MemorySettings
 import logging
 
 logger = logging.getLogger(__name__)

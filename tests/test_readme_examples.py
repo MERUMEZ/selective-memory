@@ -17,7 +17,7 @@
 ================================================================================
 """
 
-from decaymem import Memory, MemorySettings
+from selectivemem import Memory, MemorySettings
 
 
 def test_quickstart_block():
@@ -30,9 +30,10 @@ def test_quickstart_block():
 
     assert important.written, "факт обязан записаться"
     assert not routine.written, "междометие записываться не должно"
-    assert memory.context_for("какие у меня аллергии") == (
-        "- у меня аллергия на пенициллин"
-    )
+    # Запрос словом ИЗ записи. README теперь честно предупреждает, что
+    # базовая установка ищет по словам: без кодировщика "какие у меня
+    # аллергии" не находит ничего, и первая версия README это обещала.
+    assert memory.context_for("аллергия") == "- у меня аллергия на пенициллин"
     memory.close()
 
 

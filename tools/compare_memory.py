@@ -152,8 +152,8 @@ def build_baseline_store(
     забывания. order задаёт приоритет отбора, char_budget — сколько
     символов разрешено (None = без ограничения).
     """
-    from decaymem.database import Database
-    from decaymem.graph_memory import MemoryGraph
+    from selectivemem.database import Database
+    from selectivemem.graph_memory import MemoryGraph
 
     graph = MemoryGraph(db=Database(db_path=":memory:"))
     used = 0

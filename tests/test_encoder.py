@@ -20,9 +20,9 @@
 
 import pytest
 
-from decaymem import Memory
-from decaymem.database import Database
-from decaymem.graph_memory import MemoryGraph
+from selectivemem import Memory
+from selectivemem.database import Database
+from selectivemem.graph_memory import MemoryGraph
 
 EN_VOCAB = "cat dog pet animal house home city sea food music friend work book".split()
 RU_VOCAB = "кот собака дом город море еда музыка друг работа книга".split()
@@ -134,11 +134,11 @@ def test_stale_vectors_are_recomputed_not_reused():
 def test_module_level_patching_still_works(monkeypatch):
     """
     Кодировщик по умолчанию резолвится НА ВЫЗОВЕ, а не связывается в
-    конструкторе. Иначе подмена decaymem.embeddings.encode снаружи
+    конструкторе. Иначе подмена selectivemem.embeddings.encode снаружи
     (тесты, стенды, отключение семантики на ходу) молча перестаёт
     действовать — на это уже наступали с заглушкой LLM.
     """
-    from decaymem import embeddings
+    from selectivemem import embeddings
 
     graph = MemoryGraph(db=Database(db_path=":memory:"))
     monkeypatch.setattr(embeddings, "encode", lambda text: None)

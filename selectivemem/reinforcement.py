@@ -48,7 +48,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from decaymem.settings import MemorySettings
+from selectivemem.settings import MemorySettings
 import logging
 
 logger = logging.getLogger(__name__)

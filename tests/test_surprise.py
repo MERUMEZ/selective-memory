@@ -21,8 +21,8 @@
 import pytest
 
 import config
-from decaymem.database import Database
-from decaymem.graph_memory import MemoryGraph
+from selectivemem.database import Database
+from selectivemem.graph_memory import MemoryGraph
 
 PHRASE = "мама мыла раму"
 
@@ -71,7 +71,7 @@ def test_short_utterance_cannot_surprise_much(mg):
     # Порог сравнивается не с удивлением, а с ПЛОТНОСТЬЮ (эмоция +
     # удивление пополам) — на это и надо проверять, иначе тест меряет не
     # тот механизм.
-    from decaymem.plasticity import PlasticityGate
+    from selectivemem.plasticity import PlasticityGate
 
     gate = PlasticityGate()
     assert not gate.evaluate(emotion=0.0, surprise=interjection).is_spike

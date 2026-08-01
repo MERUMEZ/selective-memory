@@ -21,8 +21,8 @@ import math
 import pytest
 
 import config
-from decaymem.database import Database
-from decaymem.graph_memory import MemoryGraph
+from selectivemem.database import Database
+from selectivemem.graph_memory import MemoryGraph
 
 
 @pytest.fixture

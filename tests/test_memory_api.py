@@ -14,8 +14,8 @@
 
 import pytest
 
-from decaymem import Memory
-from decaymem.settings import MemorySettings
+from selectivemem import Memory
+from selectivemem.settings import MemorySettings
 
 
 @pytest.fixture

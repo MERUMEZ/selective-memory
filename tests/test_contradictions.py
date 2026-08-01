@@ -19,9 +19,9 @@
 import pytest
 
 import config
-from decaymem.database import Database
-from decaymem.graph_memory import MemoryGraph
-from decaymem import embeddings
+from selectivemem.database import Database
+from selectivemem.graph_memory import MemoryGraph
+from selectivemem import embeddings
 
 requires_model = pytest.mark.skipif(
     not embeddings.is_available(),

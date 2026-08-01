@@ -48,7 +48,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from decaymem.settings import MemorySettings
+from selectivemem.settings import MemorySettings
 
 logger = logging.getLogger(__name__)
 

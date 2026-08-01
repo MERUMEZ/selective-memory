@@ -43,13 +43,13 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Callable, List, Optional, Set, TYPE_CHECKING
 
-from decaymem.database import Database
-from decaymem.settings import MemorySettings
-from decaymem import embeddings
+from selectivemem.database import Database
+from selectivemem.settings import MemorySettings
+from selectivemem import embeddings
 import logging
 
 if TYPE_CHECKING:
-    from decaymem.working_memory import STMEntry
+    from selectivemem.working_memory import STMEntry
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +267,7 @@ class MemoryGraph:
         #
         # Библиотека НЕ ВОЗИТ С СОБОЙ МОДЕЛЬ и не выбирает её за
         # пользователя. Это же и снимает вопрос "а на каком языке
-        # работает decaymem": на том, на котором работает переданный
+        # работает selectivemem": на том, на котором работает переданный
         # кодировщик.
         # Хранится ИМЕННО переданное значение, а не embeddings.encode по
         # умолчанию: связать функцию здесь — значит намертво прибить

@@ -21,7 +21,7 @@
 
 import pytest
 
-from decaymem import Memory, MemorySettings
+from selectivemem import Memory, MemorySettings
 
 YEAR = 365 * 86400
 
