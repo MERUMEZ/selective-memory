@@ -178,3 +178,34 @@ def test_encode_handles_degenerate_input():
 def test_cosine_is_safe_on_missing_vectors():
     assert embeddings.cosine(None, None) == 0.0
     assert embeddings.similarity("привет", None) == 0.0
+
+
+def test_built_in_model_is_blind_to_professional_domains():
+    """
+    ЗАФИКСИРОВАННОЕ ОГРАНИЧЕНИЕ ДОМЕНА, а не размера модели.
+
+    navec обучена на художественной литературе. Слова из
+    профессиональных областей в её словаре ЕСТЬ, но связаны они по
+    литературным смыслам: "язык" — орган или речь, "python" — змея.
+
+    Это не абстракция. Живой замер: память "я предпочитаю Python, не
+    Java" не находится по запросу "какой язык я люблю" и прекрасно
+    находится по "какой язык программирования я предпочитаю". Узел цел,
+    вес после месяца молчания 0.071 — не находится ровно формулировка из
+    чужого домена.
+
+    Тест закреплён, чтобы это не выдавали за дефект памяти и чтобы при
+    смене модели на доменную он упал и напомнил пересмотреть текст в
+    README.
+    """
+    if not embeddings.is_available():
+        pytest.skip("модель эмбеддингов недоступна")
+
+    everyday = embeddings.cosine(embeddings.encode("люблю"), embeddings.encode("предпочитаю"))
+    technical = embeddings.cosine(embeddings.encode("язык"), embeddings.encode("программирование"))
+
+    assert everyday > 0.4, "бытовые синонимы модель обязана связывать"
+    assert technical < 0.3, (
+        "если профессиональная связь вдруг появилась — модель сменили, "
+        "и раздел про домен в README пора переписать"
+    )
