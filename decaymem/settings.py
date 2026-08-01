@@ -74,6 +74,10 @@ class MemorySettings:
     lexical_max_tokens_per_input: int = 20
     lexical_min_token_length: int = 2
     memory_fuzzy_weight: float = 0.1
+    # Максимальная высота пола угасания: до какого веса может опуститься
+    # узел с полностью заслуженным одобрением (reward_expectation = 1.0).
+    # Ноль отключает пол и возвращает прежнее поведение.
+    memory_floor_max: float = 0.25
     memory_keyword_weight: float = 0.3
     memory_min_keyword_length: int = 3
     memory_search_threshold: float = 0.3

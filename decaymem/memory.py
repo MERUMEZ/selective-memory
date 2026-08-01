@@ -243,9 +243,37 @@ class Memory:
         сопротивляется забыванию (эффект интервального повторения).
         """
         ts = timestamp if timestamp is not None else self.clock()
-        return self.graph.search(
+        matches = self.graph.search(
             query, top_k=top_k, timestamp=ts, with_associations=with_associations,
         )
+        self._remember_used([m.id for m in matches])
+        return matches
+
+    def _remember_used(self, node_ids: List[int]) -> None:
+        """
+        Отмечает узлы как ЗАДЕЙСТВОВАННЫЕ в текущем действии, чтобы
+        следующий feedback() достался и им.
+
+        Без этого похвала доставалась только что ЗАПИСАННОМУ узлу — а у
+        ассистента похвала обычно следует за хорошим ответом, построенным
+        на ВСПОМНЕННОМ. То есть главный случай ("ты правильно вспомнил
+        мою аллергию — молодец") не подкреплял вообще ничего, и
+        ожидание награды навсегда застревало на величине одной первой
+        похвалы. Замер: восемь похвал подряд давали то же ожидание 0.300,
+        что и одна.
+
+        Узлы НАКАПЛИВАЮТСЯ в пределах хода: приложение вправе позвать
+        recall несколько раз перед ответом, и оценка относится ко всему
+        ответу целиком.
+        """
+        trace = self.loop.last_action_trace
+        if trace is None or not node_ids:
+            return
+        existing = list(trace.node_ids or [])
+        for node_id in node_ids:
+            if node_id not in existing and node_id != trace.node_id:
+                existing.append(node_id)
+        trace.node_ids = existing
 
     def context_for(self, query: str, top_k: int = 3, timestamp: Optional[float] = None) -> str:
         """
