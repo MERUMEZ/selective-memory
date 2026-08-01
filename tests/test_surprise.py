@@ -42,11 +42,40 @@ def _teach(graph: MemoryGraph, text: str, times: int) -> None:
 # 1. Новорождённому всё ново
 # ---------------------------------------------------------------------------
 def test_newborn_is_maximally_surprised(mg):
-    result = mg.compute_surprise(PHRASE)
+    """
+    Новорождённому ново всё — но только если реплике есть чем удивить.
+    Удивление умножается на долю набранного содержания (см.
+    surprise_full_content_tokens), поэтому проверять максимум надо на
+    ПОЛНОЙ реплике, а не на трёх словах.
+    """
+    result = mg.compute_surprise("мама мыла раму белым мылом дважды")
 
     assert result.total == pytest.approx(1.0)
     assert result.known_words == 0
     assert result.known_pairs == 0
+
+
+def test_short_utterance_cannot_surprise_much(mg):
+    """
+    Междометие ново ровно так же, как факт, но информации в нём нет.
+    Без этой поправки библиотека записывала "ага" и "спасибо" наравне с
+    "у меня аллергия на пенициллин" — замер на потоке, похожем на
+    переписку с ассистентом, показал это на первом же дне.
+    """
+    interjection = mg.compute_surprise("ага").total
+    fact = mg.compute_surprise("у меня аллергия на пенициллин").total
+
+    assert interjection < fact
+    assert fact == pytest.approx(1.0)
+
+    # Порог сравнивается не с удивлением, а с ПЛОТНОСТЬЮ (эмоция +
+    # удивление пополам) — на это и надо проверять, иначе тест меряет не
+    # тот механизм.
+    from decaymem.plasticity import PlasticityGate
+
+    gate = PlasticityGate()
+    assert not gate.evaluate(emotion=0.0, surprise=interjection).is_spike
+    assert gate.evaluate(emotion=0.0, surprise=fact).is_spike
 
 
 # ---------------------------------------------------------------------------
@@ -76,10 +105,12 @@ def test_experienced_brain_still_surprised_by_the_unknown(mg):
     _teach(mg, PHRASE, times=20)
 
     familiar = mg.compute_surprise(PHRASE).total
-    gibberish = mg.compute_surprise("ЫФВАПРОЛДЖ ЙЦУКЕН").total
+    # Тарабарщина той же длины, что и выученная фраза: сравнивать надо
+    # при равном объёме содержания, иначе меряется длина, а не новизна.
+    gibberish = mg.compute_surprise("ЫФВАПРОЛДЖ ЙЦУКЕН ЩЗХЪЭЖ").total
 
     assert familiar == pytest.approx(0.0, abs=1e-9)
-    assert gibberish == pytest.approx(1.0), "незнакомые слова обязаны удивлять и опытный мозг"
+    assert gibberish > 0.7, "незнакомые слова обязаны удивлять и опытный мозг"
 
 
 def test_new_word_in_familiar_frame_is_partially_surprising(mg):
@@ -129,11 +160,13 @@ def test_single_token_uses_lexical_component_only(mg):
     result = mg.compute_surprise("привет")
 
     assert result.total_pairs == 0
-    assert result.total == pytest.approx(result.lexical)
-    assert result.total == pytest.approx(1.0), "незнакомое слово удивляет полностью"
+    # lexical — чистая незнакомость слова, total — она же с поправкой на
+    # объём содержания. Для одного токена поправка максимальная.
+    assert result.lexical == pytest.approx(1.0)
+    assert result.total < result.lexical, "одно слово не может удивить в полную силу"
 
     _teach(mg, "привет", times=5)
-    assert mg.compute_surprise("привет").total < 0.5
+    assert mg.compute_surprise("привет").total < result.total
 
 
 def test_surprise_stays_within_unit_range(mg):

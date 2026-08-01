@@ -98,6 +98,9 @@ class MemorySettings:
     stm_emotional_threshold: float = 0.6
     stm_structural_threshold: float = 0.55
     stm_structural_weight: float = 0.5
+    # При скольких содержательных словах реплика считается способной
+    # удивить в полную силу. Меньше — удивление пропорционально урезается.
+    surprise_full_content_tokens: int = 2
     surprise_lexical_weight: float = 0.6
     surprise_structural_weight: float = 0.4
     syllable_node_initial_weight: float = 0.1
