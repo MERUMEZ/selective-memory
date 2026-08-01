@@ -251,7 +251,7 @@ class MemoryGraph:
     # ----------------------------------------------------------------------
 
 
-    def get_or_create_brain_epoch(self) -> float:
+    def get_or_create_brain_epoch(self, now: Optional[float] = None) -> float:
         """
         Точка отсчёта субъективного времени, ПЕРЕЖИВАЮЩАЯ перезагрузку.
 
@@ -271,7 +271,12 @@ class MemoryGraph:
             except (TypeError, ValueError):
                 logger.warning("[BRAIN EPOCH] Повреждённое значение — ставлю заново")
 
-        epoch = time.time()
+        # now передаёт приложение — тем же источником времени, который
+        # получат часы. Иначе эпоха берётся из настоящих time.time() и
+        # отличается от запуска к запуску даже там, где всё остальное
+        # зафиксировано: у стенда расходились ответы уже на первом
+        # сообщении при побитово одинаковом графе и состоянии генератора.
+        epoch = now if now is not None else time.time()
         self.db.upsert_meta_node(
             node_type="brain_epoch", content=str(epoch), weight=1.0, timestamp=epoch,
         )
