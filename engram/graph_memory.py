@@ -31,13 +31,13 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import List, Optional, Set, TYPE_CHECKING
 
-from memory.database import Database
-from memory.settings import MemorySettings
-from services import embeddings
+from engram.database import Database
+from engram.settings import MemorySettings
+from engram import embeddings
 import logging
 
 if TYPE_CHECKING:
-    from memory.working_memory import STMEntry
+    from engram.working_memory import STMEntry
 
 logger = logging.getLogger(__name__)
 

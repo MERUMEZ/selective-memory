@@ -21,8 +21,8 @@
 import pytest
 
 import config
-from memory.database import Database
-from memory.graph_memory import MemoryGraph
+from engram.database import Database
+from engram.graph_memory import MemoryGraph
 
 PHRASE = "мама мыла раму"
 

@@ -40,10 +40,10 @@ EMBEDDINGS_ENABLED=false — encode() возвращает None, а MemoryGraph.
 import threading
 from typing import List, Optional, Sequence
 
-from memory.settings import MemorySettings
-from storage.utils.logger import get_logger
+from engram.settings import MemorySettings
+import logging
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # Служебные слова: их вектора забивают среднее и стирают смысл фразы.
 # Набор намеренно шире, чем STOP_WORDS в graph_memory (там он отсекает

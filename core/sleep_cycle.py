@@ -40,12 +40,12 @@ from dataclasses import dataclass, field
 from typing import List, Optional, TYPE_CHECKING
 
 import config
-from memory.graph_memory import MemoryGraph, HubCluster
+from engram.graph_memory import MemoryGraph, HubCluster
 from services.llm import generate_llm_response
 from storage.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from memory.working_memory import WorkingMemory
+    from engram.working_memory import WorkingMemory
     from core.instincts import InstinctSystem
     from core.mood import Mood
 

@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "engram-memory"
+version = "0.1.0"
+description = "Динамическая память: пишет избирательно, забывает со временем, укрепляет то, что пригодилось"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "MERUMEZ", email = "selectivemem@gmail.com" }]
+keywords = ["memory", "forgetting", "agent", "llm", "spaced-repetition", "npc"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# ЗАВИСИМОСТЕЙ НЕТ. Ядро живёт на стандартной библиотеке и sqlite3.
+# Это не аскеза, а требование: пакет должен ставиться туда, где 3.7 ГБ
+# памяти на всю машину, и запускаться там, где нет ни torch, ни сети.
+dependencies = []
+
+[project.optional-dependencies]
+# Семантический поиск. Без него память ищет по строковому сходству и
+# продолжает работать — деградация мягкая, а не отказ.
+semantic = ["navec>=0.10", "numpy>=1.24"]
+dev = ["pytest>=8.0"]
+
+[project.urls]
+Source = "https://github.com/MERUMEZ/mindnumbness"
+Commercial = "https://github.com/MERUMEZ/mindnumbness/blob/master/COMMERCIAL.md"
+
+[tool.setuptools]
+# Пакет — только engram/. Всё остальное в репозитории (бот, персонаж,
+# речевые стадии, мини-апп) это ДЕМОНСТРАЦИЯ памяти, а не сама память,
+# и в дистрибутив не едет.
+packages = ["engram"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

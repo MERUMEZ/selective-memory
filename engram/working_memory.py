@@ -17,7 +17,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque, List, Optional
 
-from memory.settings import MemorySettings
+from engram.settings import MemorySettings
 
 
 @dataclass

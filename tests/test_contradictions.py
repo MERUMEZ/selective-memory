@@ -19,9 +19,9 @@
 import pytest
 
 import config
-from memory.database import Database
-from memory.graph_memory import MemoryGraph
-from services import embeddings
+from engram.database import Database
+from engram.graph_memory import MemoryGraph
+from engram import embeddings
 
 requires_model = pytest.mark.skipif(
     not embeddings.is_available(),

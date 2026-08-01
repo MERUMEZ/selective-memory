@@ -85,6 +85,7 @@ class MemorySettings:
     sleep_orphan_weight_threshold: float = 0.3
     stability_growth_factor: float = 1.5
     stability_initial: float = 1.0
+    plasticity_stress_modifier: float = 0.25
     stability_max: float = 40.0
     stm_capacity: int = 16
     stm_emotional_threshold: float = 0.6

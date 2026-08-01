@@ -158,7 +158,7 @@ class Database:
         db_path: Optional[str] = None,
         settings: Optional["MemorySettings"] = None,
     ):
-        from memory.settings import MemorySettings
+        from engram.settings import MemorySettings
 
         self.settings = settings or MemorySettings()
         self.db_path = db_path or self.settings.db_path
