@@ -370,7 +370,8 @@ def test_memory_node_count_ignores_lexical_infrastructure(mg):
     mg.db.insert_node(context="разговор", response="ответ", weight=0.8,
                       timestamp=0.0, node_type="episodic")
     mg.db.upsert_concept_node("кошка", "животное", weight=0.7, timestamp=0.0)
-    mg.ensure_self_and_user_nodes()
+    from core.persona_memory import PersonaMemory
+    PersonaMemory(memory=mg).ensure_self_and_user_nodes()
     for token in ("мама", "мыла", "раму", "папа", "чинил"):
         mg.db.upsert_lexical_node("word", token, initial_weight=0.12,
                                   reinforce_step=0.04, timestamp=0.0)

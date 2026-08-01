@@ -76,6 +76,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 if "--logs" not in sys.argv:
     os.environ["LOG_LEVEL"] = "ERROR"
 
+# СТЕНД ВСЕГДА МЕРИТ ИССЛЕДОВАТЕЛЬСКУЮ КОНФИГУРАЦИЮ.
+#
+# SPEECH_DEMO_PACE ускоряет речевые стадии для показа, но при этом
+# ИСКАЖАЕТ измерение: организм раньше выходит на генерацию, чаще
+# обращается к памяти, всё подряд получает стабильность — и
+# избирательность удержания исчезает. Замер показал 100% против 100%
+# (разрыв +0) вместо честных 97% против 57% (+40 п.п.).
+#
+# Ускорять демонстрацию можно, мерить ускоренную — нельзя: это другая
+# система. Поэтому темп прибит здесь, до импорта config.
+os.environ.setdefault("SPEECH_DEMO_PACE", "false")
+
+
 import config  # noqa: E402
 from tools.compare_memory import build_baseline_store, is_hit, store_size  # noqa: E402
 from tools.simulate_learning import install_llm_stub  # noqa: E402

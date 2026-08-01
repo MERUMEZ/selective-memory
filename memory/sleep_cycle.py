@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, TYPE_CHECKING
 
 import config
-from memory.graph_memory import MemoryGraph, HubCluster, SelfModelEvolutionResult
+from memory.graph_memory import MemoryGraph, HubCluster
 from services.llm import generate_llm_response
 from storage.utils.logger import get_logger
 
@@ -73,7 +73,7 @@ class SleepSummary:
     stm_entries_flushed: int = 0
     duration_seconds: float = 0.0
     llm_unavailable: bool = False
-    self_model_evolution: Optional[SelfModelEvolutionResult] = None
+    self_model_evolution: Optional[object] = None
 
     @property
     def abstract_nodes_created(self) -> int:
@@ -134,6 +134,7 @@ class SleepCycle:
         stm: Optional["WorkingMemory"] = None,
         instincts: Optional["InstinctSystem"] = None,
         mood: Optional["Mood"] = None,
+        persona=None,
     ):
         self.memory = memory
         self.stm = stm
@@ -141,6 +142,8 @@ class SleepCycle:
         # Сон сбрасывает возбуждение — единую ось нагрузки, которая
         # теперь живёт в Mood, а не в InstinctSystem
         self.mood = mood
+        # Рефлексия над личностью — дело персонажа, не памяти
+        self.persona = persona
 
     # ----------------------------------------------------------------------
     # Точка входа: полный цикл фазы сна
@@ -183,7 +186,9 @@ class SleepCycle:
                 summary.llm_unavailable = True
 
         # --- Шаг 2.5: Эволюция Self-Model (рефлексия над пережитым опытом) ---
-        summary.self_model_evolution = self.memory.evolve_self_model(timestamp=ts)
+        summary.self_model_evolution = (
+            self.persona.evolve_self_model(timestamp=ts) if self.persona else None
+        )
 
         # --- Шаг 3: Сброс физиологического состояния ---
         if self.mood is not None:
