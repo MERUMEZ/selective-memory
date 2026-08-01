@@ -34,13 +34,12 @@ from typing import List, Optional, Set, TYPE_CHECKING
 from memory.database import Database
 from memory.settings import MemorySettings
 from services import embeddings
-from services.llm import generate_llm_response
-from storage.utils.logger import get_logger
+import logging
 
 if TYPE_CHECKING:
     from memory.working_memory import STMEntry
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 STOP_WORDS: Set[str] = {
     "и", "в", "на", "с", "по", "к", "у", "из", "за", "от", "до", "для",

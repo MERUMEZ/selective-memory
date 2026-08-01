@@ -25,9 +25,9 @@ import sqlite3
 import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from storage.utils.logger import get_logger
+import logging
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS nodes (
