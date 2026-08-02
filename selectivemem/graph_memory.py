@@ -706,68 +706,69 @@ class MemoryGraph:
 
     def get_vocabulary_size(self) -> int:
         """
-        Возвращает количество ЗАКРЕПЛЁННЫХ (усвоенных) слов — word-узлов
-        с weight >= VOCABULARY_MASTERY_MIN_WEIGHT. Слово, услышанное один
-        раз, создаёт узел с низким начальным весом и НЕ считается здесь,
-        пока не будет повторено пользователем ещё несколько раз (см.
-        WORD_NODE_INITIAL_WEIGHT/WORD_NODE_REINFORCE_STEP). Используется
-        для гейтинга стадии речевого развития (Cortex._resolve_speech_stage)
-        и для пользовательского /status — то есть отражает то, что бот
-        реально ОСВОИЛ, а не всё, что когда-либо пролетело через него.
+        The number of CONSOLIDATED words — word nodes with
+        weight >= vocabulary_mastery_min_weight. A word heard once creates
+        a node with a low initial weight and does NOT count here until the
+        user has repeated it a few more times. Used to gate the stage of
+        speech development and for the user-facing status report, so it
+        reflects what the bot has genuinely LEARNED rather than everything
+        that ever passed through it.
         """
         return self.db.count_mastered_words(self.settings.vocabulary_mastery_min_weight)
 
     def get_exposed_vocabulary_size(self) -> int:
         """
-        Общее количество РАЗЛИЧНЫХ слов, которые бот хотя бы раз услышал,
-        независимо от закрепления — "пассивный" словарь. Только для
-        статистики/отладки (например, разница между этим числом и
-        get_vocabulary_size() показывает, сколько слов ещё "на подходе" к
-        усвоению). НЕ используется для гейтинга речевых стадий.
+        The total number of DISTINCT words the bot has heard at least
+        once, consolidated or not — the passive vocabulary. For statistics
+        and debugging only: the gap between this and get_vocabulary_size()
+        shows how many words are still on their way to being learned. NOT
+        used to gate speech stages.
         """
         return self.db.count_nodes_by_type("word")
 
     def get_mastered_words_in(self, text: str) -> List[KnownWord]:
         """
-        Какие слова ВХОДЯЩЕГО сообщения организм действительно освоил —
-        в порядке появления в тексте.
+        Which words of an INCOMING message the organism has actually
+        mastered, in the order they appear in the text.
 
-        Это первый случай, когда выученный словарь влияет на то, ЧТО бот
-        говорит, а не только на счётчик, разрешающий говорить. Раньше
-        знание слова existed исключительно как число: бот мог знать
-        "привет" лучше всех своих слов (вес 0.747) и всё равно отвечать
-        на приветствие случайными слогами, потому что до генерации
-        доходил только len(словаря).
+        This is the first place where the learned vocabulary affects WHAT
+        the bot says, rather than only the counter that permits it to
+        speak. Knowing a word used to exist purely as a number: the bot
+        could know "hello" better than any other word it had (weight
+        0.747) and still answer a greeting with random syllables, because
+        all that reached generation was the size of the vocabulary.
 
-        Освоенным считается слово с весом >= VOCABULARY_MASTERY_MIN_WEIGHT,
-        то есть та же планка, что и в get_vocabulary_size — иначе бот
-        произносил бы слова, которые сам же не считает выученными.
+        A word counts as mastered at weight >=
+        vocabulary_mastery_min_weight — the same bar as in
+        get_vocabulary_size, or the bot would utter words it does not
+        itself consider learned.
         """
         return self._words_in(text, mastered=True)
 
     def get_emerging_words_in(self, text: str) -> List[KnownWord]:
         """
-        Слова входящей фразы, которые организм УЖЕ СЛЫШАЛ, но ещё НЕ
-        ОСВОИЛ — его зона ближайшего развития.
+        Words of the incoming phrase the organism HAS HEARD but has NOT
+        yet MASTERED — its zone of proximal development.
 
-        Это кандидаты на ИССЛЕДОВАНИЕ. До сих пор в архитектуре не было
-        вообще никакого механизма попробовать неосвоенное: организм только
-        эксплуатировал уже выученное, а всё остальное превращал в лепет.
-        Чисто эксплуатирующая система не развивается — она сходится и
-        застывает.
+        These are the candidates for EXPLORATION. Until this existed the
+        architecture had no mechanism at all for trying the unmastered:
+        the organism only exploited what it already knew and turned
+        everything else into babble. A purely exploiting system does not
+        develop — it converges and freezes.
 
-        Именно такие слова, а не совсем незнакомые: пробовать то, что
-        далеко за пределами текущей компетенции, бессмысленно — попытка
-        провалится и ничему не научит. Учение происходит на границе
-        освоенного.
+        These words specifically, rather than wholly unfamiliar ones:
+        attempting something far beyond current competence is pointless —
+        the attempt fails and teaches nothing. Learning happens at the
+        edge of what is already known.
         """
         return self._words_in(text, mastered=False)
 
     def _words_in(self, text: str, mastered: bool) -> List[KnownWord]:
         """
-        Общая выборка слов входящей фразы по порогу освоенности.
-        mastered=True  -> вес >= VOCABULARY_MASTERY_MIN_WEIGHT (свои слова)
-        mastered=False -> вес <  порога (услышанные, но ещё не закреплённые)
+        Shared selection of words from an incoming phrase by the mastery
+        threshold.
+        mastered=True  -> weight >= vocabulary_mastery_min_weight (its own words)
+        mastered=False -> weight below it (heard, but not yet consolidated)
         """
         tokens = self._tokenize_for_lexicon(text)
         if not tokens:
@@ -793,10 +794,11 @@ class MemoryGraph:
                         text=token,
                         weight=weight,
                         reward_expectation=expectation,
-                        # Предпочтение = освоенность + склонность к тому, за
-                        # что хвалили. Вес остаётся главным критерием, иначе
-                        # организм начнёт говорить редкими, но однажды
-                        # похваленными словами вместо тех, которыми владеет.
+                        # Preference = mastery plus a leaning towards what
+                        # earned praise. Weight remains the main criterion,
+                        # or the organism would start speaking in rare
+                        # words that were praised once instead of the ones
+                        # it actually commands.
                         preference=weight + expectation * self.settings.reward_preference_weight,
                     )
                 )
@@ -804,21 +806,21 @@ class MemoryGraph:
 
     def get_top_words(self, limit: int = 8) -> List["tuple[str, float]"]:
         """
-        Самые освоенные слова (текст, вес) — для команды /status.
-        Показывает учителю, что реально закрепилось в языке бота.
+        The best-mastered words (text, weight) — for a status report.
+        Shows the teacher what has actually taken hold in the bot's
+        language.
         """
         rows = self.db.get_top_nodes_by_type("word", limit=limit)
         return [(row["context"], row["weight"]) for row in rows]
 
     def get_known_syllables(self, limit: Optional[int] = None) -> List[KnownSyllable]:
         """
-        Возвращает пул известных слогов (id, text, weight) — кандидатов для
-        ВЗВЕШЕННОГО выбора в babbling-подсистеме (InstinctSystem.
-        generate_babble_response). Пул случайный на уровне БД (ORDER BY
-        RANDOM()), но каждый элемент несёт свой реальный вес — взвешенная
-        выборка происходит уже в InstinctSystem, не здесь.
+        A pool of known syllables (id, text, weight) — candidates for the
+        WEIGHTED choice made by the babbling subsystem. The pool itself is
+        sampled at random, but every element carries its real weight; the
+        weighted draw happens in the caller, not here.
 
-        limit по умолчанию берётся из self.settings.babbling_syllable_pool_size.
+        `limit` defaults to settings.babbling_syllable_pool_size.
         """
         effective_limit = limit if limit is not None else self.settings.babbling_syllable_pool_size
         rows = self.db.get_random_nodes_by_type("syllable", limit=effective_limit)
@@ -829,7 +831,7 @@ class MemoryGraph:
 
 
     # ----------------------------------------------------------------------
-    # 1. Сохранение новой связи
+    # 1. Storing a new link
     # ----------------------------------------------------------------------
 
     def find_superseded(
@@ -839,32 +841,35 @@ class MemoryGraph:
         explicit_correction: bool = False,
     ) -> List["SupersededNode"]:
         """
-        Какие существующие воспоминания ВЫТЕСНЯЕТ новое.
+        Which existing memories a new one SUPERSEDES.
 
-        Без этого память копила взаимоисключающие факты и отдавала
-        случайный: "мою собаку зовут Рекс", позже "мою собаку зовут Бобик" —
-        оба узла равноправны, причём устаревший находился ЛУЧШЕ (0.906
-        против 0.875), потому что порядок решает сходство строк, а не время.
+        Without this, memory piled up mutually exclusive facts and
+        returned an arbitrary one: "my dog is called Rex", later "my dog is
+        called Buddy" — both nodes equal, and the stale one actually
+        scoring BETTER (0.906 against 0.875), because the ranking is
+        decided by string similarity rather than by time.
 
-        Признак вытеснения — два условия сразу:
-          1. высокая СЕМАНТИЧЕСКАЯ близость: речь об одном и том же;
-          2. НЕПОЛНОЕ словесное совпадение: значит это другая версия, а не
-             повтор. Чистый повтор обязан просто подкреплять узел.
+        Supersession requires two conditions at once:
+          1. high SEMANTIC similarity: they are about the same thing;
+          2. INCOMPLETE word overlap: this is a different version, not a
+             repetition. A plain repetition must simply reinforce the node.
 
-        explicit_correction — пользователь явно поправил ("нет",
-        "неправильно"). Это сильное свидетельство, поэтому порог темы
-        снижается: без маркера мы осторожничаем, с маркером доверяем.
+        explicit_correction means the user corrected something outright
+        ("no", "that's wrong"). That is strong evidence, so the topic
+        threshold is lowered: without such a marker we are cautious, with
+        one we trust.
 
-        Порог намеренно высокий. Ошибиться в сторону "пропустил
-        противоречие" дешевле, чем ослабить независимое воспоминание —
-        хотя и второе не катастрофа, потому что узлы ослабляются, а не
-        удаляются (см. supersede_node).
+        The threshold is deliberately high. Erring towards "missed a
+        contradiction" is cheaper than weakening an independent memory —
+        though even that is no catastrophe, because nodes are weakened
+        rather than deleted (see supersede_node).
         """
         query_vector = self._encode(text)
         if query_vector is None:
-            # Без семантики отличить "другую версию" от "другой темы"
-            # нечем: строковое сходство одинаково высоко и для "зовут
-            # Рекс"/"зовут Бобик", и для "зовут Рекс"/"зовут Рекс".
+            # Without semantics there is no way to tell "a different
+            # version" from "a different subject": string similarity is
+            # equally high for "called Rex"/"called Buddy" and for
+            # "called Rex"/"called Rex".
             return []
 
         threshold = self.settings.contradiction_topic_threshold
