@@ -1231,17 +1231,18 @@ class MemoryGraph:
         is computed the first time the node is touched and stored right
         away; afterwards it is simply read.
 
-        Смысл узла берётся из ОБЕИХ его половин: пользователь мог спросить
-        одними словами, а суть оказаться в ответе бота.
+        A node's meaning is taken from BOTH halves: the user may have
+        asked in one set of words while the substance ended up in the
+        bot's reply.
         """
         vector = embeddings.from_blob(row["embedding"])
-        # РАЗМЕРНОСТЬ ПРОВЕРЯЕТСЯ, и это не педантизм. Кодировщик
-        # подключаемый, значит базу, набитую векторами одной модели,
-        # однажды откроют с другой. BLOB читается как массив float32
-        # без всякой разметки, поэтому чужой вектор не вызовет ошибку —
-        # он молча даст бессмысленную близость. Такое расхождение
-        # проявляется не падением, а тем, что поиск начинает находить не
-        # то, и ловится только замером.
+        # THE DIMENSION IS CHECKED, and that is not pedantry. The encoder
+        # is pluggable, so a database filled with one model's vectors will
+        # one day be opened with another. A BLOB is read as a float32
+        # array with no metadata whatsoever, so a foreign vector raises no
+        # error — it quietly yields a meaningless similarity. Such a
+        # mismatch shows up not as a crash but as search returning the
+        # wrong things, and only measurement catches it.
         if vector is not None and (
             self._vector_dim is None or len(vector) == self._vector_dim
         ):
@@ -1256,7 +1257,7 @@ class MemoryGraph:
         return vector
 
     def _encode(self, text: str):
-        """Вектор смысла через подключённый кодировщик, либо None."""
+        """The meaning vector through the attached encoder, or None."""
         encode = self.encoder if self.encoder is not None else embeddings.encode
         vector = encode(text)
         if vector is not None and self._vector_dim is None:
@@ -1283,7 +1284,7 @@ class MemoryGraph:
         return SequenceMatcher(None, query, context).ratio()
 
     # ----------------------------------------------------------------------
-    # 3. Обновление last_accessed при обращении
+    # 3. Updating last_accessed on a touch
     # ----------------------------------------------------------------------
 
     def touch_node(self, node_id: int, timestamp: Optional[float] = None) -> None:
@@ -1292,7 +1293,7 @@ class MemoryGraph:
         logger.debug("[MEMORY TOUCHED] id=%s last_accessed updated (t=%.2f)", node_id, ts)
 
     # ----------------------------------------------------------------------
-    # 3b. АССОЦИАТИВНЫЕ РЁБРА (Semantic Edges / Spreading Activation)
+    # 3b. ASSOCIATIVE EDGES (semantic edges / spreading activation)
     # ----------------------------------------------------------------------
 
     def connect_nodes(
@@ -1303,27 +1304,28 @@ class MemoryGraph:
         timestamp: Optional[float] = None,
     ) -> float:
         """
-        Создаёт или укрепляет ассоциативное ребро между двумя узлами LTM.
+        Creates or strengthens an associative edge between two long-term
+        nodes.
 
-        Используется в двух сценариях:
-            1. Связь по контексту: узел A подтянулся из памяти (MEMORY HIT),
-               а в процессе разговора создался/подкрепился узел B ->
-               укрепляем ребро A -> B.
-            2. Связь по со-активации: несколько узлов были задействованы
-               в рамках одного окна STM -> растим вес рёбер между ними
-               (см. reinforce_coactivation).
+        Two scenarios use it:
+            1. Contextual linking: node A was pulled from memory (a search
+               hit) and node B was created or reinforced during the same
+               exchange -> the edge A -> B is strengthened.
+            2. Co-activation linking: several nodes were used within one
+               STM window -> the edges between them grow (see
+               reinforce_coactivation).
 
-        Ребро игнорируется, если node_from == node_to (нет смысла в петле).
-        Возвращает итоговый вес ребра.
+        The edge is ignored when node_from == node_to; a self-loop means
+        nothing. Returns the resulting edge weight.
         """
         if node_from is None or node_to is None or node_from == node_to:
             return 0.0
 
-        # Защита от гонки: один из узлов мог быть удалён (например, во сне
-        # low-weight syllable-узел попал под orphan pruning) в промежутке
-        # между тем, как его id был запомнён (last_action_trace.node_ids
-        # / связка из STM), и текущим вызовом. FOREIGN KEY на edges иначе
-        # уронит вставку исключением — просто тихо пропускаем ребро.
+        # Race protection: one of the nodes may have been deleted — a
+        # low-weight syllable node caught by orphan pruning during sleep,
+        # say — between the moment its id was recorded and this call. The
+        # FOREIGN KEY on edges would otherwise blow up the insert, so the
+        # edge is quietly skipped instead.
         if self.db.get_node(node_from) is None or self.db.get_node(node_to) is None:
             logger.debug(
                 "[ASSOCIATION SKIP] Node %s or %s no longer exists (deleted) -> edge not created",
@@ -1354,12 +1356,12 @@ class MemoryGraph:
         timestamp: Optional[float] = None,
     ) -> None:
         """
-        Связь по со-активации: если несколько узлов LTM были задействованы
-        (touch/reinforce) в рамках ОДНОГО окна STM (обычно 8 сообщений),
-        растим вес рёбер между КАЖДОЙ парой этих узлов.
+        Co-activation linking: when several long-term nodes were touched
+        or reinforced within ONE STM window, the edges between EVERY pair
+        of them grow.
 
-        node_ids — список id узлов, активированных в текущем окне STM
-        (дубликаты и None автоматически отфильтровываются).
+        node_ids is the list of nodes activated in the current window;
+        duplicates and None values are filtered out automatically.
         """
         unique_ids = sorted({nid for nid in node_ids if nid is not None})
         if len(unique_ids) < 2:
@@ -1385,10 +1387,10 @@ class MemoryGraph:
         timestamp: Optional[float] = None,
     ) -> List[AssociatedNode]:
         """
-        Возвращает узлы, смежные с node_id через рёбра с weight >= min_weight,
-        отсортированные по весу ребра (сильнейшие ассоциации первыми).
+        Nodes adjacent to node_id through edges with weight >= min_weight,
+        sorted by edge weight — the strongest associations first.
 
-        Используется в search() для Spreading Activation (Multi-hop RAG).
+        Used by search() for spreading activation.
         """
         effective_min_weight = min_weight if min_weight is not None else self.settings.edge_activation_threshold
 
@@ -1416,21 +1418,21 @@ class MemoryGraph:
                     source_node_id=node_id,
                 )
             )
-            # Обращение к ассоциативному узлу тоже считается "касанием" —
-            # он вспомнился, хоть и не был напрямую найден по score.
+            # Reaching an associative node counts as a touch too: it was
+            # recalled, even though it was not found directly by score.
             self.touch_node(neighbor_row["id"], timestamp=timestamp)
 
         return results
 
     # ----------------------------------------------------------------------
-    # 4. Decay — угасание веса старых связей
+    # 4. Decay — the fading of old links
     # ----------------------------------------------------------------------
 
     def apply_decay(self, now: Optional[float] = None) -> int:
         """
-        Применяет экспоненциальное угасание веса ко всем узлам LTM, а также
-        к рёбрам ассоциативного графа (Edge Decay). Редкие/неиспользуемые
-        рёбра (weight < EDGE_FORGET_THRESHOLD) физически удаляются.
+        Applies exponential weight decay to every long-term node and to
+        the edges of the associative graph. Rare or unused edges (weight
+        below edge_forget_threshold) are deleted outright.
         """
         current_time = now if now is not None else time.time()
 
@@ -1439,25 +1441,27 @@ class MemoryGraph:
 
         return decayed_count
 
-    # Лексические узлы — инфраструктура языка, а не эпизоды разговора,
-    # поэтому живут на своей (много более длинной) шкале времени.
+    # Lexical nodes are the infrastructure of language rather than
+    # episodes of a conversation, so they live on their own, far longer
+    # timescale.
     LEXICAL_NODE_TYPES = frozenset({"word", "syllable"})
 
     def _age_t0_for(self, node_type: Optional[str]) -> float:
         """
-        Характерное время жизни узла для формулы decay. Словарь угасает
-        по LEXICAL_AGE_T0 (~30 суток), всё остальное — по AGE_T0 (~1 час).
+        The characteristic lifetime of a node for the decay formula.
+        Vocabulary fades on lexical_age_t0 (~30 days), everything else on
+        age_t0 (~7 subjective hours).
 
-        Без этого разделения освоенное слово теряло статус за ночь, а за
-        сутки с небольшим удалялось из БД — словарь не мог накопиться в
-        принципе (см. комментарий у self.settings.lexical_age_t0).
+        Without that split, a mastered word lost its status overnight and
+        was deleted from the database within a day — the vocabulary could
+        never accumulate at all.
         """
         if node_type in MemoryGraph.LEXICAL_NODE_TYPES:
             return self.settings.lexical_age_t0
         return self.settings.age_t0
 
     def _decay_nodes(self, current_time: float) -> int:
-        """Экспоненциальное угасание веса узлов (старая логика apply_decay)."""
+        """Exponential weight decay for nodes."""
         rows = self.db.fetch_all_nodes()
 
         updates = []
@@ -1470,10 +1474,10 @@ class MemoryGraph:
                 skipped_meta_count += 1
                 continue
 
-            # Защита от NULL: если last_decayed_at не проставлен (пропущенный
-            # путь создания/обновления узла) — используем last_accessed как
-            # отсчётную точку, вместо падения с TypeError. На этом же проходе
-            # last_decayed_at будет проставлен через updates[] ниже.
+            # NULL guard: if last_decayed_at was never set — some path
+            # of creation or update missed it — last_accessed serves as
+            # the origin instead of crashing with a TypeError. The same
+            # pass fills last_decayed_at in through updates[] below.
             last_decayed = row["last_decayed_at"]
             if last_decayed is None:
                 last_decayed = row["last_accessed"]
@@ -1483,39 +1487,41 @@ class MemoryGraph:
                 continue
 
             old_weight = row["weight"]
-            # Эффективное время жизни = базовое для типа узла * стабильность.
-            # Стабильность растёт при каждом вспоминании (см. Database.
-            # update_last_accessed), поэтому востребованная память
-            # сопротивляется времени, а невостребованная уходит быстро.
+            # Effective lifetime = the base for this node type times
+            # stability. Stability grows on every recall (see
+            # Database.update_last_accessed), so memory that is in demand
+            # resists time while memory that is not disappears quickly.
             stability = row["stability"] if row["stability"] else self.settings.stability_initial
             effective_t0 = self._age_t0_for(row["node_type"]) * max(1e-9, stability)
             decay_factor = math.exp(-self.settings.decay_rate * dt / effective_t0)
 
-            # ПОЛ УГАСАНИЯ. Узел, за который пользователь хвалил, тускнеет,
-            # но не исчезает: он угасает не в ноль, а к ненулевому уровню.
+            # THE DECAY FLOOR. A node the user praised dims but does not
+            # vanish: it decays towards a non-zero level rather than to
+            # nothing.
             #
-            # Зачем. Стабильность растёт от ВСПОМИНАНИЯ, поэтому отмеченное
-            # важным, но ни разу не пригодившееся, всё равно уходило в
-            # ноль и удалялось. Замер: после двух недель молчания от
-            # разговора на пятнадцать реплик не оставалось НИЧЕГО, включая
-            # то, что пользователь прямо назвал важным. Для ассистента,
-            # которому сказали "у меня аллергия на пенициллин", это
-            # неприемлемо: такое не должно забываться никогда, даже если
-            # разговор об этом больше не заходил.
+            # Why. Stability grows through RECALL, so something marked as
+            # important but never needed again still sank to zero and was
+            # deleted. Measured: after two weeks of silence, NOTHING
+            # survived a fifteen-message conversation — including what the
+            # user had explicitly called important. For an assistant that
+            # was told "I am allergic to penicillin" that is unacceptable:
+            # such a thing must never be forgotten, even if it never came
+            # up again.
             #
-            # Откуда берётся высота пола. Из reward_expectation — той
-            # самой величины, которую ведёт правило Рескорлы-Вагнера
-            # (см. apply_reward). Она и означает "сколько одобрения этот
-            # узел заслужил", то есть уже готовый ответ на вопрос
-            # "насколько это важно ПОЛЬЗОВАТЕЛЮ". Отдельную колонку заводить
-            # незачем, и порог не назначается вручную.
+            # Where the floor's height comes from: reward_expectation, the
+            # very quantity the Rescorla-Wagner rule maintains (see
+            # apply_reward). It already means "how much approval this node
+            # has earned" — a ready-made answer to "how important is this
+            # TO THE USER". No extra column is needed and no threshold is
+            # assigned by hand.
             #
-            # Ни разу не подкреплённый узел имеет ожидание 0 и пол 0 —
-            # для него ничего не меняется, он угасает как раньше. То есть
-            # правка не делает память бессмертной: пол получают единицы.
+            # A node that was never reinforced has an expectation of 0 and
+            # a floor of 0 — nothing changes for it, and it fades as
+            # before. So this does not make memory immortal: only a
+            # handful of nodes ever get a floor.
             expectation = row["reward_expectation"] or 0.0
             floor = max(0.0, expectation) * self.settings.memory_floor_max
-            floor = min(floor, old_weight)          # пол не поднимает вес
+            floor = min(floor, old_weight)          # the floor never raises a weight
             new_weight = floor + (old_weight - floor) * decay_factor
 
             if new_weight < self.settings.forget_threshold:
@@ -1545,10 +1551,11 @@ class MemoryGraph:
 
     def _decay_edges(self, current_time: float) -> int:
         """
-        Экспоненциальное угасание веса рёбер (Edge Decay). Рёбра угасают
-        быстрее узлов (EDGE_DECAY_RATE обычно > DECAY_RATE), имитируя то,
-        что ассоциации между воспоминаниями более хрупкие, чем сами
-        воспоминания. Рёбра ниже EDGE_FORGET_THRESHOLD удаляются физически.
+        Exponential weight decay for edges. Edges fade faster than nodes
+        (edge_decay_rate is normally above decay_rate), modelling the fact
+        that associations between memories are more fragile than the
+        memories themselves. Edges below edge_forget_threshold are deleted
+        outright.
         """
         edges = self.db.fetch_all_edges()
 
@@ -1557,7 +1564,7 @@ class MemoryGraph:
         decayed_count = 0
 
         for edge in edges:
-            # Защита от NULL — см. комментарий в _decay_nodes.
+            # NULL guard — see the comment in _decay_nodes.
             last_decayed = edge["last_decayed_at"]
             if last_decayed is None:
                 last_decayed = edge["last_activated"]
@@ -1599,7 +1606,7 @@ class MemoryGraph:
         return decayed_count
 
     # ----------------------------------------------------------------------
-    # 4b. SLEEP CYCLE — синаптический прунинг (Pruning & Edge Cleaning)
+    # 4b. SLEEP CYCLE — synaptic pruning and edge cleaning
     # ----------------------------------------------------------------------
 
     def prune_weak_edges(self, min_weight: Optional[float] = None) -> int:
