@@ -20,8 +20,8 @@
 from selectivemem import Memory, MemorySettings
 
 
-def test_quickstart_block():
-    """Первый блок README: наблюдение, оценка, рутина, контекст."""
+def test_quickstart_block_russian():
+    """Первый блок README.ru: наблюдение, оценка, рутина, контекст."""
     memory = Memory(":memory:")
 
     important = memory.observe("у меня аллергия на пенициллин")
@@ -30,10 +30,37 @@ def test_quickstart_block():
 
     assert important.written, "факт обязан записаться"
     assert not routine.written, "междометие записываться не должно"
-    # Запрос словом ИЗ записи. README теперь честно предупреждает, что
-    # базовая установка ищет по словам: без кодировщика "какие у меня
-    # аллергии" не находит ничего, и первая версия README это обещала.
+    # Запрос словом ИЗ записи. README честно предупреждает, что базовая
+    # установка ищет по словам: без кодировщика "какие у меня аллергии"
+    # не находит ничего, и первая версия README это обещала.
     assert memory.context_for("аллергия") == "- у меня аллергия на пенициллин"
+    memory.close()
+
+
+def test_quickstart_block_english():
+    """
+    Тот же блок из английского README, и он проверяется отдельно не для
+    симметрии.
+
+    Встроенная модель РУССКАЯ, поэтому на английском семантики нет вовсе
+    и работает только совпадение слов. Первая версия английского примера
+    спрашивала "allergy" про запись "I am allergic to penicillin" — и
+    возвращала пустоту, потому что "allergy" и "allergic" для строкового
+    сходства разные слова. Пример исправлен, а README получил
+    предупреждение в самое начало.
+    """
+    memory = Memory(":memory:")
+
+    important = memory.observe("I am allergic to penicillin")
+    memory.feedback(+1.0)
+    routine = memory.observe("thanks")
+
+    assert important.written
+    assert not routine.written
+    assert "short of the threshold" in routine.reason
+    assert memory.context_for("what am I allergic to") == (
+        "- I am allergic to penicillin"
+    )
     memory.close()
 
 

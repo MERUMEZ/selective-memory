@@ -1,110 +1,116 @@
 # selectivemem
 
-**Память, которая решает, что забыть.**
+**Memory that decides what to forget.**
 
-Ваш ассистент каждый раз знакомится с пользователем заново. Складывать
-всё подряд в векторную базу — значит платить за хранение мусора и
-тонуть в нём при поиске. `selectivemem` делает обратное: пишет не всё,
-забывает со временем и укрепляет то, что пригодилось.
+Your assistant meets the user from scratch every time. Dumping everything
+into a vector store means paying to keep noise and drowning in it at
+retrieval. `selectivemem` does the opposite: it doesn't store everything,
+it fades what goes unused, and it strengthens what turned out to matter.
 
 ```python
 from selectivemem import Memory
 
 memory = Memory("user_42.db")
 
-memory.observe("у меня аллергия на пенициллин")   # запишется
-memory.feedback(+1.0)                             # пользователь отметил важным
-memory.observe("спасибо")                         # не запишется, нечего помнить
+memory.observe("I am allergic to penicillin")   # stored
+memory.feedback(+1.0)                           # the user marked it important
+memory.observe("thanks")                        # not stored, nothing to remember
 
-memory.context_for("аллергия")
-# '- у меня аллергия на пенициллин'
+memory.context_for("what am I allergic to")
+# '- I am allergic to penicillin'
 ```
 
-Через месяц молчания аллергия на месте, «спасибо» и болтовня о погоде
-забыты. Это не настройка — так работает механизм.
+A month later the allergy is still there; "thanks" and the small talk
+about weather are gone. That is not a setting — that is how the mechanism
+works.
 
 ```
-pip install selective-memory              # ядро, зависимостей нет
-pip install selective-memory[semantic]    # + поиск по смыслу
+pip install selective-memory              # core, zero dependencies
+pip install selective-memory[semantic]    # + meaning-based search
 ```
 
-Колесо 86 КБ, стандартная библиотека и sqlite3. Имя на PyPI свободно,
-публикации пока не было.
+86 KB wheel, standard library and sqlite3. The name on PyPI is free; no
+release has been published yet.
 
-**Базовая установка ищет по словам, а не по смыслу.** Запрос «аллергия»
-найдёт запись про аллергию, а «какие у меня аллергии» — уже нет. Для
-поиска по смыслу нужен кодировщик: либо встроенный из `[semantic]`, либо
-свой (см. ниже). Это не оговорка мелким шрифтом — от этого зависит, как
-вы будете формулировать запросы.
+**If you work in English, read this before anything else.** The bundled
+semantic model is Russian, so for English text there is effectively no
+meaning-based search at all — matching falls back to shared words. The
+example above works because "allergic" appears in both the query and the
+note; ask for "allergy" instead and you get nothing.
+
+This is not fine print. Plan on attaching your own encoder from day one
+(see [below](#the-encoder-sets-the-language-and-the-domain)); everything
+else in the library is language-agnostic, but retrieval is only as good
+as the vectors you give it.
 
 ---
 
-## Кому это
+## Who it is for
 
-| Задача | Что даёт |
+| Use case | What you get |
 |---|---|
-| **Личный ассистент** | помнит пользователя между сессиями, не раздувая контекст |
-| **NPC в игре** | помнит, что сделал игрок, и забывает мелочи. Офлайн, детерминированно, без сети |
-| **Бот поддержки** | удерживает то, что клиент отметил важным, а не всю переписку |
-| **Долгий агент** | контекст не растёт линейно по времени работы |
+| **Personal assistant** | remembers the user across sessions without inflating the context |
+| **Game NPC** | remembers what the player did and forgets trivia. Offline, deterministic, no network |
+| **Support bot** | keeps what the customer flagged as important, not the whole transcript |
+| **Long-running agent** | context does not grow linearly with uptime |
 
-Не подойдёт, если нужна **полнота** — найти всё, что когда-либо
-говорилось. Для этого берите векторную базу; ниже показано, почему.
+Not for you if you need **completeness** — finding everything ever said.
+Use a vector store for that; the numbers below show why.
 
 ---
 
-## Пять действий
+## Five calls
 
 ```python
-obs = memory.observe(text, response="", emotion=0.0)   # показать событие
-memory.feedback(+1.0)                                  # оценить последнее действие
-memory.recall("запрос", top_k=3)                       # найти подходящее
-memory.context_for("запрос")                           # то же готовым текстом
-memory.forget()                                        # провести угасание
-memory.stats()                                         # что внутри
+obs = memory.observe(text, response="", emotion=0.0)   # show an event
+memory.feedback(+1.0)                                  # rate the last action
+memory.recall("query", top_k=3)                        # find what fits
+memory.context_for("query")                            # the same, ready for a prompt
+memory.forget()                                        # let time pass
+memory.stats()                                         # what is inside
 ```
 
-`observe` возвращает не только факт записи, но и **причину**:
+`observe` returns not just whether it stored anything, but **why**:
 
 ```python
 obs.written    # False
-obs.reason     # 'рутина, не хватило 0.130 до порога'
+obs.reason     # 'routine, 0.130 short of the threshold'
 obs.surprise   # 0.340
 ```
 
-На вопрос «почему бот это не запомнил» есть ответ числом.
+"Why didn't the bot remember that?" has an answer, and it is a number.
 
-### Откуда брать `emotion` и `feedback`
+### Where `emotion` and `feedback` come from
 
-Ядро не выводит эмоцию само и не знает ни одного слова оценки — это
-решает приложение:
+The core does not infer emotion and knows no words of approval — that is
+your application's job:
 
-| Где | `emotion` при observe | `feedback` |
+| Where | `emotion` on observe | `feedback` |
 |---|---|---|
-| Ассистент | 0.0 обычно; 1.0 если пользователь сказал «запомни» | кнопка 👍/👎, явное «правильно/неверно» |
-| NPC | значимость игрового события: смерть 1.0, подобрал травинку 0.0 | исход квеста, реакция фракции |
-| Бот поддержки | приоритет тикета | оценка решения клиентом |
+| Assistant | 0.0 normally; 1.0 when the user says "remember this" | 👍/👎 button, an explicit "right/wrong" |
+| NPC | significance of the game event: death 1.0, picked up a blade of grass 0.0 | quest outcome, faction reaction |
+| Support bot | ticket priority | customer's rating of the resolution |
 
-Можно не передавать ничего: при `emotion=0.0` запись идёт только по
-новизне, и это рабочий режим по умолчанию.
+You may pass nothing at all: with `emotion=0.0` writing is driven by
+novelty alone, and that is a perfectly good default mode.
 
-### Время приходит извне
+### Time comes from outside
 
 ```python
 now = [1_700_000_000.0]
 memory = Memory("brain.db", clock=lambda: now[0])
-now[0] += 30 * 86400          # промотать месяц
+now[0] += 30 * 86400          # fast-forward a month
 memory.forget()
 ```
 
-Забывание считается по этой шкале. Для игр это ещё и **детерминизм**:
-одинаковый вход даёт побайтово одинаковый результат — нужно для
-реплеев, сейвов и QA.
+Forgetting is computed on that scale. For games this also buys
+**determinism**: the same input yields byte-identical results, which is
+what replays, saves and QA require.
 
-### Язык и домен задаёт кодировщик
+### The encoder sets the language and the domain
 
-Встроенный — navec, русские статические векторы (51 МБ, без torch). Для
-другого языка или другой области передайте свою функцию:
+The bundled one is navec, Russian static vectors (51 MB, no torch). For
+another language or another domain, pass your own function:
 
 ```python
 from sentence_transformers import SentenceTransformer
@@ -112,31 +118,32 @@ model = SentenceTransformer("all-MiniLM-L6-v2")
 memory = Memory("brain.db", encoder=lambda text: model.encode(text))
 ```
 
-### Встроенную модель стоит заменить, и вот насколько
+### The bundled model is worth replacing, and here is by how much
 
-`tools/probe_semantic.py` — шестнадцать пар «факт → как о нём спросят».
-Половина пар не делит с фактом ни одного слова («где я живу» против «мы
-живём на Пушкина двенадцать»): именно они и проверяют семантику.
+`tools/probe_semantic.py` holds sixteen pairs of "fact → how someone will
+ask about it". Half of the pairs share no word with the fact ("where do I
+live" against "we live at 12 Pushkin Street") — those are the ones that
+actually test semantics.
 
-| модель | попаданий | память | диск |
+| model | hits | RAM | disk |
 |---|---|---|---|
-| navec, встроенная | 8/16 = 50% | 376 МБ | 51 МБ |
-| potion-base-8M | 7/16 = 44% | 351 МБ | 30 МБ |
-| potion-retrieval-32M | 7/16 = 44% | 351 МБ | 130 МБ |
-| **potion-multilingual-128M** | **12/16 = 75%** | 1.6 ГБ | 1 ГБ |
+| navec, bundled | 8/16 = 50% | 376 MB | 51 MB |
+| potion-base-8M | 7/16 = 44% | 351 MB | 30 MB |
+| potion-retrieval-32M | 7/16 = 44% | 351 MB | 130 MB |
+| **potion-multilingual-128M** | **12/16 = 75%** | 1.6 GB | 1 GB |
 
-Числа встроенной модели надо читать вместе с одним обстоятельством:
-**восемь пар решаются простым совпадением слов, и это те же самые
-восемь.** То есть navec не добавляет к поиску ничего. Взвешивание слов
-по редкости было написано и откачено — оно не изменило ни одного
-попадания. Крутить веса бесполезно, когда различать нечем.
+Read the bundled model's number together with one fact: **eight pairs are
+solvable by plain word overlap, and they are the same eight.** navec adds
+nothing to retrieval. Weighting words by rarity was written and reverted
+— it did not change a single hit. Tuning weights is pointless when there
+is nothing to tell apart.
 
-Причина не в размере, а в домене: navec обучена на художественной
-литературе. «Люблю ~ предпочитаю» 0.580, но «язык ~ программирование»
-0.114 и «язык ~ python» 0.145 — в художественных текстах «язык» это
-орган, а «python» змея.
+The cause is the domain, not the size: navec was trained on literary
+fiction. "Love ~ prefer" scores 0.580, but "language ~ programming"
+0.114 and "language ~ python" 0.145 — in fiction a "language" is a
+tongue and a "python" is a snake.
 
-Рабочая замена, если вам не жаль 1.6 ГБ памяти:
+A working replacement, if 1.6 GB of RAM is acceptable:
 
 ```python
 from model2vec import StaticModel
@@ -146,22 +153,23 @@ model = StaticModel.from_pretrained("minishlab/potion-multilingual-128M")
 memory = Memory("brain.db", encoder=lambda text: model.encode([text])[0])
 ```
 
-**Прогоните `probe_semantic.py` на своих данных до интеграции.** Замените
-`FACTS` и `PROBES` на свои — узнаете качество поиска за десять минут, а
-не через месяц эксплуатации.
+**Run `probe_semantic.py` on your own data before integrating.** Replace
+`FACTS` and `PROBES` with yours — you will know your retrieval quality in
+ten minutes instead of a month into production.
 
-Без кодировщика поиск идёт по строковому сходству и продолжает работать —
-но библиотека **предупредит об этом в лог один раз**, и `stats().semantic`
-будет `False`. Проверяйте его при старте, если не хотите работать вслепую.
+Without an encoder, search falls back to string similarity and keeps
+working — but the library **warns once in the log**, and
+`stats().semantic` is `False`. Check it at start-up if you would rather
+not run blind.
 
-Порог поиска (`memory_search_threshold`) рассчитан на работающий
-кодировщик, и с любым из них разделяет верно. Замер на английском с
-`potion-base-8M`: релевантные запросы дают 0.30–0.65, нерелевантные
-0.18–0.24, порог 0.3 стоит ровно между. Без кодировщика — 0.178 против
-0.167, то есть разделять нечем, и понижение порога вернёт шум, а не
-ответы.
+The search threshold (`memory_search_threshold`) assumes a working
+encoder, and with any of them it separates correctly. Measured in English
+with `potion-base-8M`: relevant queries score 0.30–0.65, irrelevant ones
+0.18–0.24, and the 0.3 threshold sits exactly between. Without an encoder
+it is 0.178 against 0.167 — nothing to separate, and lowering the
+threshold returns noise rather than answers.
 
-### Настройки — датакласс, а не глобальный конфиг
+### Settings are a dataclass, not a global config
 
 ```python
 from selectivemem import Memory, MemorySettings
@@ -170,147 +178,147 @@ memory = Memory("brain.db", settings=MemorySettings(decay_rate=0.02, age_t0=3600
 
 ---
 
-## Что измерено
+## What has been measured
 
-Стендами из этого репозитория, на пяти сидах, воспроизводимо побайтово.
+By benchmarks from this repository, over five seeds, byte-reproducible.
 
-**Забывание избирательно по важности, которую задаёт пользователь.**
-После двух недель молчания, с контролем на объём (`compare_retention.py`):
+**Forgetting is selective by the importance the user assigns.** After two
+weeks of silence, with volume held equal (`compare_retention.py`):
 
-| Хранилище | Похвалённое | Обычное | Разрыв |
+| Store | Praised | Ordinary | Gap |
 |---|---|---|---|
-| Скользящее окно | 77% | 70% | +7% |
-| Случайный отбор | 43% | 50% | −7% |
-| **selectivemem** | **100%** | **60%** | **+40 п.п.** |
+| Sliding window | 77% | 70% | +7% |
+| Random sample | 43% | 50% | −7% |
+| **selectivemem** | **100%** | **60%** | **+40 pp** |
 
-У наивных хранилищ разрыв около нуля — они про оценку пользователя
-ничего не знают. Контроль на объём означает, что обе группы дают поровну
-сообщений: разрыв нельзя объяснить тем, что важная тема просто чаще
-звучит.
+The naive stores show a gap near zero — they know nothing about the
+user's opinion. "Volume held equal" means both groups produce the same
+number of messages, so the gap cannot be explained by the important topic
+simply coming up more often.
 
-**Организм перестаёт удивляться привычному.** На потоке из 120 сообщений
-удивление падает 0.750 → 0.278, спайки 9 → 0. На тысячном сообщении
-рутина уже не пишется.
+**The organism stops being surprised by the familiar.** Over a stream of
+120 messages surprise falls 0.750 → 0.278 and spikes follow it 9 → 0. By
+the thousandth message routine is no longer stored.
 
-**Сжатие.** 38–51 эпизод из 120 обменов. Меньше, чем было при прежнем
-пороге, — за полноту заплачено объёмом.
+**Compression.** 38–51 episodes out of 120 exchanges.
 
-**Скорость.** Поиск линейный, но дорогое нечёткое сравнение считается
-только для лучших кандидатов — профилировщик показал, что оно съедало
-82% времени.
+**Speed.** Search is linear, but the expensive fuzzy comparison runs only
+on the best candidates — profiling showed it ate 82% of the time.
 
-| узлов | было | стало |
+| nodes | before | after |
 |---|---|---|
-| 500 | 32 мс | 7 мс |
-| 10 000 | 655 мс | 177 мс |
-| 30 000 | 2 074 мс | 503 мс |
+| 500 | 32 ms | 7 ms |
+| 10 000 | 655 ms | 177 ms |
+| 30 000 | 2 074 ms | 503 ms |
 
-**Внешний бенчмарк: LongMemEval.** 60 вопросов, у каждого стог из ~48
-сессий переписки с уликами внутри. Меряется recall@k — тем же
-показателем отчитываются соседи.
+**External benchmark: LongMemEval.** 60 questions, each with a haystack
+of ~48 chat sessions with the evidence buried inside. Measured as
+recall@k — the same figure our neighbours report.
 
-| режим | записано | R@1 | R@5 | R@10 |
+| mode | stored | R@1 | R@5 | R@10 |
 |---|---|---|---|---|
-| рабочий | 24.6% | 60.0% | **68.0%** | 72.0% |
-| архив (гейт обойдён, забывание выкл.) | 49.6% | 76.7% | **91.7%** | 96.7% |
+| normal | 24.6% | 60.0% | **68.0%** | 72.0% |
+| archive (gate bypassed, forgetting off) | 49.6% | 76.7% | **91.7%** | 96.7% |
 
-Разница между строками — цена нашей политики забывания, выраженная
-числом: 24 пункта. За них вы получаете вчетверо меньше хранимого и
-избирательное удержание из таблицы выше.
+The difference between the rows is the price of our forgetting policy,
+stated as a number: 24 points. In exchange you store four times less and
+get the selective retention from the table above.
 
-Порог записи оказался главным рычагом. При прежнем умолчании (0.35)
-записывалась каждая девятая пара реплик и R@5 был 20%; замер по внешним
-данным показал, что 0.25 поднимает полноту втрое, не трогая удержание.
-Умолчание изменено, и это первая калибровка этого порога **не по
-собственному корпусу**.
+The write threshold turned out to be the main lever. At the previous
+default (0.35) one exchange in nine was stored and R@5 was 20%; measuring
+against external data showed that 0.25 triples recall without touching
+retention. The default was changed, and that is the first calibration of
+this threshold **not against our own corpus**.
 
-Нужна максимальная полнота — ставьте `base_plasticity_threshold` ниже
-или отключайте гейт вовсе.
+If you need maximum completeness, set `base_plasticity_threshold` lower
+or disable the gate entirely.
 
-### Чего selectivemem НЕ делает
+### What selectivemem does NOT do
 
-**Он не лучше случайной выборки на равномерных вопросах.**
-`compare_memory.py`, те же пять сидов, равный бюджет в символах:
+**It is not better than a random sample at uniform coverage.**
+`compare_memory.py`, the same five seeds, equal budget in characters:
 
-| Хранилище | Найдено |
+| Store | Found |
 |---|---|
-| Скользящее окно | 90.0% |
-| Случайный отбор | 90.8% |
+| Sliding window | 90.0% |
+| Random sample | 90.8% |
 | selectivemem | 92.4% |
 
-**Раньше здесь стоял отрицательный результат** — 87.2% против 88.8% у
-случайного отбора, — и он был честным при прежнем пороге записи. После
-его снижения отставание исчезло. Но объявлять победу рано: разброс по
-сидам 82–98%, так что 92.4 против 90.8 это «сравнялись», а не «обошли».
+**This used to be a negative result** — 87.2% against 88.8% for random
+sampling — and it was honest at the previous write threshold. Lowering
+it removed the deficit. But it is too early to claim a win: the spread
+across seeds is 82–98%, so 92.4 against 90.8 means "level", not "ahead".
 
-Ждать здесь большего и не стоит: против равномерных вопросов
-несмещённый отбор непобедим по построению, а любой осмысленный отбор
-смещён.
+Do not expect more here either: against uniform questions an unbiased
+sample is unbeatable by construction, and any meaningful selection is
+biased.
 
 ---
 
-## Как это устроено
+## How it works
 
-| Механизм | Что делает |
+| Mechanism | What it does |
 |---|---|
-| **Спайк-гейт** | Пишет, когда `(эмоция + удивление) / 2 >= порог`. Порог поднимается под нагрузкой. |
-| **Собственное удивление** | Ошибка предсказания по своему графу слов и их сочетаний, а не энтропия строки. Опыт снижает её; короткая реплика удивляет слабее — в ней меньше информации. |
-| **Два параметра памяти** | `weight` — насколько ярко помнится сейчас; `stability` — насколько медленно забывается. Стабильность растёт при каждом вспоминании. |
-| **Дофамин** | Подкрепление по ошибке предсказания награды (Рескорла-Вагнер): ожидаемая похвала почти не двигает вес, неожиданная двигает сильно. |
-| **Вытеснение** | Противоречие с известным — самостоятельный повод записать. Устаревшая версия ослабляется, а не удаляется. |
-| **Пол угасания** | Подкреплённое тускнеет, но не исчезает: угасает не в ноль, а к полу, высота которого заслуживается одобрением. Неподкреплённое уходит как раньше. |
+| **Spike gate** | Stores when `(emotion + surprise) / 2 >= threshold`. The threshold rises under load. |
+| **Its own surprise** | Prediction error against its own graph of words and their pairings, not the entropy of a string. Experience lowers it; a short utterance surprises less, because it carries less information. |
+| **Two memory parameters** | `weight` — how vividly it is remembered now; `stability` — how slowly it fades. Stability grows on every recall. |
+| **Dopamine** | Reinforcement by reward prediction error (Rescorla–Wagner): expected praise barely moves the weight, unexpected praise moves it a lot. |
+| **Supersession** | A contradiction with something known is itself a reason to store. The stale version is weakened, not deleted. |
+| **Decay floor** | Reinforced memories dim but do not vanish: they decay towards a floor whose height is earned by approval. Unreinforced ones go as before. |
 
-Про пол отдельно, потому что он определяет поведение продукта. Стабильность
-растёт от вспоминания — значит факт, который пользователь назвал важным, но
-о котором разговор больше не заходил, раньше уходил в ноль вместе с рутиной.
-Для ассистента, которому сказали «у меня аллергия на пенициллин», это
-неприемлемо.
+The floor deserves a note of its own, because it defines product
+behaviour. Stability grows on recall — so a fact the user called
+important but never returned to used to sink to zero along with the
+routine. For an assistant that was told "I am allergic to penicillin",
+that is unacceptable.
 
-| похвал | через год |
+| times praised | after a year |
 |---|---|
-| 0 | забыто |
+| 0 | forgotten |
 | 1 | 0.075 |
 | 2 | 0.128 |
 | 5 | 0.343 |
 
-Похвала относится и к записанному только что, и к **вспомненному** — у
-ассистента одобряют обычно именно хороший ответ по памяти. Отключается
-через `MemorySettings(memory_floor_max=0.0)`.
+Praise applies both to what was just written and to what was **recalled**
+— with an assistant, approval usually lands on a good answer built from
+memory. Switch it off with `MemorySettings(memory_floor_max=0.0)`.
 
 ---
 
-## Демонстрация
+## The showcase
 
-Память невидима: строка «узел записан, вес 0.7» никого не трогает.
-Поэтому в репозитории лежит **витрина** — телеграм-бот, который начинает
-с лепета `ма-ма-ма` и к десятому сообщению отвечает фразами, плюс
-мини-приложение с разбором каждого хода.
+Memory is invisible: the line "node stored, weight 0.7" moves nobody. So
+this repository also holds a **showcase** — a Telegram bot that starts
+out babbling `ma-ma-ma` and answers in sentences by the tenth message,
+plus a mini-app that breaks down every turn.
 
-Витрина — не продукт и в пакет не входит: [DEMO.md](DEMO.md).
+The showcase is not the product and is not part of the package. Details
+in [DEMO.md](DEMO.md) (in Russian).
 
 ```
-selectivemem/   пакет памяти — единственное, что ставится через pip
-core/       витрина: персонаж, настроение, речевые стадии
-tools/      стенды и инспектор памяти
-tests/      286 тестов
-AUDIT.md    что измерено, что опровергнуто, что не сделано
-RELEASING.md как выпускать релиз
+selectivemem/  the memory package — the only thing pip installs
+core/          showcase: persona, mood, speech stages
+tools/         benchmarks and the memory inspector
+tests/         287 tests
+AUDIT.md       what was measured, what was refuted, what is left undone
+RELEASING.md   how to cut a release
 ```
+
+Documentation in Russian: [README.ru.md](README.ru.md).
 
 ---
 
-## Лицензия
+## Licence
 
 Copyright © 2026 MERUMEZ
 
-Ядро — **AGPL-3.0** ([LICENSE](LICENSE)). Свободно для личных проектов,
-исследований и открытых продуктов.
+The core is **AGPL-3.0** ([LICENSE](LICENSE)). Free for personal
+projects, research and open products.
 
-Для закрытых игр, закрытого SaaS и продуктов, поставляемых клиентам,
-нужна коммерческая лицензия: условия и вилки цен —
-[COMMERCIAL.md](COMMERCIAL.md), договор —
+Closed games, closed SaaS and products shipped to customers need a
+commercial licence: terms and price ranges in
+[COMMERCIAL.md](COMMERCIAL.md), the agreement in
 [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
 
-Присылаете патч — прочтите [CONTRIBUTING.md](CONTRIBUTING.md): чтобы
-двойное лицензирование оставалось возможным, нужна одна подписанная
-строка.
+Sending a patch? Read [CONTRIBUTING.md](CONTRIBUTING.md) first: one
+signed line is what keeps dual licensing possible.
