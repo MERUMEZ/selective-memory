@@ -67,9 +67,10 @@ STOP_WORDS: Set[str] = {
 
 WORD_PATTERN = re.compile(r"[^\s\d\W]+", flags=re.UNICODE)
 
-# Vowels (RU + EN) for a primitive syllable segmentation: a syllable is
-# consonants* + vowel(s), and trailing consonants stick to the last
-# syllable of the word.
+# Vowels (Russian + English) for primitive syllable segmentation: a
+# syllable is consonants* + vowel(s), and trailing consonants stick to the
+# last syllable of the word. Add your own alphabet's vowels here if the
+# babbling showcase matters to you; the memory itself does not use this.
 VOWELS: Set[str] = set("аеёиоуыэюяAEIOUYaeiouy")
 
 
@@ -1611,12 +1612,12 @@ class MemoryGraph:
 
     def prune_weak_edges(self, min_weight: Optional[float] = None) -> int:
         """
-        Явный (не decay-based) прунинг рёбер: физически удаляет ВСЕ рёбра
-        с weight < min_weight. Используется фазой сна (SleepCycle), в
-        отличие от _decay_edges(), который сначала уменьшает вес, а
-        удаляет только то, что упало ниже порога В ЭТОМ вызове.
+        Explicit, non-decay pruning of edges: deletes EVERY edge with
+        weight < min_weight. Used by the sleep phase, unlike _decay_edges,
+        which first lowers weights and deletes only what fell below the
+        threshold DURING that call.
 
-        Возвращает количество удалённых рёбер.
+        Returns the number of edges deleted.
         """
         threshold = min_weight if min_weight is not None else self.settings.edge_forget_threshold
         deleted = self.db.delete_edges_below_weight(threshold)
@@ -1628,12 +1629,12 @@ class MemoryGraph:
         max_node_weight: Optional[float] = None,
     ) -> int:
         """
-        Удаляет "осиротевшие" узлы: не имеющие ни одного сильного ребра
-        (weight >= min_edge_weight) И при этом сами по себе слабые
-        (node.weight < max_node_weight). Сильные изолированные воспоминания
-        не трогаем — они самодостаточны, даже если ни с чем не связаны.
+        Deletes orphaned nodes: those with no strong edge (weight >=
+        min_edge_weight) AND weak in themselves (node weight below
+        max_node_weight). Strong isolated memories are left alone — they
+        stand on their own even when linked to nothing.
 
-        Возвращает количество удалённых узлов.
+        Returns the number of nodes deleted.
         """
         effective_edge_weight = (
             min_edge_weight if min_edge_weight is not None else self.settings.edge_activation_threshold
@@ -1660,9 +1661,9 @@ class MemoryGraph:
 
     def run_synaptic_pruning(self) -> PruningReport:
         """
-        Полный цикл синаптического прунинга: сначала срезаем слабые рёбра,
-        ПОТОМ ищем осиротевшие узлы (порядок важен — удаление слабых рёбер
-        может "осиротить" узлы, которые держались только на них).
+        The full synaptic pruning cycle: weak edges are cut first, orphan
+        nodes are sought AFTERWARDS. The order matters — removing weak
+        edges can orphan nodes that were held up by nothing else.
         """
         edges_pruned = self.prune_weak_edges()
         orphan_nodes_pruned = self.prune_orphan_nodes()
@@ -1673,7 +1674,7 @@ class MemoryGraph:
         )
 
     # ----------------------------------------------------------------------
-    # 4c. SLEEP CYCLE — кластеризация Hub-and-Spoke
+    # 4c. SLEEP CYCLE — hub-and-spoke clustering
     # ----------------------------------------------------------------------
 
     def find_hub_clusters(
@@ -1685,14 +1686,14 @@ class MemoryGraph:
         timestamp: Optional[float] = None,
     ) -> List[HubCluster]:
         """
-        Ищет кластеры типа 'звезда вокруг хаба': доминантный узел (hub) с
-        наибольшей суммой весов сильных рёбер (hub_score), и его top-N
-        сильнейших соседей (spokes) как кандидатов на семантическую
-        консолидацию (Abstract Node Generation) во время фазы сна.
+        Looks for hub-and-spoke clusters: a dominant node with the
+        largest sum of strong edge weights (its hub score) and its top-N
+        strongest neighbours, as candidates for semantic consolidation
+        during the sleep phase.
 
-        Возвращает до `limit` кластеров, отсортированных по hub_score.
-        Кластер попадает в результат только если у хаба есть >= min_spokes
-        сильных соседей (иначе это не "кластер", а просто пара узлов).
+        Returns up to `limit` clusters sorted by hub score. A cluster is
+        included only when the hub has at least min_spokes strong
+        neighbours — otherwise it is not a cluster but merely a pair.
         """
         effective_edge_weight = (
             min_edge_weight if min_edge_weight is not None else self.settings.sleep_hub_min_edge_weight
@@ -1724,8 +1725,8 @@ class MemoryGraph:
                 timestamp=timestamp,
             )
 
-            # Отсекаем спутников, которые уже "использованы" в другом кластере
-            # этого же прогона (чтобы не консолидировать один узел дважды)
+            # Drop spokes already claimed by another cluster in this same
+            # pass, so no node is consolidated twice
             available_spokes = [a for a in associated if a.id not in used_node_ids]
 
             if len(available_spokes) < effective_min_spokes:
@@ -1763,16 +1764,17 @@ class MemoryGraph:
         timestamp: Optional[float] = None,
     ) -> int:
         """
-        Записывает новый 'абстрактный' узел LTM (результат семантической
-        консолидации кластера) и АРХИВИРУЕТ исходные узлы кластера:
-        снижает их вес умножением на SLEEP_ARCHIVE_WEIGHT_MULTIPLIER (узлы
-        не удаляются немедленно — они станут кандидатами на удаление при
-        следующем обычном decay/pruning, если так и останутся невостребованными).
+        Stores a new abstract long-term node — the result of semantically
+        consolidating a cluster — and ARCHIVES the cluster's source nodes
+        by multiplying their weight by sleep_archive_weight_multiplier.
+        They are not deleted immediately: they become candidates for
+        deletion at the next ordinary decay or pruning pass if they remain
+        unused.
 
-        Также связывает новый абстрактный узел ребром со всеми исходными
-        узлами кластера (чтобы сохранить след происхождения в графе).
+        The new abstract node is also linked by edges to every source node
+        of the cluster, preserving a trace of where it came from.
 
-        Возвращает id нового абстрактного узла.
+        Returns the id of the new abstract node.
         """
         effective_weight = weight if weight is not None else self.settings.sleep_abstract_node_weight
         ts = timestamp if timestamp is not None else time.time()
@@ -1802,13 +1804,13 @@ class MemoryGraph:
         return abstract_node_id
 
         # ----------------------------------------------------------------------
-    # 4d. PROACTIVE MEMORY RECALL — выбор узла для инициативного сообщения
+    # 4d. PROACTIVE MEMORY RECALL — choosing a node to speak up about
     # ----------------------------------------------------------------------
 
 
 
     # ----------------------------------------------------------------------
-    # 5. ИЗБИРАТЕЛЬНАЯ КОНСОЛИДАЦИЯ (STM -> LTM)
+    # 5. SELECTIVE CONSOLIDATION (short-term -> long-term)
     # ----------------------------------------------------------------------
 
     def consolidate_from_stm(
@@ -1818,35 +1820,38 @@ class MemoryGraph:
         already_captured_by_spike: bool = False,
     ) -> ConsolidationResult:
         """
-        Оценивает накопленный эпизод кратковременной памяти (STM) и
-        принимает решение согласно физике Избирательной Консолидации:
+        Judges an accumulated short-term episode and decides according to
+        the physics of selective consolidation:
 
-            a) ЭМОЦИОНАЛЬНЫЙ УЗЕЛ — если max(emotion_score) среди записей
-               STM >= STM_EMOTIONAL_THRESHOLD -> эпизод упаковывается и
-               записывается в LTM с высоким весом (= max emotion_score).
+            a) EMOTIONAL NODE — if the highest emotion_score among the STM
+               entries reaches stm_emotional_threshold, the episode is
+               packed and stored with a high weight (that same maximum).
 
-            b) СТРУКТУРНЫЙ УЗЕЛ — если средняя perplexity эпизода >=
-               STM_STRUCTURAL_THRESHOLD (много новой информации/фактов) ->
-               эпизод упаковывается и записывается в LTM с умеренным
-               весом (STM_STRUCTURAL_WEIGHT).
+            b) STRUCTURAL NODE — if the episode's average surprise reaches
+               stm_structural_threshold (a lot of new information), it is
+               packed and stored with a moderate weight
+               (stm_structural_weight).
 
-            c) РУТИННЫЙ ШУМ — ни то ни другое -> эпизод просто отбрасывается,
-               без записи в БД (экономим память от бытового шума).
+            c) ROUTINE NOISE — neither of the above: the episode is simply
+               discarded without touching the database, which is how
+               memory is spared everyday chatter.
 
-        entries — список STMEntry, обычно результат working_memory.consume_all().
-        Пустой список -> сразу считается рутинным шумом (нет данных).
+        `entries` is a list of STMEntry, normally the result of
+        working_memory.consume_all(). An empty list counts as routine
+        noise straight away — there is no data.
 
-        Возвращает ConsolidationResult с решением и деталями для логов/дебага.
+        Returns a ConsolidationResult with the decision and the details
+        for logs and debugging.
         """
         if not entries:
-            return ConsolidationResult(decision="routine_noise", reason="STM пуст, нет данных")
+            return ConsolidationResult(decision="routine_noise", reason="STM is empty, no data")
 
-        # Защита от дублирования: если этот флеш вызван спайком амигдалы,
-        # который уже создал точный узел LTM для текущего обмена (шаг 10 в
-        # brain_session.py), а STM на момент флеша содержит только этот же
-        # самый обмен (<=2 записи: реплика user + реплика bot), то
-        # консолидация создала бы почти идентичный дубль. В этом случае
-        # пропускаем запись — контент уже сохранён.
+        # Duplicate guard: if this flush was triggered by a spike that
+        # already created an exact long-term node for the current
+        # exchange, and STM at flush time holds only that same exchange
+        # (at most two entries — one user turn and one bot turn), then
+        # consolidation would create a near-identical duplicate. The write
+        # is skipped: the content is already stored.
         if already_captured_by_spike and len(entries) <= 2:
             logger.info(
                 "[CONSOLIDATION] Skipped: the exchange is already stored as a spike node "
@@ -1855,7 +1860,7 @@ class MemoryGraph:
             )
             return ConsolidationResult(
                 decision="routine_noise",
-                reason="Уже сохранён как spike-узел, дублирование пропущено",
+                reason="Already stored as a spike node, duplicate skipped",
             )
 
         max_emotion = max(e.emotion_score for e in entries)
@@ -1863,7 +1868,7 @@ class MemoryGraph:
 
         packed_context, packed_response = self._pack_episode(entries)
 
-        # --- a) Эмоциональный узел (приоритет выше структурного) ---
+        # --- a) Emotional node (takes priority over the structural one) ---
         if max_emotion >= self.settings.stm_emotional_threshold:
             node_id = self.save_connection(
                 context=packed_context,
@@ -1882,7 +1887,7 @@ class MemoryGraph:
                 reason=f"max_emotion={max_emotion:.3f} >= {self.settings.stm_emotional_threshold}",
             )
 
-        # --- b) Структурный узел ---
+        # --- b) Structural node ---
         if avg_perplexity >= self.settings.stm_structural_threshold:
             node_id = self.save_connection(
                 context=packed_context,
@@ -1901,33 +1906,33 @@ class MemoryGraph:
                 reason=f"avg_perplexity={avg_perplexity:.3f} >= {self.settings.stm_structural_threshold}",
             )
 
-        # --- c) Рутинный шум — отбрасываем без записи в БД ---
+        # --- c) Routine noise — discarded without touching the database ---
         logger.info(
             "[STM FLUSH] Routine noise discarded (max_emotion=%.3f, avg_perplexity=%.3f, %d entries)",
             max_emotion, avg_perplexity, len(entries),
         )
         return ConsolidationResult(
             decision="routine_noise",
-            reason=f"max_emotion={max_emotion:.3f}, avg_perplexity={avg_perplexity:.3f} — ниже порогов",
+            reason=f"max_emotion={max_emotion:.3f}, avg_surprise={avg_perplexity:.3f} — below both thresholds",
         )
 
     @staticmethod
     def _pack_episode(entries: List["STMEntry"]) -> "tuple[str, str]":
         """
-        Упаковывает список STMEntry в пару (context, response) для хранения
-        как единого узла LTM. Реплики user объединяются в context, реплики
-        bot — в response (сохраняя порядок появления).
+        Packs a list of STMEntry into a (context, response) pair for
+        storage as one long-term node. User turns are joined into context
+        and bot turns into response, preserving their order.
         """
         user_lines = [e.text.strip() for e in entries if e.role == "user"]
         bot_lines = [e.text.strip() for e in entries if e.role != "user"]
 
-        context = " | ".join(user_lines) if user_lines else "(без реплик пользователя)"
-        response = " | ".join(bot_lines) if bot_lines else "(без ответов бота)"
+        context = " | ".join(user_lines) if user_lines else "(no user turns)"
+        response = " | ".join(bot_lines) if bot_lines else "(no bot replies)"
 
         return context, response
 
     # ----------------------------------------------------------------------
-    # Вспомогательные методы
+    # Helper methods
     # ----------------------------------------------------------------------
 
     def reinforce_node(self, node_id: int, boost: float = 0.1, timestamp: Optional[float] = None) -> None:
@@ -1948,21 +1953,21 @@ class MemoryGraph:
         timestamp: Optional[float] = None,
     ) -> Optional[RewardSignal]:
         """
-        Дофаминовый сигнал: считает ОШИБКУ ПРЕДСКАЗАНИЯ награды для узла,
-        обновляет его ожидание и возвращает результат.
+        The dopamine signal: computes the REWARD PREDICTION ERROR for a
+        node, updates its expectation and returns the result.
 
-            rpe = фактическая_валентность - ожидаемая_для_этого_узла
-            ожидание += REWARD_EXPECTATION_LEARNING_RATE * rpe
+            rpe = actual valence - what this node expected
+            expectation += reward_expectation_learning_rate * rpe
 
-        Это правило Рескорлы-Вагнера. Смысл поправки: дофамин выделяется
-        не на награду, а на НЕОЖИДАННУЮ награду. Без неё "стремление к
-        одобрению" вырождается — организм нашёл бы одно слово, которое
-        всегда хвалят, и повторял бы его вечно. Здесь же то, что хвалят
-        ВСЕГДА, перестаёт давать сигнал (rpe -> 0), и организм идёт
-        пробовать новое.
+        This is the Rescorla-Wagner rule. The point of it: dopamine is
+        released not by reward but by UNEXPECTED reward. Without it, the
+        pursuit of approval degenerates — the organism would find one word
+        that is always praised and repeat it forever. Here, what is
+        ALWAYS praised stops producing a signal (rpe -> 0) and the
+        organism goes off to try something new.
 
-        Возвращает None, если узел исчез (мог попасть под прунинг между
-        действием и оценкой).
+        Returns None if the node has disappeared: it may have been pruned
+        between the action and the rating.
         """
         row = self.db.get_node(node_id)
         if row is None:
@@ -1989,13 +1994,13 @@ class MemoryGraph:
 
     def learning_scale(self, prediction_error: float) -> float:
         """
-        Во сколько раз ошибка предсказания награды ускоряет закрепление.
+        By how much the reward prediction error accelerates consolidation.
 
-        Дофамин модулирует синаптическую пластичность: неожиданный исход
-        закрепляется сильно, полностью предсказанный — почти никак.
-        Нижняя граница (REWARD_MIN_LEARNING_SCALE) не даёт обучению
-        обнулиться совсем, иначе давно освоенный узел перестал бы получать
-        даже поддерживающее подкрепление.
+        Dopamine modulates synaptic plasticity: an unexpected outcome
+        consolidates strongly, a fully predicted one almost not at all.
+        The lower bound (reward_min_learning_scale) keeps learning from
+        reaching exactly zero — otherwise a long-mastered node would stop
+        receiving even maintenance reinforcement.
         """
         return max(self.settings.reward_min_learning_scale, min(1.0, abs(prediction_error)))
 
@@ -2006,11 +2011,11 @@ class MemoryGraph:
         timestamp: Optional[float] = None,
     ) -> None:
         """
-        Штрафует узел за негативный фидбэк (Reinforcement Loop): снижает
-        вес узла и НЕ обновляет last_accessed на текущий момент (в отличие
-        от touch_node/reinforce_node) — это ускоряет относительное старение
-        узла при следующем apply_decay(), имитируя пониженную "устойчивость"
-        (decay_rate) отрицательно подкреплённой связи.
+        Penalises a node for negative feedback: lowers its weight and
+        deliberately does NOT move last_accessed forward, unlike
+        touch_node or reinforce_node. That accelerates the node's relative
+        ageing at the next apply_decay, modelling the lower durability of
+        a negatively reinforced link.
         """
         row = self.db.get_node(node_id)
         if row is None:
