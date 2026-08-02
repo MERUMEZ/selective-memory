@@ -12,26 +12,26 @@
 # COMMERCIAL.md.
 """
 ================================================================================
- GRAPH_MEMORY.PY — Биологический слой памяти "Динамического Мозга" (LTM)
+ GRAPH_MEMORY.PY — The biological layer of long-term memory
 ================================================================================
-Класс MemoryGraph оперирует поверх Database (memory/database.py) и добавляет
-"живую" логику:
-    - сохранение новой связи с начальным весом (spike memory)
-    - поиск похожего контекста по ключевым словам + нечёткому сходству (search)
-    - обновление last_accessed при каждом обращении
-    - функция угасания веса (decay) для старых, неиспользуемых связей
-    - ИЗБИРАТЕЛЬНАЯ КОНСОЛИДАЦИЯ (Selective Consolidation) — перенос эпизодов
-      из кратковременной памяти (STM, WorkingMemory) в долгосрочную (LTM/БД)
+MemoryGraph sits on top of Database and adds the living logic:
+    - storing a new link with an initial weight (spike memory)
+    - finding similar context by keywords plus fuzzy similarity (search)
+    - updating last_accessed on every touch
+    - weight decay for old, unused links
+    - SELECTIVE CONSOLIDATION — moving episodes from short-term memory
+      (WorkingMemory) into long-term storage
 
-Консолидация (consolidate_from_stm) оценивает накопленный эпизод STM по
-двум критериям и принимает одно из трёх решений:
-    a) ЭМОЦИОНАЛЬНЫЙ УЗЕЛ — высокий emotion_score/total_density -> запись в БД
-       с высоким весом (аналог core/amygdala.py, но для целого эпизода).
-    b) СТРУКТУРНЫЙ УЗЕЛ — высокая средняя perplexity (много новой информации)
-       -> запись в БД с умеренным весом.
-    c) РУТИННЫЙ ШУМ — ни то ни другое -> эпизод стирается БЕЗ записи в БД.
+Consolidation (consolidate_from_stm) judges an accumulated STM episode by
+two criteria and reaches one of three decisions:
+    a) EMOTIONAL NODE — high emotion_score/density -> stored with a high
+       weight (the analogue of the spike gate, but for a whole episode).
+    b) STRUCTURAL NODE — high average surprise (a lot of new information)
+       -> stored with a moderate weight.
+    c) ROUTINE NOISE — neither of the above -> the episode is discarded
+       without being stored at all.
 
-Формула затухания (экспоненциальная кривая забывания):
+The decay formula (an exponential forgetting curve):
     weight(t) = weight_0 * exp(-DECAY_RATE * dt / AGE_T0)
 ================================================================================
 """
@@ -53,6 +53,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Stop words for keyword matching. Russian entries are here because the
+# bundled encoder is Russian; English ones because that is the other
+# language this was tested in. With your own encoder and language, extend
+# this set — it only filters noise from the lexical component of scoring.
 STOP_WORDS: Set[str] = {
     "и", "в", "на", "с", "по", "к", "у", "из", "за", "от", "до", "для",
     "что", "как", "это", "то", "я", "ты", "он", "она", "мы", "вы", "они",
@@ -63,15 +67,15 @@ STOP_WORDS: Set[str] = {
 
 WORD_PATTERN = re.compile(r"[^\s\d\W]+", flags=re.UNICODE)
 
-# Гласные (RU + EN) для примитивной слоговой сегментации (heuristic:
-# слог = согласные* + гласная(-ые), хвостовые согласные "прилипают"
-# к последнему слогу слова).
+# Vowels (RU + EN) for a primitive syllable segmentation: a syllable is
+# consonants* + vowel(s), and trailing consonants stick to the last
+# syllable of the word.
 VOWELS: Set[str] = set("аеёиоуыэюяAEIOUYaeiouy")
 
 
 @dataclass
 class LexicalProcessingResult:
-    """Результат побочного процесса лексического освоения языка."""
+    """Result of the side process of lexical language acquisition."""
     words_processed: int
     syllables_processed: int
     new_words: int
@@ -81,14 +85,15 @@ class LexicalProcessingResult:
 @dataclass
 class SurpriseResult:
     """
-    Ошибка предсказания организма на входящем тексте — СОБСТВЕННОЕ
-    удивление, посчитанное по его же графу, а не статистика строки.
+The organism's prediction error on incoming text — its OWN surprise,
+    computed against its own graph rather than a statistic of the string.
 
-    total      — итог [0..1], идёт в спайк-гейт, уверенность, консолидацию
-    lexical    — доля новизны от незнакомых СЛОВ
-    structural — доля новизны от непривычных СОЧЕТАНИЙ соседних слов
-    known_words / total_words — сколько слов входа организм уже знает
-    known_pairs / total_pairs — то же для пар соседних слов
+    total      — the result [0..1], fed to the spike gate, confidence and
+                 consolidation
+    lexical    — the share of novelty coming from unfamiliar WORDS
+    structural — the share coming from unfamiliar PAIRINGS of neighbours
+    known_words / total_words — how many of the input's words are known
+    known_pairs / total_pairs — the same for pairs of neighbours
     """
     total: float
     lexical: float
@@ -101,7 +106,7 @@ class SurpriseResult:
 
 @dataclass
 class MemoryMatch:
-    """Результат поиска похожего контекста в графе памяти."""
+    """A match found while searching the memory graph for similar context."""
     id: int
     context: str
     response: str
@@ -113,7 +118,7 @@ class MemoryMatch:
 
 @dataclass
 class ConsolidationResult:
-    """Результат попытки избирательной консолидации эпизода STM в LTM."""
+    """Outcome of trying to consolidate an STM episode into long-term memory."""
     decision: str  # "emotional_node" | "structural_node" | "routine_noise"
     node_id: Optional[int] = None
     weight: Optional[float] = None
@@ -123,10 +128,9 @@ class ConsolidationResult:
 @dataclass
 class KnownSyllable:
     """
-    Известный слог с его ID и текущим весом (усвоенностью) — используется
-    babbling-подсистемой (InstinctSystem.generate_babble_response) для
-    взвешенного выбора слогов и последующего трекинга использованных
-    узлов в Reinforcement Loop (Cortex.apply_feedback).
+    A known syllable with its id and current weight (mastery) — used by
+    the babbling subsystem for weighted syllable choice and for tracking
+    which nodes were used, so reinforcement can reach them.
     """
     id: int
     text: str
@@ -136,11 +140,11 @@ class KnownSyllable:
 @dataclass
 class RewardSignal:
     """
-    Результат дофаминового сигнала на одном узле (см. MemoryGraph.apply_reward).
+    The dopamine signal for one node (see MemoryGraph.apply_reward).
 
-    prediction_error — то самое "неожиданно похвалили": именно эта
-    величина, а не сама валентность, управляет и темпом закрепления, и
-    смещением будущего выбора.
+    prediction_error is the "praised unexpectedly" quantity: it, rather
+    than raw valence, drives both the rate of consolidation and the bias
+    of future choices.
     """
     node_id: int
     valence: float
@@ -152,11 +156,11 @@ class RewardSignal:
 @dataclass
 class SupersededNode:
     """
-    Воспоминание, вытесненное более новой версией того же факта
-    (см. MemoryGraph.find_superseded).
+    A memory superseded by a newer version of the same fact (see
+    MemoryGraph.find_superseded).
 
-    word_overlap хранится для отладки: по нему видно, почему узел сочли
-    другой версией, а не повтором.
+    word_overlap is kept for debugging: it shows why a node was judged a
+    different version rather than a repetition.
     """
     id: int
     context: str
@@ -167,24 +171,23 @@ class SupersededNode:
 @dataclass
 class KnownWord:
     """
-    Освоенное слово, найденное во входящем сообщении (см.
-    MemoryGraph.get_mastered_words_in). id нужен, чтобы подкрепление
-    (Cortex.apply_feedback) могло усилить именно те СЛОВА, которые бот
-    употребил удачно — раньше в контур подкрепления попадали только слоги
-    лепета.
+    A mastered word found in an incoming message (see
+    MemoryGraph.get_mastered_words_in). The id is there so reinforcement
+    can strengthen exactly the WORDS the bot used successfully — the loop
+    used to receive only babbling syllables.
     """
     id: int
     text: str
     weight: float
     reward_expectation: float = 0.0
-    # По чему организм на самом деле выбирает, что произнести: освоенность
-    # плюс склонность к тому, за что хвалили (см. get_mastered_words_in)
+    # What the organism actually chooses to say by: mastery plus a
+    # leaning towards what earned praise (see get_mastered_words_in)
     preference: float = 0.0
 
 
 @dataclass
 class AssociatedNode:
-    """Узел, подтянутый через Spreading Activation (ассоциативное ребро)."""
+    """A node pulled in by spreading activation along an associative edge."""
     id: int
     context: str
     response: str
@@ -196,7 +199,7 @@ class AssociatedNode:
 
 @dataclass
 class ActivationTrace:
-    """Одна ассоциативная активация: узел A привёл к подтягиванию узла B."""
+    """One associative activation: node A caused node B to be pulled in."""
     source_id: int
     target_id: int
     edge_weight: float
@@ -208,9 +211,9 @@ class ActivationTrace:
 @dataclass
 class HubCluster:
     """
-    Кластер типа 'звезда вокруг хаба' (Hub-and-Spoke) — доминантный узел
-    (hub) и его сильно связанные соседи (spokes), кандидаты на
-    семантическую консолидацию во время фазы сна.
+    A hub-and-spoke cluster: a dominant node (hub) and its strongly
+    linked neighbours (spokes), candidates for semantic consolidation
+    during the sleep phase.
     """
     hub_id: int
     hub_context: str
@@ -225,7 +228,7 @@ class HubCluster:
 
 @dataclass
 class PruningReport:
-    """Результат синаптического прунинга (Pruning & Edge Cleaning)."""
+    """Result of synaptic pruning and edge cleaning."""
     edges_pruned: int
     orphan_nodes_pruned: int
 
@@ -234,12 +237,12 @@ class PruningReport:
 
 class MemoryGraph:
     """
-    Высокоуровневый интерфейс к графу долгосрочной памяти (LTM).
+    The high-level interface to the long-term memory graph.
 
-    Использование:
+    Usage:
         graph = MemoryGraph()
-        graph.save_connection("привет", "привет, как дела?", weight=0.9)
-        matches = graph.search("как у тебя дела")
+        graph.save_connection("hello", "hi, how are you?", weight=0.9)
+        matches = graph.search("how are you doing")
         graph.apply_decay()
         result = graph.consolidate_from_stm(stm_entries, timestamp=brain_time)
     """
@@ -250,52 +253,51 @@ class MemoryGraph:
         settings: Optional[MemorySettings] = None,
         encoder: Optional[Callable[[str], Any]] = None,
     ):
-        # Параметры приходят извне: ядро не должно знать про глобальный
-        # config приложения, иначе его нельзя вынести в отдельный пакет.
-        # Умолчания в MemorySettings — те же значения, что откалиброваны
-        # замерами, поэтому MemoryGraph() без аргументов ведёт себя как
-        # раньше.
+        # Parameters arrive from outside: the core must not know about
+        # the application's global config, or it could never be extracted
+        # into a package of its own. The defaults in MemorySettings are the
+        # values calibrated by measurement, so MemoryGraph() with no
+        # arguments behaves exactly as before.
         self.settings = settings or MemorySettings()
         self.db = db or Database(settings=self.settings)
 
-        # КОДИРОВЩИК СМЫСЛА ПОДКЛЮЧАЕМЫЙ. Встроенный — navec, русские
-        # статические векторы: он лёгкий и не тянет torch, но он русский.
-        # Для английского (и любого другого языка) сюда передаётся своя
-        # функция text -> вектор: sentence-transformers, эмбеддинги через
-        # API, fastText — что угодно, лишь бы возвращало последовательность
-        # чисел или None.
+        # THE MEANING ENCODER IS PLUGGABLE. The bundled one is navec,
+        # Russian static vectors: light and free of torch, but Russian.
+        # For English — or any other language — pass your own function
+        # text -> vector: sentence-transformers, embeddings over an API,
+        # fastText, anything that returns a sequence of numbers or None.
         #
-        # Библиотека НЕ ВОЗИТ С СОБОЙ МОДЕЛЬ и не выбирает её за
-        # пользователя. Это же и снимает вопрос "а на каком языке
-        # работает selectivemem": на том, на котором работает переданный
-        # кодировщик.
-        # Хранится ИМЕННО переданное значение, а не embeddings.encode по
-        # умолчанию: связать функцию здесь — значит намертво прибить
-        # ссылку, и подмена embeddings.encode снаружи (тесты, стенды,
-        # отключение семантики на ходу) перестанет действовать. Ровно на
-        # это уже наступали с заглушкой LLM.
+        # The library SHIPS NO MODEL and does not choose one for the user.
+        # That also settles the question "what language does selectivemem
+        # work in": whichever language the supplied encoder works in.
+        # Stores EXACTLY what was passed rather than defaulting to
+        # embeddings.encode: binding the function here would nail the
+        # reference down, and replacing embeddings.encode from outside
+        # (tests, benchmarks, disabling semantics on the fly) would stop
+        # working. This project already stepped on that rake with the LLM
+        # stub.
         self.encoder = encoder
         self._vector_dim: Optional[int] = None
         self._warned_no_semantics = False
         self.last_activation_traces: List[ActivationTrace] = []
 
     # ----------------------------------------------------------------------
-    # SELF-MODEL & USER-MODEL — инициализация мета-узлов (Итерация 15)
+    # SELF-MODEL & USER-MODEL — meta-node initialisation
     # ----------------------------------------------------------------------
 
 
     def get_or_create_brain_epoch(self, now: Optional[float] = None) -> float:
         """
-        Точка отсчёта субъективного времени, ПЕРЕЖИВАЮЩАЯ перезагрузку.
+        The origin of subjective time, one that SURVIVES a restart.
 
-        Без неё BrainSession при каждом запуске ставил brain_time =
-        time.time(), и часы прыгали назад относительно last_decayed_at,
-        сохранённых разогнанной шкалой. Забывание после этого молча
-        выключалось (в _decay_nodes стоит `if dt <= 0: continue`) — после
-        разговора на 100 сообщений ещё на 2.3 часа.
+        Without it, every start-up set brain_time = time.time() and the
+        clock jumped backwards relative to the last_decayed_at marks saved
+        on the accelerated scale. Forgetting then switched off silently
+        (_decay_nodes contains `if dt <= 0: continue`) — for another 2.3
+        hours after a hundred-message conversation.
 
-        Хранится тем же механизмом мета-узлов, что и last_sleep_marker:
-        отдельная таблица ради одного числа не нужна.
+        Stored through the same meta-node mechanism as the sleep marker: a
+        separate table for a single number would be excessive.
         """
         row = self.db.get_meta_node("brain_epoch")
         if row is not None:
@@ -304,11 +306,11 @@ class MemoryGraph:
             except (TypeError, ValueError):
                 logger.warning("[BRAIN EPOCH] Corrupted value — resetting")
 
-        # now передаёт приложение — тем же источником времени, который
-        # получат часы. Иначе эпоха берётся из настоящих time.time() и
-        # отличается от запуска к запуску даже там, где всё остальное
-        # зафиксировано: у стенда расходились ответы уже на первом
-        # сообщении при побитово одинаковом графе и состоянии генератора.
+        # `now` is supplied by the application from the same time source
+        # the clock will use. Otherwise the epoch comes from a real
+        # time.time() and differs between runs even when everything else
+        # is pinned: the benchmark's replies diverged on the very first
+        # message with a bit-identical graph and RNG state.
         epoch = now if now is not None else time.time()
         self.db.upsert_meta_node(
             node_type="brain_epoch", content=str(epoch), weight=1.0, timestamp=epoch,
