@@ -12,24 +12,19 @@
 # COMMERCIAL.md.
 """
 ================================================================================
-
- DATABASE.PY — SQLite-слой хранения памяти "Динамического Мозга"
+ DATABASE.PY — The SQLite storage layer
 ================================================================================
+Responsible ONLY for low-level database access: creating the schema and
+CRUD over the `nodes` table. All the "biological" logic — decay, spike
+thresholds, finding similar context — lives in graph_memory.py.
 
-
-Отвечает ТОЛЬКО за низкоуровневый доступ к БД: создание схемы, CRUD-операции
-над таблицей nodes. Вся "биологическая" логика (decay, spike-пороги, поиск
-похожего контекста) находится в memory/graph_memory.py.
-
-
-
-Схема таблицы nodes:
+Schema of the `nodes` table:
     id            INTEGER PRIMARY KEY AUTOINCREMENT
-    context       TEXT     -- входящий контекст (сообщение пользователя)
-    response      TEXT     -- ответ системы, связанный с этим контекстом
-    weight        REAL     -- текущий "вес" связи (сила памяти), 0..1+
-    created_at    REAL     -- unix timestamp создания узла
-    last_accessed REAL     -- unix timestamp последнего обращения к узлу
+    context       TEXT     -- incoming context (the user's message)
+    response      TEXT     -- the system's reply tied to that context
+    weight        REAL     -- current "weight" of the link (memory strength), 0..1+
+    created_at    REAL     -- unix timestamp of creation
+    last_accessed REAL     -- unix timestamp of the last touch
 ================================================================================
 """
 
@@ -58,8 +53,8 @@ CREATE INDEX IF NOT EXISTS idx_nodes_context ON nodes(context);
 """
 
 # --------------------------------------------------------------------------
-# Схема таблицы edges — ассоциативные связи между узлами LTM
-# (Semantic Edges / Spreading Activation)
+# Schema of the `edges` table — associative links between long-term nodes
+# (semantic edges / spreading activation)
 # --------------------------------------------------------------------------
 EDGES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS edges (
@@ -81,15 +76,15 @@ INDEX_EDGE_TO = """
 CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(node_to);
 """
 
-# Уникальность направленной пары (node_from, node_to). Ненаправленность
-# (A->B эквивалентно B->A) обеспечивается на уровне логики graph_memory.py
-# через нормализацию порядка id перед вставкой (см. Database.upsert_edge).
+# Uniqueness of the directed pair (node_from, node_to). Undirectedness
+# (A->B equals B->A) is enforced in graph_memory.py by normalising the id
+# order before insertion (see Database.upsert_edge).
 UNIQUE_EDGE_PAIR = """
 CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_unique_pair ON edges(node_from, node_to);
 """
 
 # --------------------------------------------------------------------------
-# Миграция: мета-узлы Self-Model / User-Model (Итерация 15)
+# Migration: meta-nodes for the self model and the user model
 # --------------------------------------------------------------------------
 ALTER_ADD_IS_META = """
 ALTER TABLE nodes ADD COLUMN is_meta INTEGER DEFAULT 0;
@@ -99,18 +94,18 @@ ALTER_ADD_NODE_TYPE = """
 ALTER TABLE nodes ADD COLUMN node_type TEXT DEFAULT NULL;
 """
 # --------------------------------------------------------------------------
-# Миграция: отдельные "часы" decay (last_decayed_at), НЕ совпадающие с
-# last_accessed/last_activated (фикс компаундинга decay).
+# Migration: a separate decay "clock" (last_decayed_at) that does NOT
+# coincide with last_accessed/last_activated — the fix for compounding decay.
 #
-# last_accessed / last_activated = "когда узел/ребро РЕАЛЬНО использовали"
-#   (нужно для proactive cooldown, скоринга релевантности и т.п.)
-# last_decayed_at                = "с какого момента отсчитывать угасание
-#   веса" — чисто техническая метка для формулы decay.
+# last_accessed / last_activated = "when the node/edge was REALLY used"
+#   (needed for proactive cooldown, relevance scoring and so on)
+# last_decayed_at                = "from which moment to count the weight
+#   fading" — a purely technical mark for the decay formula.
 #
-# Раньше decay считал dt от last_accessed, но apply_decay гоняется на
-# КАЖДОЕ сообщение для ВСЕХ узлов, а last_accessed двигается только при
-# реальном касании — из-за этого угасание накапливалось некорректно
-# (квадратично по числу сообщений вместо линейного по времени).
+# Decay used to measure dt from last_accessed, but apply_decay runs on
+# EVERY message for EVERY node, while last_accessed only moves on a real
+# touch. Fading therefore accumulated incorrectly — quadratically in the
+# number of messages instead of linearly in time.
 # --------------------------------------------------------------------------
 ALTER_ADD_LAST_DECAYED_NODES = """
 ALTER TABLE nodes ADD COLUMN last_decayed_at REAL DEFAULT NULL;
@@ -119,49 +114,48 @@ ALTER_ADD_LAST_DECAYED_EDGES = """
 ALTER TABLE edges ADD COLUMN last_decayed_at REAL DEFAULT NULL;
 """
 # --------------------------------------------------------------------------
-# Миграция: stability — сопротивление узла забыванию.
+# Migration: stability — a node's resistance to being forgotten.
 #
-# weight    = "насколько ярко помнится сейчас"
-# stability = "насколько медленно забывается" (множитель к AGE_T0)
+# weight    = "how vividly it is remembered right now"
+# stability = "how slowly it fades" (a multiplier on AGE_T0)
 #
-# Раньше был только weight, и все эпизоды старели по одной шкале
-# независимо от востребованности. Теперь стабильность растёт при каждом
-# вспоминании (см. update_last_accessed), поэтому пригодившееся живёт
-# долго, а случайное уходит за сутки.
+# There used to be only weight, and every episode aged on one scale
+# regardless of how useful it had been. Stability now grows on every
+# recall (see update_last_accessed), so what proved useful lives for
+# months while an accidental exchange is gone within a day.
 # --------------------------------------------------------------------------
 ALTER_ADD_STABILITY = """
 ALTER TABLE nodes ADD COLUMN stability REAL DEFAULT 1.0;
 """
 # --------------------------------------------------------------------------
-# Миграция: reward_expectation — ожидаемое одобрение за использование узла.
+# Migration: reward_expectation — the approval expected for using a node.
 #
-# Нужна для дофаминового сигнала: дофамин выделяется не на награду, а на
-# НЕОЖИДАННУЮ награду, поэтому организму нужно с чем-то сравнивать
-# фактическую оценку пользователя. Обновляется правилом Рескорлы-Вагнера
-# (см. MemoryGraph.apply_reward), диапазон тот же, что у валентности:
-# [-1.0, 1.0].
+# Needed for the dopamine signal: dopamine is released not by reward but
+# by UNEXPECTED reward, so the organism needs something to compare the
+# user's actual rating against. Updated by the Rescorla-Wagner rule (see
+# MemoryGraph.apply_reward); the range matches valence: [-1.0, 1.0].
 # --------------------------------------------------------------------------
 ALTER_ADD_REWARD_EXPECTATION = """
 ALTER TABLE nodes ADD COLUMN reward_expectation REAL DEFAULT 0.0;
 """
 # --------------------------------------------------------------------------
-# Миграция: embedding — вектор смысла узла для семантического поиска.
+# Migration: embedding — a node's meaning vector for semantic search.
 #
-# Хранится BLOB-ом (float32), заполняется лениво: узлы, созданные до
-# появления модели, получают вектор при первом же поиске. NULL — законное
-# значение и означает "семантики для этого узла пока нет", поиск в таком
-# случае опирается на строковое сходство.
+# Stored as a BLOB (float32) and filled lazily: nodes created before the
+# model appeared get their vector on the first search that touches them.
+# NULL is a legitimate value meaning "no semantics for this node yet", and
+# search then falls back to string similarity.
 # --------------------------------------------------------------------------
 ALTER_ADD_EMBEDDING = """
 ALTER TABLE nodes ADD COLUMN embedding BLOB DEFAULT NULL;
 """
 class Database:
     """
-    Тонкая обёртка над SQLite для таблицы `nodes`.
+    A thin wrapper over SQLite for the `nodes` table.
 
-    Использование:
+    Usage:
         db = Database()
-        db.insert_node(context="привет", response="привет!", weight=0.8)
+        db.insert_node(context="hello", response="hi there!", weight=0.8)
         rows = db.fetch_all_nodes()
     """
 
@@ -177,14 +171,14 @@ class Database:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
-        # Включаем поддержку внешних ключей — без этого SQLite ИГНОРИРУЕТ
-        # "ON DELETE CASCADE" в схеме edges, и при удалении узла (delete_node)
-        # его рёбра остались бы "осиротевшими" записями в таблице edges.
+        # Enable foreign keys — without this SQLite IGNORES the
+        # "ON DELETE CASCADE" in the edges schema, and deleting a node
+        # would leave orphaned rows behind in `edges`.
         self._conn.execute("PRAGMA foreign_keys = ON;")
         self._init_schema()
 
     def _init_schema(self) -> None:
-        """Создаёт таблицы nodes/edges и нужные индексы, если их ещё нет."""
+        """Creates the nodes/edges tables and their indexes if absent."""
         cursor = self._conn.cursor()
         cursor.execute(SCHEMA)
         cursor.execute(INDEX_CONTEXT)
@@ -200,10 +194,10 @@ class Database:
 
     def _migrate_meta_columns(self) -> None:
         """
-        Миграция таблицы nodes: добавляет колонки is_meta/node_type, если
-        они ещё не существуют (для БД, созданных до Итерации 15). ALTER
-        TABLE в SQLite не поддерживает IF NOT EXISTS для колонок, поэтому
-        перехватываем sqlite3.OperationalError ("duplicate column name").
+        Adds the is_meta/node_type columns if they do not exist yet (for
+        databases created before they were introduced). SQLite's ALTER
+        TABLE has no IF NOT EXISTS for columns, so sqlite3.OperationalError
+        ("duplicate column name") is caught instead.
         """
         cursor = self._conn.cursor()
         migrated_any = False
@@ -229,13 +223,13 @@ class Database:
 
     def _migrate_decay_columns(self) -> None:
         """
-        Миграция: добавляет колонку last_decayed_at в nodes и edges —
-        отдельные "часы" для decay, НЕ совпадающие с last_accessed/
-        last_activated (см. комментарий у ALTER_ADD_LAST_DECAYED_*).
+        Adds last_decayed_at to nodes and edges — a separate decay clock
+        that does NOT coincide with last_accessed/last_activated (see the
+        comment near ALTER_ADD_LAST_DECAYED_*).
 
-        Существующие строки backfill'ятся текущим значением
-        last_accessed/last_activated — decay-часы для них просто
-        начинают тикать с этого момента, без искусственного "долга".
+        Existing rows are backfilled with their current
+        last_accessed/last_activated: their decay clock simply starts
+        ticking from that moment, with no artificial "debt".
         """
         cursor = self._conn.cursor()
         migrated_any = False
@@ -263,12 +257,12 @@ class Database:
 
     def _migrate_stability_column(self) -> None:
         """
-        Миграция: добавляет nodes.stability — множитель к характерному
-        времени жизни узла (см. комментарий у ALTER_ADD_STABILITY).
+        Adds nodes.stability — a multiplier on a node's characteristic
+        lifetime (see the comment near ALTER_ADD_STABILITY).
 
-        Существующие узлы получают STABILITY_INITIAL: они не наказываются
-        за то, что были созданы до появления механизма, но и не получают
-        незаслуженного бессмертия — дальше всё решает востребованность.
+        Existing nodes get STABILITY_INITIAL: they are not punished for
+        predating the mechanism, but they get no undeserved immortality
+        either — from here on, usefulness decides.
         """
         cursor = self._conn.cursor()
         migrated = False
@@ -281,8 +275,8 @@ class Database:
                 if "duplicate column name" not in str(exc):
                     raise
 
-        # Явный backfill: страхует и от NULL-ов, если колонка когда-то
-        # появилась без DEFAULT.
+        # Explicit backfill: also guards against NULLs if the column was
+        # once added without a DEFAULT.
         cursor.execute(
             "UPDATE nodes SET stability = ? WHERE stability IS NULL",
             (self.settings.stability_initial,),
@@ -298,7 +292,7 @@ class Database:
             )
 
     # ----------------------------------------------------------------------
-    # CRUD операции
+    # CRUD operations
     # ----------------------------------------------------------------------
 
     def insert_node(
@@ -310,14 +304,14 @@ class Database:
         node_type: str = "episodic",
     ) -> int:
         """
-        Добавляет новый узел памяти. Возвращает id созданной записи.
+        Inserts a new memory node. Returns the id of the created row.
 
-        node_type классифицирует природу узла:
-            "episodic" (по умолчанию) — обычное воспоминание/эпизод
-            "concept"                 — явно преподанное понятие/термин/правило
-            "meta"                    — служебные супер-узлы (обрабатываются
-                                         отдельно через is_meta/upsert_meta_node,
-                                         сюда практически не попадает напрямую)
+        node_type classifies the nature of the node:
+            "episodic" (default) — an ordinary memory or episode
+            "concept"            — an explicitly taught notion, term or rule
+            "meta"               — service super-nodes (handled separately
+                                    through is_meta/upsert_meta_node; they
+                                    practically never arrive here directly)
         """
         ts = timestamp if timestamp is not None else time.time()
         cursor = self._conn.cursor()
@@ -337,30 +331,30 @@ class Database:
         return node_id
 
     def get_node(self, node_id: int) -> Optional[sqlite3.Row]:
-        """Возвращает один узел по id, либо None."""
+        """Returns a single node by id, or None."""
         cursor = self._conn.cursor()
         cursor.execute("SELECT * FROM nodes WHERE id = ?", (node_id,))
         return cursor.fetchone()
 
     def fetch_all_nodes(self) -> List[sqlite3.Row]:
-        """Возвращает все узлы памяти (ВСЕ node_type — используется decay/sleep_cycle,
-        где угасание/забывание должно применяться одинаково к любому типу узла)."""
+        """All memory nodes (EVERY node_type — used by decay and the sleep
+        cycle, where fading must apply identically to any type of node)."""
         cursor = self._conn.cursor()
         cursor.execute("SELECT * FROM nodes")
         return cursor.fetchall()
 
     def fetch_searchable_nodes(self) -> List[sqlite3.Row]:
         """
-        Возвращает только узлы, пригодные для семантического поиска
-        диалогового контекста (MemoryGraph.search) — то есть настоящие
-        воспоминания/эпизоды и явно преподанные понятия.
+        Only the nodes fit for semantic search over conversational
+        context (MemoryGraph.search) — that is, real memories and
+        explicitly taught concepts.
 
-        ИСКЛЮЧАЕТ 'word'/'syllable' (служебные узлы лексического
-        усвоения — у них пустой response, и участие в поиске приводило
-        к ложным MEMORY HIT на любом повторно использованном слове,
-        см. баг: "почему" находило само себя с score=1.0) и
-        'self_model'/'user_model' (мета-узлы, подмешиваются в промпт
-        отдельным механизмом, не через search).
+        EXCLUDES 'word'/'syllable' (service nodes of lexical acquisition:
+        their response is empty, and letting them into search produced
+        false MEMORY HITs on any reused word — the bug where "why" found
+        itself with score=1.0) and 'self_model'/'user_model' (meta-nodes
+        mixed into the prompt by a separate mechanism, not through
+        search).
         """
         cursor = self._conn.cursor()
         cursor.execute(
@@ -369,7 +363,7 @@ class Database:
         return cursor.fetchall()
 
     def update_weight(self, node_id: int, new_weight: float) -> None:
-        """Обновляет вес узла (например, после decay или подкрепления)."""
+        """Updates a node's weight (after decay or reinforcement, say)."""
         cursor = self._conn.cursor()
         cursor.execute(
             "UPDATE nodes SET weight = ? WHERE id = ?",
@@ -379,23 +373,23 @@ class Database:
 
     def update_last_accessed(self, node_id: int, timestamp: Optional[float] = None) -> None:
         """
-        Регистрирует ВСПОМИНАНИЕ узла. Делает три вещи одним запросом:
+        Registers a RECALL of the node. Does three things in one query:
 
-            1. last_accessed    — когда узел реально использовали
-                                  (нужно для proactive cooldown и скоринга);
-            2. last_decayed_at  — точка отсчёта угасания сдвигается вперёд
-                                  (см. _migrate_decay_columns);
-            3. stability        — РАСТЁТ мультипликативно, до STABILITY_MAX.
+            1. last_accessed    — when the node was actually used
+                                  (needed for proactive cooldown and scoring);
+            2. last_decayed_at  — the decay origin moves forward
+                                  (see _migrate_decay_columns);
+            3. stability        — GROWS multiplicatively, up to STABILITY_MAX.
 
-        Пункт 3 — это эффект распределённого повторения: каждое успешное
-        обращение к памяти делает её не только свежее, но и ПРОЧНЕЕ, то
-        есть увеличивает эффективное время жизни (AGE_T0 * stability).
-        Благодаря этому случайный обмен репликами уходит за сутки, а то,
-        к чему организм действительно возвращался, живёт месяцами.
+        Point 3 is the spacing effect: every successful retrieval makes a
+        memory not only fresher but STURDIER, increasing its effective
+        lifetime (AGE_T0 * stability). Thanks to that an accidental
+        exchange is gone within a day, while what the organism genuinely
+        returned to lives for months.
 
-        Один UPDATE вместо чтения-записи выбран намеренно: touch_node
-        вызывается на каждое совпадение поиска и на каждый узел,
-        подтянутый распространением активации.
+        A single UPDATE instead of read-then-write is deliberate:
+        touch_node is called for every search hit and for every node
+        pulled in by spreading activation.
         """
         ts = timestamp if timestamp is not None else time.time()
         cursor = self._conn.cursor()
@@ -419,9 +413,9 @@ class Database:
 
     def update_embedding(self, node_id: int, blob: Optional[bytes]) -> None:
         """
-        Записывает вектор смысла узла. Отдельным методом, а не при
-        вставке: узлы, созданные до появления модели, досчитываются
-        лениво при первом поиске.
+        Stores a node's meaning vector. A separate method rather than
+        part of insertion: nodes created before the model existed are
+        filled in lazily on the first search.
         """
         cursor = self._conn.cursor()
         cursor.execute("UPDATE nodes SET embedding = ? WHERE id = ?", (blob, node_id))
@@ -429,9 +423,9 @@ class Database:
 
     def update_stability(self, node_id: int, stability: float) -> None:
         """
-        Задаёт сопротивление узла забыванию напрямую. Нужно вытеснению
-        противоречий: устаревшая версия факта возвращается в разряд
-        забываемых, а не удаляется.
+        Sets a node's resistance to forgetting directly. Needed by
+        supersession: a stale version of a fact returns to the forgettable
+        pile rather than being deleted.
         """
         cursor = self._conn.cursor()
         cursor.execute("UPDATE nodes SET stability = ? WHERE id = ?", (stability, node_id))
@@ -439,11 +433,12 @@ class Database:
 
     def update_reward_expectation(self, node_id: int, expectation: float) -> None:
         """
-        Записывает новое ожидаемое одобрение за использование узла.
+        Stores the new expected approval for using a node.
 
-        Намеренно НЕ трогает last_accessed/last_decayed_at: получение
-        оценки — не то же самое, что вспоминание. Иначе любая реакция
-        пользователя продлевала бы жизнь узлу, включая ругань.
+        Deliberately does NOT touch last_accessed/last_decayed_at:
+        receiving a rating is not the same as recalling. Otherwise any
+        reaction from the user would extend a node's life, including
+        criticism.
         """
         cursor = self._conn.cursor()
         cursor.execute(
@@ -453,7 +448,7 @@ class Database:
         self._conn.commit()
 
     def delete_node(self, node_id: int) -> None:
-        """Физически удаляет узел (используется во время sleep_cycle при забывании)."""
+        """Physically deletes a node (used by the sleep cycle when forgetting)."""
         cursor = self._conn.cursor()
         cursor.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
         self._conn.commit()
@@ -461,12 +456,12 @@ class Database:
 
     def bulk_update_weights(self, updates: List[Dict[str, Any]]) -> None:
         """
-        Массовое обновление весов. updates = [{"id": 1, "weight": 0.4,
+        Bulk weight update. updates = [{"id": 1, "weight": 0.4,
         "last_decayed_at": 12345.0}, ...]
-        Используется decay-циклом для эффективного батч-обновления.
-        Каждая запись ОБЯЗАНА содержать last_decayed_at (новую точку
-        отсчёта decay) — иначе следующий decay-проход пересчитает dt от
-        старой метки и угасание накопится некорректно.
+        Used by the decay cycle for an efficient batch update. Every row
+        MUST carry last_decayed_at (the new decay origin) — otherwise the
+        next decay pass would measure dt from the old mark and fading
+        would accumulate incorrectly.
         """
         cursor = self._conn.cursor()
         cursor.executemany(
@@ -476,11 +471,11 @@ class Database:
         self._conn.commit()
 
     def close(self) -> None:
-        """Закрывает соединение с БД."""
+        """Closes the database connection."""
         self._conn.close()
 
     # ----------------------------------------------------------------------
-    # EDGES — ассоциативные связи между узлами (Semantic Edges)
+    # EDGES — associative links between nodes (semantic edges)
     # ----------------------------------------------------------------------
 
     def upsert_edge(
@@ -492,15 +487,14 @@ class Database:
         max_weight: float = 1.0,
     ) -> float:
         """
-        Создаёт новое ребро node_from -> node_to с начальным весом weight_boost,
-        либо, если ребро уже существует, УСИЛИВАЕТ его вес на weight_boost
-        (ограничивая сверху max_weight). Обновляет last_activated.
+        Creates a new edge node_from -> node_to with initial weight
+        weight_boost, or, if the edge exists, INCREASES its weight by
+        weight_boost (capped at max_weight). Updates last_activated.
 
-        Пара нормализуется (node_from, node_to) так, чтобы связь была
-        симметричной по факту хранения — всегда сохраняем меньший id первым,
-        избегая дублей A->B и B->A как разных строк.
+        The pair is normalised so storage is symmetric — the smaller id is
+        always saved first, which avoids A->B and B->A becoming two rows.
 
-        Возвращает итоговый вес ребра после операции.
+        Returns the resulting edge weight.
         """
         ts = timestamp if timestamp is not None else time.time()
         a, b = (node_from, node_to) if node_from <= node_to else (node_to, node_from)
@@ -524,11 +518,12 @@ class Database:
                 )
                 self._conn.commit()
             except sqlite3.IntegrityError:
-                # Последний рубеж защиты: один из узлов был удалён между
-                # проверкой существования (MemoryGraph.connect_nodes) и
-                # этой вставкой (крайне узкое окно гонки) — FOREIGN KEY
-                # constraint. Не даём этому уронить весь обработчик
-                # сообщения, просто пропускаем создание ребра.
+                # Last line of defence: one of the nodes was deleted
+                # between the existence check (MemoryGraph.connect_nodes)
+                # and this insert — an extremely narrow race window —
+                # tripping the FOREIGN KEY constraint. Rather than let
+                # that take down the whole message handler, the edge is
+                # simply skipped.
                 self._conn.rollback()
                 logger.warning(
                     "[EDGE SKIP] FOREIGN KEY constraint while creating edge %s <-> %s "
@@ -555,9 +550,9 @@ class Database:
 
     def get_edges_for_node(self, node_id: int) -> List[sqlite3.Row]:
         """
-        Возвращает все рёбра, инцидентные node_id (в любом направлении
-        хранения node_from/node_to), вместе с id соседнего узла как
-        отдельным вычисляемым полем `neighbor_id`.
+        All edges incident to node_id (in either stored direction),
+        together with the neighbouring node's id as a computed field
+        `neighbor_id`.
         """
         cursor = self._conn.cursor()
         cursor.execute(
@@ -577,15 +572,15 @@ class Database:
         return cursor.fetchall()
 
     def fetch_all_edges(self) -> List[sqlite3.Row]:
-        """Возвращает все рёбра графа (используется decay-циклом)."""
+        """All edges in the graph (used by the decay cycle)."""
         cursor = self._conn.cursor()
         cursor.execute("SELECT * FROM edges")
         return cursor.fetchall()
 
     def bulk_update_edge_weights(self, updates: List[Dict[str, Any]]) -> None:
         """
-        Массовое обновление весов рёбер. updates = [{"id": 1, "weight": 0.1}, ...]
-        Используется decay-циклом рёбер.
+        Bulk edge weight update. updates = [{"id": 1, "weight": 0.1}, ...]
+        Used by the edge decay cycle.
         """
         if not updates:
             return
@@ -597,22 +592,22 @@ class Database:
         self._conn.commit()
 
     def delete_edge(self, edge_id: int) -> None:
-        """Физически удаляет ребро (используется при decay/забывании связи)."""
+        """Physically deletes an edge (used when a link decays away)."""
         cursor = self._conn.cursor()
         cursor.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
         self._conn.commit()
         logger.info("[EDGE FORGOTTEN] id=%s deleted from the database", edge_id)
 
     # ----------------------------------------------------------------------
-    # SLEEP CYCLE — батч-прунинг и поиск орфанов
+    # SLEEP CYCLE — batch pruning and orphan search
     # ----------------------------------------------------------------------
 
     def delete_edges_below_weight(self, min_weight: float) -> int:
         """
-        Батч-удаление ВСЕХ рёбер с weight < min_weight. Используется при
-        синаптическом прунинге во время фазы сна (SleepCycle.run_sleep_cycle).
+        Bulk deletion of ALL edges with weight < min_weight. Used for
+        synaptic pruning during the sleep phase.
 
-        Возвращает количество удалённых рёбер.
+        Returns the number of edges deleted.
         """
         cursor = self._conn.cursor()
         cursor.execute("SELECT COUNT(*) as cnt FROM edges WHERE weight < ?", (min_weight,))
@@ -631,37 +626,36 @@ class Database:
 
     def get_orphan_nodes(self, min_edge_weight: float, max_node_weight: float) -> List[sqlite3.Row]:
         """
-        Возвращает узлы, у которых НЕТ ни одного ребра с weight >= min_edge_weight
-        (то есть узел фактически изолирован от ассоциативной сети), И
-        текущий вес самого узла ниже max_node_weight (слабые, малозначимые
-        воспоминания — сильные изолированные узлы НЕ считаются орфанами
-        и не удаляются, даже без связей). Мета-узлы (is_meta=1) полностью
-        иммунны и никогда не попадают в этот запрос.
+        Nodes that have NO edge with weight >= min_edge_weight (that is,
+        the node is effectively cut off from the associative network) AND
+        whose own weight is below max_node_weight (weak, unimportant
+        memories — strong isolated nodes are NOT orphans and are not
+        deleted even without links). Meta-nodes (is_meta=1) are fully
+        immune and never appear in this query.
 
-        ЛЕКСИЧЕСКИЕ узлы ('word' И 'syllable') иммунны: словарный запас —
-        это медленно растущая инфраструктура (vocabulary_size), а не
-        транзиентное эпизодическое воспоминание. Свежесозданный word-узел
-        почти всегда технически "осиротевший" на границе
-        EDGE_ACTIVATION_THRESHOLD сразу после первого decay-тика
-        (SYLLABLE_WORD_EDGE_WEIGHT граничит с этим порогом) — без иммунитета
-        слово удалялось бы до того, как успеет повториться и закрепиться,
-        и vocabulary_size никогда бы не рос.
+        LEXICAL nodes ('word' AND 'syllable') are immune: vocabulary is
+        slowly growing infrastructure, not a transient episodic memory. A
+        freshly created word node is almost always technically "orphaned"
+        right at EDGE_ACTIVATION_THRESHOLD after the first decay tick
+        (SYLLABLE_WORD_EDGE_WEIGHT sits on that boundary) — without
+        immunity a word would be deleted before it had a chance to recur
+        and take hold, and the vocabulary would never grow.
 
-        'syllable' раньше в иммунитет НЕ входил, хотя должен был по той же
-        логике: слог держится ребром SYLLABLE_WORD_EDGE_WEIGHT=0.45, но
-        рёбра угасают быстрее узлов (EDGE_DECAY_RATE=0.08 против
-        DECAY_RATE=0.05), поэтому связь рано или поздно проседает ниже
-        EDGE_ACTIVATION_THRESHOLD=0.3 — и слог удалялся во сне, подмывая
-        субстрат лепета, из которого вообще строится довербальная речь.
+        'syllable' was NOT immune originally, though by the same logic it
+        should have been: a syllable is held by an edge of
+        SYLLABLE_WORD_EDGE_WEIGHT=0.45, but edges decay faster than nodes
+        (EDGE_DECAY_RATE=0.08 against DECAY_RATE=0.05), so the link sooner
+        or later drops below EDGE_ACTIVATION_THRESHOLD=0.3 — and the
+        syllable was deleted during sleep, eroding the very substrate that
+        pre-verbal speech is built from.
 
-        Естественное забывание для лексики всё равно происходит — через
-        обычный decay до FORGET_THRESHOLD, но на своей шкале времени
-        (self.settings.lexical_age_t0, ~30 суток), а не через жёсткий orphan-
-        прунинг сна.
+        Natural forgetting still applies to vocabulary — through ordinary
+        decay down to FORGET_THRESHOLD, but on its own timescale
+        (lexical_age_t0, ~30 days) rather than through the sleep phase's
+        hard orphan pruning.
 
-        Используется при синаптическом прунинге фазы сна для удаления
-        "мусорных" узлов, которые не входят ни в один ассоциативный кластер
-        и сами по себе не представляют большой ценности.
+        Used during synaptic pruning to remove "junk" nodes that belong to
+        no associative cluster and carry little value on their own.
         """
         cursor = self._conn.cursor()
         cursor.execute(
@@ -683,25 +677,22 @@ class Database:
 
     def get_hub_candidates(self, min_edge_weight: float) -> List[sqlite3.Row]:
         """
-        Возвращает узлы, отсортированные по СУММЕ весов их рёбер, где
-        каждое учитываемое ребро имеет weight >= min_edge_weight.
+        Nodes sorted by the SUM of their edge weights, counting only
+        edges with weight >= min_edge_weight.
 
-        Используется для поиска "хабов" — доминантных очагов активности,
-        вокруг которых строится звёздная кластеризация (Hub-and-Spoke)
-        в фазе сна.
+        Used to find "hubs" — dominant centres of activity around which
+        hub-and-spoke clustering is built during sleep.
 
-        ВАЖНО: ограничено node_type IN ('episodic', 'concept') и is_meta=0.
-        Без этого фильтра хабами могли становиться служебные лексические
-        узлы ('word'/'syllable') — их рёбра (SYLLABLE_WORD_EDGE_WEIGHT,
-        WORD_COOCCURRENCE_EDGE_WEIGHT) укрепляются очень быстро при
-        повторном употреблении слова и легко перегоняли по hub_score
-        настоящие эпизодические воспоминания, из-за чего семантическая
-        консолидация во сне "обобщала" бессмысленные пары вида
-        User: "привет" | Bot: "привет" (context == response у лексических
-        узлов) вместо реальных диалогов.
+        IMPORTANT: restricted to node_type IN ('episodic', 'concept') and
+        is_meta=0. Without that filter, service lexical nodes could become
+        hubs: their edges strengthen very quickly on repeated use of a word
+        and easily outscored real episodic memories, so semantic
+        consolidation during sleep "generalised" meaningless pairs like
+        User: "hello" | Bot: "hello" (context == response for lexical
+        nodes) instead of actual conversations.
 
-        Возвращает строки вида: {id, context, response, weight,
-        created_at, last_accessed, hub_score}, отсортированные по
+        Returns rows of {id, context, response, weight, created_at,
+        last_accessed, hub_score}, sorted by
         hub_score DESC.
         """
         cursor = self._conn.cursor()
@@ -731,14 +722,14 @@ class Database:
         self, min_created_at: float, limit: int
     ) -> List[sqlite3.Row]:
         """
-        Возвращает до `limit` "значимых" узлов LTM (node_type='episodic',
-        is_meta=0 — то есть спайк-узлы, эмоциональные/структурные узлы
-        консолидации и абстрактные узлы сна, но НЕ лексика/концепты/мета-
-        узлы), созданных ПОСЛЕ min_created_at, отсортированных по весу
-        (сильнейшие/самые эмоционально значимые — первыми).
+        Up to `limit` "significant" long-term nodes (node_type='episodic',
+        is_meta=0 — spike nodes, emotional and structural consolidation
+        nodes, abstract sleep nodes, but NOT vocabulary, concepts or
+        meta-nodes) created AFTER min_created_at, sorted by weight
+        (strongest and most emotionally charged first).
 
-        Используется эволюцией Self-Model во время сна (Итерация H) —
-        строит "дайджест" опыта, накопленного с прошлого сна.
+        Used by the self-model evolution during sleep to build a digest of
+        the experience accumulated since the previous sleep.
         """
         cursor = self._conn.cursor()
         cursor.execute(
@@ -755,13 +746,13 @@ class Database:
         return cursor.fetchall()
 
     # ----------------------------------------------------------------------
-    # SELF-MODEL & USER-MODEL — мета-узлы самосознания (Итерация 15)
+    # SELF-MODEL & USER-MODEL — meta-nodes of self-awareness
     # ----------------------------------------------------------------------
 
     def get_meta_node(self, node_type: str) -> Optional[sqlite3.Row]:
         """
-        Возвращает мета-узел заданного типа ('self_model' или 'user_model'),
-        либо None, если он ещё не создан.
+        The meta-node of a given type ('self_model' or 'user_model'), or
+        None if it has not been created yet.
         """
         cursor = self._conn.cursor()
         cursor.execute(
@@ -778,13 +769,13 @@ class Database:
         timestamp: Optional[float] = None,
     ) -> int:
         """
-        Создаёт мета-узел заданного типа, если он не существует, либо
-        обновляет его содержимое (context/response), если уже существует.
-        context и response дублируют одно и то же содержимое мета-узла —
-        для мета-узлов различие context/response не имеет смысла, это
-        просто единый "слот" самосознания/образа пользователя.
+        Creates the meta-node of a given type if it does not exist, or
+        updates its content otherwise. context and response hold the same
+        text — for meta-nodes the context/response distinction is
+        meaningless; it is simply one slot for the self image or the image
+        of the user.
 
-        Возвращает id мета-узла.
+        Returns the meta-node's id.
         """
         ts = timestamp if timestamp is not None else time.time()
         existing = self.get_meta_node(node_type)
@@ -823,14 +814,13 @@ class Database:
         return existing["id"]
 
     # ----------------------------------------------------------------------
-    # CONCEPT EXTRACTION — семантические понятия (Итерация 16)
+    # CONCEPT EXTRACTION — semantic concepts
     # ----------------------------------------------------------------------
 
     def get_concept_node_by_name(self, name: str) -> Optional[sqlite3.Row]:
         """
-        Возвращает concept-узел по точному совпадению нормализованного
-        имени (хранится в поле context), либо None, если такого понятия
-        ещё нет в графе знаний.
+        A concept node matched by its exact normalised name (stored in
+        the context field), or None if the graph holds no such concept.
         """
         cursor = self._conn.cursor()
         cursor.execute(
@@ -847,14 +837,13 @@ class Database:
         timestamp: Optional[float] = None,
     ) -> "tuple[int, bool]":
         """
-        Создаёт новый concept-узел (context=name, response=definition,
-        node_type='concept'), либо, если понятие с таким именем уже
-        существует, ОБНОВЛЯЕТ его определение (response) и слегка
-        усиливает вес (повторное объяснение того же термина укрепляет
-        память о нём).
+        Creates a concept node (context=name, response=definition,
+        node_type='concept'), or, if a concept with that name exists,
+        UPDATES its definition and slightly raises its weight — explaining
+        the same term again strengthens the memory of it.
 
-        Возвращает (node_id, was_created), где was_created=True, если
-        узел был создан впервые, False — если это обновление существующего.
+        Returns (node_id, was_created), where was_created is True on first
+        creation and False when an existing node was updated.
         """
         ts = timestamp if timestamp is not None else time.time()
         existing = self.get_concept_node_by_name(name)
@@ -894,14 +883,14 @@ class Database:
         return existing["id"], False
 
     # ----------------------------------------------------------------------
-    # LEXICAL ACQUISITION — word/syllable узлы (освоение языка "с нуля")
+    # LEXICAL ACQUISITION — word/syllable nodes (learning a language from zero)
     # ----------------------------------------------------------------------
 
     def get_lexical_node(self, node_type: str, text: str) -> Optional[sqlite3.Row]:
         """
-        Возвращает лексический узел (node_type='word' или 'syllable') по
-        точному совпадению нормализованного текста (хранится в context),
-        либо None, если такой узел ещё не создан.
+        A lexical node (node_type='word' or 'syllable') matched by its
+        exact normalised text (stored in context), or None if no such node
+        exists yet.
         """
         cursor = self._conn.cursor()
         cursor.execute(
@@ -920,13 +909,14 @@ class Database:
         max_weight: float = 1.0,
     ) -> "tuple[int, bool]":
         """
-        Создаёт новый лексический узел (context=response=text, node_type=
-        'word'/'syllable') с весом initial_weight, либо, если такой токен
-        уже встречался ранее, УСИЛИВАЕТ его вес на reinforce_step (не выше
-        max_weight) — имитация постепенного "усвоения" слова/слога через
-        повторение (частотность = освоенность).
+        Creates a lexical node (context=response=text,
+        node_type='word'/'syllable') with weight initial_weight, or, if the
+        token has been seen before, RAISES its weight by reinforce_step
+        (capped at max_weight) — modelling the gradual acquisition of a
+        word or syllable through repetition, where frequency equals
+        mastery.
 
-        Возвращает (node_id, was_created).
+        Returns (node_id, was_created).
         """
         ts = timestamp if timestamp is not None else time.time()
         existing = self.get_lexical_node(node_type, text)
@@ -963,19 +953,18 @@ class Database:
 
     def count_memory_nodes(self) -> int:
         """
-        Количество узлов, которые являются ВОСПОМИНАНИЯМИ — эпизоды и
-        понятия. Исключает лексическую инфраструктуру ('word'/'syllable')
-        и мета-узлы.
+        The number of nodes that are MEMORIES — episodes and concepts.
+        Excludes lexical infrastructure ('word'/'syllable') and meta-nodes.
 
-        Нужен для триггера автоматической фазы сна. Раньше там стоял
-        count_nodes() по ВСЕМ узлам, а лексика набирает сотни узлов за
-        первый десяток сообщений — из-за чего порог
-        SLEEP_AUTO_TRIGGER_NODE_COUNT=150 пробивался уже на 9-м сообщении
-        и сон запускался НА КАЖДОЕ последующее. Последствия были тяжёлые:
-        STM очищался каждое сообщение (бот терял нить разговора), стресс
-        сбрасывался каждое сообщение, прунинг гонялся каждое сообщение, а
-        в проде на каждое сообщение уходило ДВА вызова LLM (консолидация
-        кластера + эволюция Self-Model).
+        Needed for the automatic sleep trigger. It used to call
+        count_nodes() over EVERY node, while vocabulary accumulates
+        hundreds of nodes within the first dozen messages — so the
+        threshold of 150 was crossed by the ninth message and sleep fired
+        on EVERY message after that. The consequences were severe: STM was
+        wiped every message (the bot lost the thread of the conversation),
+        stress was reset every message, pruning ran every message, and in
+        production every message cost TWO LLM calls (cluster consolidation
+        plus self-model evolution).
         """
         cursor = self._conn.cursor()
         cursor.execute(
@@ -986,7 +975,7 @@ class Database:
         return row["cnt"] if row else 0
 
     def count_nodes_by_type(self, node_type: str) -> int:
-        """Возвращает количество узлов заданного node_type (например, 'word')."""
+        """The number of nodes of a given node_type (for example 'word')."""
         cursor = self._conn.cursor()
         cursor.execute("SELECT COUNT(*) as cnt FROM nodes WHERE node_type = ?", (node_type,))
         row = cursor.fetchone()
@@ -994,11 +983,11 @@ class Database:
 
     def count_mastered_words(self, min_weight: float) -> int:
         """
-        Возвращает количество word-узлов с weight >= min_weight — то есть
-        слов, которые были ЗАКРЕПЛЕНЫ повторным употреблением, а не просто
-        услышаны один раз. Используется вместо count_nodes_by_type('word')
-        там, где важно честное "усвоение" языка (гейтинг речевых стадий),
-        а не сырой факт разового контакта со словом.
+        The number of word nodes with weight >= min_weight — words that
+        were CONSOLIDATED by repeated use rather than merely heard once.
+        Used instead of count_nodes_by_type('word') wherever genuine
+        acquisition matters (gating speech stages) rather than the raw
+        fact of a single encounter with a word.
         """
         cursor = self._conn.cursor()
         cursor.execute(
@@ -1010,16 +999,16 @@ class Database:
 
     def get_lexical_nodes_by_texts(self, node_type: str, texts: List[str]) -> List[sqlite3.Row]:
         """
-        Возвращает лексические узлы для СПИСКА текстов одним запросом.
+        Lexical nodes for a LIST of texts in a single query.
 
-        Нужен для расчёта удивления (MemoryGraph.compute_surprise): там на
-        каждое входящее сообщение проверяется знакомость всех его слов, и
-        поштучный get_lexical_node дал бы до LEXICAL_MAX_TOKENS_PER_INPUT
-        обращений к SQLite — на каждое сообщение, дважды (perplexity
-        считается и в brain_session, и в cortex).
+        Needed by the surprise computation (MemoryGraph.compute_surprise):
+        it checks the familiarity of every word of every incoming message,
+        and calling get_lexical_node one by one would mean up to
+        lexical_max_tokens_per_input round trips to SQLite per message,
+        twice over.
 
-        Дубликаты в texts допустимы: SQL всё равно вернёт по одной строке
-        на узел, вызывающий код сам раскладывает результат в словарь.
+        Duplicates in `texts` are fine: SQL returns one row per node
+        anyway, and the caller arranges the result into a dictionary.
         """
         if not texts:
             return []
@@ -1034,13 +1023,13 @@ class Database:
 
     def get_edges_between(self, node_ids: List[int]) -> List[sqlite3.Row]:
         """
-        Возвращает все рёбра, ОБА конца которых лежат в node_ids — одним
-        запросом. Используется расчётом удивления для проверки, насколько
-        привычны сочетания соседних слов входящего сообщения.
+        All edges with BOTH ends inside node_ids, in a single query. Used
+        by the surprise computation to check how familiar the pairings of
+        neighbouring words in an incoming message are.
 
-        Направление в таблице не хранится (см. upsert_edge — пара
-        нормализуется по возрастанию id), поэтому вызывающий код должен
-        искать пару в обоих порядках.
+        Direction is not stored (see upsert_edge — the pair is normalised
+        by ascending id), so the caller must look a pair up in both
+        orders.
         """
         if len(node_ids) < 2:
             return []
@@ -1058,11 +1047,11 @@ class Database:
 
     def get_top_nodes_by_type(self, node_type: str, limit: int) -> List[sqlite3.Row]:
         """
-        Возвращает до `limit` узлов заданного node_type, отсортированных по
-        весу убывающе — то есть самые ОСВОЕННЫЕ слова/слоги. В отличие от
-        get_random_nodes_by_type (случайный пул для лепета), здесь нужен
-        именно топ: команда /status показывает учителю, что бот выучил
-        лучше всего.
+        Up to `limit` nodes of a given node_type sorted by descending
+        weight — the best MASTERED words or syllables. Unlike
+        get_random_nodes_by_type (a random pool for babbling), what is
+        needed here is the top: a status command shows the teacher what
+        the bot has learned best.
         """
         cursor = self._conn.cursor()
         cursor.execute(
@@ -1073,20 +1062,22 @@ class Database:
 
     def get_random_nodes_by_type(self, node_type: str, limit: int) -> List[sqlite3.Row]:
         """
-        Возвращает до `limit` случайных узлов заданного node_type —
-        используется инстинктом лепета (babbling) для выбора известных
-        слогов при генерации "лепетного" ответа.
+        Up to `limit` random nodes of a given node_type — used by the
+        babbling instinct to pick known syllables when generating a
+        pre-verbal reply.
 
-        ВЫБОРКА ДЕЛАЕТСЯ В PYTHON, а не через ORDER BY RANDOM(). Так было
-        раньше, и генератор SQLite не сеется ничем: он брал энтропию у
-        системы. Из-за этого измерительные стенды не воспроизводились —
-        два прогона одного кода на одних данных, с одинаковым графом,
-        одинаковым временем и побитово одинаковым состоянием random,
-        расходились уже на первом сообщении, потому что лепет получал
-        другой пул слогов. Гуляли и итоговые числа удержания.
+        THE SAMPLING IS DONE IN PYTHON, not via ORDER BY RANDOM(). It used
+        to be the latter, and SQLite's generator is seeded by nothing: it
+        takes entropy from the system. That made the benchmarks
+        irreproducible — two runs of the same code over the same data,
+        with an identical graph, identical time and a bit-identical
+        `random` state, diverged on the very first message because
+        babbling received a different pool of syllables. The final
+        retention figures wandered along with it.
 
-        random модуля Python сеется стендом, поэтому здесь выборка
-        управляемая. Распределение то же — равномерное без возвращения.
+        Python's `random` module is seeded by the benchmark, so sampling
+        here is controllable. The distribution is the same — uniform
+        without replacement.
         """
         cursor = self._conn.cursor()
         cursor.execute(
@@ -1095,9 +1086,9 @@ class Database:
         )
         rows = cursor.fetchall()
         if limit >= len(rows):
-            # Выборка всё равно вернула бы всё — но порядок должен остаться
-            # случайным: вызывающий берёт из пула взвешенно, и стабильный
-            # порядок сместил бы выбор к малым id.
+            # Sampling would return everything anyway — but the order
+            # must stay random: the caller draws from the pool by weight,
+            # and a stable order would bias the choice towards low ids.
             rows = list(rows)
             random.shuffle(rows)
             return rows
