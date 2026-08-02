@@ -12,59 +12,61 @@
 # COMMERCIAL.md.
 """
 ================================================================================
- EMBEDDINGS.PY — Семантические векторы для поиска по смыслу
+ EMBEDDINGS.PY — Semantic vectors for meaning-based search
 ================================================================================
-До этого модуля память искала ПО БУКВАМ: keyword-пересечение плюс
-SequenceMatcher. Замер показывал, чем это кончается —
+Before this module, memory searched BY LETTERS: keyword overlap plus
+SequenceMatcher. Measurement showed where that ends —
 
-    в памяти "у меня есть кошка":
-        "у меня есть кот"              -> 0.870  найдено
-        "расскажи про кота"            -> не найдено
-        "мой домашний питомец мяукает" -> не найдено
-        "у меня есть кожа"             -> 0.884  НАЙДЕНО ЛУЧШЕ, ЧЕМ КОТ
+    stored "I have a cat" (Russian: "у меня есть кошка"):
+        "у меня есть кот"   (I have a cat, masc.)  -> 0.870  found
+        "расскажи про кота" (tell me about the cat) -> not found
+        "мой питомец мяукает" (my pet meows)        -> not found
+        "у меня есть кожа"  (I have skin)           -> 0.884  FOUND BETTER
 
-то есть "кожа" побеждала "кота", потому что отличается одной буквой.
-Смысла в таком поиске не было вовсе.
+that is, "skin" beat "cat" because it differs by one letter. There was no
+meaning in that search at all.
 
-ВЫБОР МОДЕЛИ продиктован железом, а не вкусом. sentence-transformers тянет
-torch: ~2.5 ГБ на диске и 0.5-1 ГБ RAM на процесс. На этой машине 3.7 ГБ
-всего, свободно ~1.8 ГБ, и рядом работают ещё три сервиса — такой сосед
-уронил бы их. Здесь используется navec (проект natasha): статические
-русские векторы, 51 МБ квантованная модель, ~370 МБ RAM, без torch.
+THE CHOICE OF MODEL was dictated by hardware, not taste.
+sentence-transformers pulls in torch: ~2.5 GB on disk and 0.5-1 GB of RAM
+per process. This machine has 3.7 GB in total with ~1.8 GB free and three
+other services running — such a neighbour would take them down. So navec
+is used (from the natasha project): static Russian vectors, a 51 MB
+quantised model, ~370 MB of RAM, no torch.
 
-СЛУЖЕБНЫЕ СЛОВА ОТБРАСЫВАЮТСЯ, и это не мелочь. Вектор фразы — среднее по
-словам, поэтому "у меня есть" забивает единственное содержательное слово:
-без фильтрации "кожа" держалась на 0.863 и всё равно почти равнялась
-"коту". После отбрасывания служебных — 0.222 против 0.671, порядок стал
-правильным.
+FUNCTION WORDS ARE DROPPED, and that is not a detail. A phrase vector is
+the mean over its words, so "у меня есть" ("I have") drowns out the one
+word that carries meaning: without filtering, "skin" stayed at 0.863 and
+still nearly matched "cat". After dropping function words it was 0.222
+against 0.671 — the order finally became correct.
 
-ОБУЧЕНА НА ХУДОЖЕСТВЕННОЙ ЛИТЕРАТУРЕ (hudlit), и это важнее размера.
-Профессиональная лексика в такой модели не связана: замер косинусов —
+TRAINED ON LITERARY FICTION (hudlit), and that matters more than its
+size. Professional vocabulary is unrelated in such a model — measured
+cosines:
 
-    люблю ~ предпочитаю          0.580   связывает
-    дочь  ~ ребёнок              0.260   слабо
-    аллергия ~ лекарство         0.303   слабо
-    язык  ~ программирование     0.114   НЕ связывает
-    язык  ~ python               0.145   НЕ связывает
+    love ~ prefer                0.580   connected
+    daughter ~ child             0.260   weakly
+    allergy ~ medicine           0.303   weakly
+    language ~ programming       0.114   NOT connected
+    language ~ python            0.145   NOT connected
 
-Слова есть в словаре, но в художественных текстах "язык" — это орган или
-речь, а "python" — змея. Поэтому на памяти "я предпочитаю Python, не
-Java" запрос "какой язык я люблю" не находит ничего, хотя узел цел и
-находится по "какой язык программирования я предпочитаю".
+The words are in the vocabulary, but in fiction a "language" is a tongue
+and a "python" is a snake. So a memory holding "I prefer Python, not
+Java" is not found by "what language do I like", although the node is
+intact and is found by "what programming language do I prefer".
 
-Для технических, медицинских, юридических и любых профессиональных
-областей встроенная модель не годится — туда нужен свой кодировщик
-(см. MemoryGraph(encoder=...)). Это не дефект памяти: узел на месте,
-не находится только формулировка из чужого домена.
+For technical, medical, legal and any other professional domain this
+model is unsuitable — bring your own encoder there (see
+MemoryGraph(encoder=...)). This is not a memory defect: the node is in
+place, only a phrasing from another domain fails to reach it.
 
-ДЕГРАДИРУЕТ МЯГКО: если модели нет, библиотека не установлена или
-EMBEDDINGS_ENABLED=false — encode() возвращает None, а MemoryGraph.search
-продолжает работать на прежнем строковом сходстве. Бот не должен падать
-из-за отсутствия необязательного файла на 51 МБ.
+DEGRADES GENTLY: if the model is missing, the library is not installed or
+embeddings are disabled by settings, encode() returns None and
+MemoryGraph.search keeps working on the previous string similarity. A bot
+must not fall over because an optional 51 MB file is absent.
 
-ЗАГРУЖАЕТСЯ ЛЕНИВО: модель поднимается при первом обращении, а не при
-импорте, чтобы процесс, которому семантика не нужна (тесты, стенд,
-инспектор памяти), не платил за неё оперативной памятью.
+LOADS LAZILY: the model comes up on first use rather than at import, so a
+process that does not need semantics (tests, benchmarks, the memory
+inspector) does not pay for it in RAM.
 ================================================================================
 """
 
@@ -76,9 +78,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Служебные слова: их вектора забивают среднее и стирают смысл фразы.
-# Набор намеренно шире, чем STOP_WORDS в graph_memory (там он отсекает
-# шум для keyword-поиска, здесь — чинит усреднение векторов).
+# Russian function words: their vectors dominate the mean and erase the
+# meaning of a phrase. The set is deliberately wider than STOP_WORDS in
+# graph_memory (there it filters noise for keyword search, here it fixes
+# vector averaging). It is Russian because the bundled model is — with
+# your own encoder this list is irrelevant.
 _FUNCTION_WORDS = {
     "и", "в", "во", "на", "с", "со", "по", "к", "у", "из", "за", "от", "до",
     "для", "что", "как", "это", "то", "я", "ты", "он", "она", "мы", "вы",
@@ -88,13 +92,13 @@ _FUNCTION_WORDS = {
     "тут", "ещё", "еще", "уже", "бы", "чтобы", "если", "когда", "где",
 }
 
-# Настройки модуля: приложение может подменить их до первого
-# обращения через configure(). По умолчанию — библиотечные.
+# Module settings: an application may replace them via configure()
+# before first use. The defaults are the library's own.
 _settings = MemorySettings()
 
 
 def configure(settings: MemorySettings) -> None:
-    """Задаёт настройки эмбеддингов (путь к модели, включённость)."""
+    """Sets the embedding settings (model path, whether enabled)."""
     global _settings, _model, _load_failed
     _settings = settings
     _model, _load_failed = None, False
@@ -107,8 +111,9 @@ _lock = threading.Lock()
 
 def _load_model():
     """
-    Лениво поднимает модель. Повторные неудачи не ретраятся: если файла
-    нет, он не появится сам, а сыпать ошибкой на каждое сообщение незачем.
+    Brings the model up lazily. Repeated failures are not retried: a
+    missing file will not appear on its own, and there is no point raising
+    the same error on every message.
     """
     global _model, _load_failed
 
@@ -150,17 +155,18 @@ def _load_model():
 
 
 def is_available() -> bool:
-    """Работает ли семантический поиск (без побочной загрузки модели)."""
+    """Whether semantic search works (without loading the model as a side effect)."""
     return _load_model() is not None
 
 
 def _content_words(text: str) -> List[str]:
     """
-    Содержательные слова фразы. Служебные отбрасываются — иначе среднее по
-    векторам определяется ими, а не смыслом (см. шапку модуля).
+    The content words of a phrase. Function words are dropped — otherwise
+    the mean of the vectors is decided by them rather than by meaning (see
+    the module header).
 
-    Если содержательных не осталось (фраза целиком служебная — "а что если"),
-    возвращаются все слова: лучше слабый вектор, чем никакого.
+    If no content words remain (a phrase made entirely of function words),
+    all words are returned: a weak vector beats no vector.
     """
     words = [w.strip(".,!?;:()\"'«»").lower() for w in text.split()]
     words = [w for w in words if w]
@@ -170,11 +176,11 @@ def _content_words(text: str) -> List[str]:
 
 def encode(text: str):
     """
-    Вектор смысла фразы, либо None — если семантика недоступна или в тексте
-    не нашлось ни одного known слова.
+    The meaning vector of a phrase, or None when semantics is unavailable
+    or not a single known word was found in the text.
 
-    None это НЕ ошибка: вызывающий код обязан уметь работать без семантики
-    (см. MemoryGraph.search), потому что модель необязательна.
+    None is NOT an error: the caller must be able to work without
+    semantics (see MemoryGraph.search), because the model is optional.
     """
     if not text or not text.strip():
         return None
@@ -193,7 +199,7 @@ def encode(text: str):
 
 
 def cosine(a, b) -> float:
-    """Косинусная близость двух векторов, 0.0 при вырожденных входах."""
+    """Cosine similarity of two vectors; 0.0 for degenerate inputs."""
     if a is None or b is None:
         return 0.0
 
@@ -206,7 +212,7 @@ def cosine(a, b) -> float:
 
 
 def to_blob(vector) -> Optional[bytes]:
-    """Вектор -> BLOB для хранения в SQLite."""
+    """Vector -> BLOB for storage in SQLite."""
     if vector is None:
         return None
     import numpy as np
@@ -214,7 +220,7 @@ def to_blob(vector) -> Optional[bytes]:
 
 
 def from_blob(blob: Optional[bytes]):
-    """BLOB из SQLite -> вектор. None, если поля нет или оно пустое."""
+    """BLOB from SQLite -> vector. None when the field is absent or empty."""
     if not blob:
         return None
     import numpy as np
@@ -222,5 +228,5 @@ def from_blob(blob: Optional[bytes]):
 
 
 def similarity(text: str, blob: Optional[bytes]) -> float:
-    """Удобная обёртка: близость текста к сохранённому вектору узла."""
+    """Convenience wrapper: similarity of a text to a node's stored vector."""
     return cosine(encode(text), from_blob(blob))
