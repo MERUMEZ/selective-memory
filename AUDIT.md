@@ -1,403 +1,449 @@
-# Аудит проекта «Динамический мозг»
+# Audit
 
-**Дата:** 2026-08-01 · **Коммит:** `2873b73` · **Тестов:** 286 · **Строк Python:** 18 424
+**Date:** 2026-08-02 · **Tests:** 286 · **Lines of Python:** ~18,400
 
-Предыдущий аудит — [`audit.txt`](audit.txt) (2026-07-29). Большинство описанного там
-исправлено, он оставлен как история. Этот документ описывает **текущее**
-состояние.
-
-Всё, что здесь утверждается, получено **прогонами**, а не чтением кода.
-Числа воспроизводимы: `tools/simulate_learning.py`, `tools/compare_memory.py`,
-`tools/compare_retention.py`.
+Everything asserted here comes from **runs**, not from reading code. The
+numbers are reproducible: `tools/simulate_learning.py`,
+`tools/compare_memory.py`, `tools/compare_retention.py`,
+`tools/probe_semantic.py`, `tools/bench_longmemeval.py`.
 
 ---
 
-## 1. Что это такое
+## 1. What this is
 
-Не чат-бот и не обёртка над LLM. Это **контроллер памяти и внимания**,
-управляющий языковой моделью.
+Not a chatbot and not an LLM wrapper. It is a **controller of memory and
+attention** that governs a language model.
 
-Разница с RAG принципиальная. У RAG память — индекс: положил всё, достал
-похожее. Здесь память — **экономика с дефицитом**: узел тратит вес,
-угасает по экспоненте, конкурирует за право быть вспомненным и умирает,
-если не пригодился.
+The difference from RAG is fundamental. In RAG memory is an index: put
+everything in, take out what looks similar. Here memory is **an economy
+of scarcity**: a node spends weight, fades exponentially, competes for
+the right to be recalled, and dies if it was never useful.
 
-Один принцип держит конструкцию — **пластичностью правит ошибка
-предсказания** — и реализован дважды:
+One principle holds the construction together — **prediction error
+governs plasticity** — and it is implemented twice:
 
-| Где | Что это | Измерено |
+| Where | What it is | Measured |
 |---|---|---|
-| На входе | удивление = расхождение с собственным графом языка | 0.750 → 0.278 по мере взросления |
-| На действии | дофамин = неожиданность награды, а не награда | прирост радости 0.32 → 0.08 |
+| On input | surprise = divergence from its own graph of language | 0.750 → 0.278 as it matures |
+| On action | dopamine = the unexpectedness of reward, not the reward | joy increment 0.32 → 0.08 |
 
 ---
 
-## 2. Что найдено и починено (эта сессия)
+## 2. What was found and fixed
 
-Ни один из дефектов ниже **нельзя было увидеть чтением кода**. Все нашлись
-замером. Значения констант объясняются здесь, чтобы их не «почистили»
-обратно.
+None of the defects below **could have been seen by reading the code**.
+Every one was found by measurement. Constant values are explained here so
+they do not get "tidied up" back.
 
-### 2.1 Словарь стирался каждую ночь
+### 2.1 Vocabulary was erased every night
 
-`AGE_T0 = 1 час` применялся ко всем узлам, включая лексику. Освоенное
-слово (0.20) падало ниже порога за 6 часов паузы и **удалялось из БД** за
-28. Учить бота было физически невозможно: в рабочей базе за месяц —
-2 освоенных слова из 40 услышанных.
+`AGE_T0 = 1 hour` applied to all nodes, vocabulary included. A mastered
+word (0.20) fell below the threshold after a 6-hour pause and was
+**deleted from the database** within 28. Teaching the bot was physically
+impossible: a month of a live database held 2 mastered words out of 40
+heard.
 
-**Фикс:** `LEXICAL_AGE_T0 = 30 суток`. Словарь — инфраструктура языка, а не
-вчерашний разговор.
+**Fix:** `LEXICAL_AGE_T0 = 30 days`. Vocabulary is the infrastructure of
+language, not yesterday's conversation.
 
-### 2.2 Спайк управлялся счётчиком восклицательных знаков
+### 2.2 The spike gate was driven by counting exclamation marks
 
-«Удивление» считалось энтропией Шеннона по символам строки. Новорождённый
-мозг и мозг после 50 повторений фразы выдавали одинаковые 0.856,
-бессмысленный набор букв — 0.819.
+"Surprise" was Shannon entropy over the characters of a string. A newborn
+mind and a mind that had seen a phrase fifty times both produced 0.856;
+meaningless gibberish scored 0.819.
 
-**Фикс:** `MemoryGraph.compute_surprise` — ошибка предсказания по
-собственному графу (лексическая новизна + структурная).
+**Fix:** `MemoryGraph.compute_surprise` — prediction error against its own
+graph (lexical novelty plus structural).
 
-`BASE_PLASTICITY_THRESHOLD` пришлось калибровать **дважды**, и оба раза
-замером:
+`BASE_PLASTICITY_THRESHOLD` had to be calibrated **three times**, and
+every time by measurement:
 
-- **0.65 → 0.45** здесь. Старый порог был неявно настроен под
-  всегда-высокую перплексию (энтропия символов для любого текста держалась
-  около 0.85–0.9 и молча удерживала плотность у порога). После честного
-  удивления замер показал **ноль спайков за прогон**.
-- **0.45 → 0.35** позже, при слиянии осей возбуждения (§2.5): раньше
-  возбуждение было мёртвым и вклада не давало, теперь оно живое и реально
-  поднимает порог, значит база должна быть ниже на величину типичного
-  вклада.
-- **0.35 → 0.25** по внешнему бенчмарку — первая калибровка не по
-  собственному корпусу. При 0.35 записывалась каждая девятая пара
-  реплик, и R@5 на LongMemEval был 18.3%; при 0.25 стало 68% при том
-  же удержании. Текущее значение — **0.25**.
+- **0.65 → 0.45.** The old threshold was implicitly tuned to
+  always-high perplexity: character entropy stayed near 0.85–0.9 for any
+  text and quietly held density near the threshold. With honest surprise,
+  the measurement showed **zero spikes over an entire run**.
+- **0.45 → 0.35** later, when the arousal axes were merged (§2.5):
+  arousal used to be dead and contributed nothing; now it is live and
+  genuinely raises the threshold, so the base had to drop by the size of
+  a typical contribution.
+- **0.35 → 0.25** against an external benchmark — the first calibration
+  **not** against our own corpus. At 0.35 one exchange in nine was
+  stored and R@5 on LongMemEval was 18.3%; at 0.25 it became 68% at the
+  same retention. Current value: **0.25**.
 
-  Заодно пришлось поднять `SURPRISE_FULL_CONTENT_TOKENS` 2 → 3: при
-  пороге 0.25 однословная реплика давала плотность ровно 0.250 и
-  проходила впритык, то есть возвращался мусор, убранный накануне. Два
-  параметра оказались связаны, и подбирать их надо парой.
+  This also forced `SURPRISE_FULL_CONTENT_TOKENS` from 2 to 3: at a
+  threshold of 0.25 a one-word utterance produced a density of exactly
+  0.250 and slipped through, bringing back the interjection clutter that
+  had been removed the day before. The two parameters turned out to be
+  coupled and must be chosen as a pair.
 
-### 2.3 Кратковременной памяти не существовало
+### 2.3 Short-term memory did not exist
 
-STM была пуста после **39 сообщений из 40**. Три причины:
+STM was empty after **39 messages out of 40**. Three causes:
 
-- автосон срабатывал на каждом сообщении с девятого (порог считал *все*
-  узлы, а лексика набирает 145 за девять сообщений) — плюс **два вызова
-  LLM на сообщение** в проде;
-- спайк вытирал буфер, хотя обмен уже был записан отдельным узлом;
-- `STM_CAPACITY = 8` считается в записях, а на сообщение их две — то есть
-  контекста было 4 обмена.
+- auto-sleep fired on every message from the ninth onwards (the
+  threshold counted *all* nodes, and vocabulary accumulates 145 within
+  nine messages) — plus **two LLM calls per message** in production;
+- a spike wiped the buffer even though the exchange had already been
+  stored as its own node;
+- `STM_CAPACITY = 8` counts entries, and a message produces two — so the
+  context was four exchanges.
 
-**Фикс:** триггер по `count_memory_nodes()`, консолидация отвязана от
-спайка, ёмкость 16. Стало: пусто 5 раз из 40, автосон 0 из 40.
+**Fix:** trigger on `count_memory_nodes()`, consolidation decoupled from
+spikes, capacity 16. Result: empty 5 times out of 40, auto-sleep 0
+out of 40.
 
-### 2.4 Память была амнезией, а не забыванием
+### 2.4 Memory was amnesia, not forgetting
 
-Все эпизоды старели по одной шкале независимо от востребованности: 11
-узлов до ночной паузы, 1–2 после.
+Every episode aged on one scale regardless of usefulness: 11 nodes before
+an overnight pause, 1–2 after.
 
-**Фикс:** колонка `stability` — сопротивление забыванию, растёт
-мультипликативно при каждом вспоминании.
+**Fix:** a `stability` column — resistance to forgetting, growing
+multiplicatively on every recall.
 
-| Вспоминаний | Через 2 суток | Через 2 недели |
+| Recalls | After 2 days | After 2 weeks |
 |---|---|---|
-| 0 | 0.073 | забыт |
-| 3 | 0.393 | забыт |
+| 0 | 0.073 | forgotten |
+| 3 | 0.393 | forgotten |
 | 10 | 0.753 | 0.526 |
 
-### 2.5 Слой самозащиты не включался ни разу
+### 2.5 The self-protection layer never once engaged
 
-Заявленный в манифесте Stress Protection был **мёртвым кодом**: стресс
-накапливался на +0.025 за сообщение при восстановлении −6.00 за тик, то
-есть мгновенно падал в ноль. `is_overloaded` не срабатывал никогда.
+The Stress Protection declared in the manifesto was **dead code**: stress
+accumulated at +0.025 per message against a recovery of −6.00 per tick,
+so it collapsed to zero instantly. `is_overloaded` never fired.
 
-Плюс то же состояние жило вторым экземпляром как `Mood.anxiety`.
+On top of that, the same state existed a second time as `Mood.anxiety`.
 
-**Фикс:** единая ось возбуждения в `Mood`, питается оценками, а не
-пунктуацией. `InstinctSystem` больше не хранит состояние.
-`MOOD_AROUSAL_GAIN` подобран замером: при 0.35 возбуждение вставало на
-0.84 при пороге 0.8 — **вечная перегрузка**, вызовов LLM 14 вместо 86.
+**Fix:** a single arousal axis in `Mood`, fed by appraisals rather than
+punctuation. `InstinctSystem` no longer holds state. `MOOD_AROUSAL_GAIN`
+was chosen by measurement: at 0.35 arousal settled at 0.84 against a
+threshold of 0.8 — **permanent overload**, 14 LLM calls instead of 86.
 
-### 2.6 Забывание молча выключалось после перезагрузки
+### 2.6 Forgetting switched itself off silently after a restart
 
-`brain_time` был составным: +120 за каждое сообщение (часы бежали **всемеро**
-быстрее настенных) и сброс на `time.time()` при старте сессии. Метки узлов
-оказывались в будущем, `if dt <= 0: continue` пропускал угасание.
+`brain_time` was composite: +120 per message (the clock ran **seven
+times** faster than the wall) and a reset to `time.time()` at session
+start. Node marks ended up in the future and `if dt <= 0: continue`
+skipped the decay.
 
-| Сообщений в сессии | Забывание после возврата |
+| Messages in a session | Forgetting after returning |
 |---|---|
-| 10 | работает |
-| 60 | стоит ещё 1.0 ч |
-| 100 | **стоит ещё 2.3 ч** |
+| 10 | works |
+| 60 | stalled another 1.0 h |
+| 100 | **stalled another 2.3 h** |
 
-**Фикс:** одна шкала `brain_time = эпоха + (настенное − эпоха) × 7`, эпоха
-хранится в БД. `AGE_T0` пересчитан 3600 → 25200: теория предсказала рост
-ровно в `TIME_ACCELERATION` раз, замер подтвердил.
+**Fix:** one scale, `brain_time = epoch + (wall − epoch) × 7`, with the
+epoch stored in the database. `AGE_T0` recomputed 3600 → 25200: theory
+predicted growth by exactly `TIME_ACCELERATION`, and measurement
+confirmed it.
 
-### 2.7 «Кожа» была релевантнее «кота»
+### 2.7 "Skin" was more relevant than "cat"
 
-Поиск шёл по буквам. На узле «у меня есть кошка»: «кожа» → 0.884, «кот» →
-0.870, перифразы не находились вовсе.
+Search went by letters. On the node "I have a cat" (in Russian): "skin"
+scored 0.884, "cat" 0.870, and paraphrases were not found at all.
 
-**Фикс:** семантический поиск (navec, 51 МБ, без torch — под 3.7 ГБ RAM
-машины). Отбрасывание служебных слов оказалось решающим: без него «кожа»
-держалась на 0.863.
+**Fix:** semantic search (navec, 51 MB, no torch — this machine has
+3.7 GB). Dropping function words proved decisive: without it "skin" held
+at 0.863.
 
-### 2.8 Гонка потоков
+### 2.8 A thread race
 
-`process_message` и `run_idle_tick` работали с одним объектом сессии из
-разных потоков без синхронизации. Единственный дефект, способный
-**испортить данные**.
+`process_message` and `run_idle_tick` worked on one session object from
+different threads without synchronisation. The only defect capable of
+**corrupting data**.
 
-**Фикс:** блокировка со сдвигом приоритетов — сообщение ждёт, фоновый тик
-уступает. Осмысленность теста доказана: при обходе блокировки внутрь
-заходит до 8 потоков.
+**Fix:** a lock with priority skew — a message waits, the background tick
+yields. The test's meaningfulness was demonstrated: bypassing the lock
+lets up to 8 threads inside.
 
-### 2.9 Мёртвый CLI
+### 2.9 A dead CLI
 
-`main.py` не запускался (`TypeError` на старте) и писал это в лог как
-`CRITICAL`. 581 строка дублировала `BrainSession` и отставала на всю
-сессию правок. **Удалён** вместе с `async_console.py`,
-`debug_formatting.py` и двумя сломанными ручными скриптами.
+`main.py` did not start (a `TypeError` at launch) and logged that as
+`CRITICAL`. Its 581 lines duplicated `BrainSession` and lagged an entire
+session of fixes behind. **Deleted**, along with `async_console.py`,
+`debug_formatting.py` and two broken manual scripts.
+
+### 2.10 Contradictions were never resolved
+
+"My dog is called Rex", a month later "my dog is called Buddy" — both
+nodes lived on as equals, and the stale one actually ranked **better**
+(0.906 against 0.875), because order is decided by string similarity
+rather than by time.
+
+**Fix:** `find_superseded` plus `supersede_node`. A contradiction is a
+reason to store in its own right — a correction is unsurprising by
+nature and would never clear the density threshold on its own. The stale
+version is weakened, never deleted: if the supersession was a false
+positive, the user will mention the fact again and it will recover.
+
+### 2.11 Praise never reached what was recalled
+
+Through the facade, feedback only reached the node just WRITTEN. With an
+assistant, praise usually lands on a good answer built from what was
+RECALLED — so the main case reinforced nothing at all. Measured: eight
+consecutive praises produced the same reward expectation of 0.300 as one.
+
+**Fix:** `recall` now marks the nodes it used as involved in the turn,
+and the reinforcement loop rewards all of them. The either/or was present
+in **two** places — reward expectation and effect application — and
+fixing only the first left praise making memory more durable but not
+brighter.
+
+### 2.12 What was marked important still vanished
+
+Stability grows through recall, so a fact the user called important but
+never returned to sank to zero along with the routine. Measured: six
+months after a conversation, nothing survived — including the penicillin
+allergy.
+
+**Fix:** a decay floor whose height comes from `reward_expectation`. A
+node that was never reinforced has a floor of zero and fades as before,
+so this does not make memory immortal.
+
+| Times praised | After a year |
+|---|---|
+| 0 | forgotten |
+| 1 | 0.075 |
+| 2 | 0.128 |
+| 5 | 0.343 |
 
 ---
 
-## 3. Что остаётся
+## 3. What remains
 
-### 3.1 Дефекты
+### 3.1 Defects
 
-| Что | Серьёзность | Комментарий |
+| What | Severity | Comment |
 |---|---|---|
-| Поиск линейный | средняя | Всё ещё линеен, но вчетверо дешевле: 30 000 узлов за 0.5 с вместо 2.1 с. Осталось чтение всех строк из SQLite (30% времени). Сублинейность потребует индекса и новой зависимости — против обещания «ноль зависимостей» |
-| ~~Семантика только русская~~ | — | починено: кодировщик подключаемый, язык задаёт вызывающий |
-| Встроенная семантика не даёт НИЧЕГО сверх совпадения слов | **высокая для продажи** | `tools/probe_semantic.py`: 8 попаданий из 16, и это ровно те 8, что решаются совпадением слов. Современная многоязычная модель даёт 12/16, но стоит 1.6 ГБ памяти. Причина доменная: navec обучена на художественной литературе («язык ~ программирование» 0.114). Взвешивание слов по редкости написано и откачено — ноль изменений |
-| Далёкий перифраз не тянется | низкая | предел лёгкой модели, зафиксирован тестом |
-| ~~Противоречия не разрешаются~~ | — | починено: вытеснение версий, `find_superseded` |
-| ~~Лог без ротации~~ | — | починено: хендлеры на корне, 5 МБ × 3 |
+| Search is linear | medium | Still linear, but four times cheaper: 30,000 nodes in 0.5 s instead of 2.1 s. What remains is reading every row from SQLite (30% of the time). Going sub-linear needs an index and a new dependency — against the promise of zero dependencies |
+| The bundled semantics adds NOTHING beyond word overlap | **high for selling** | `tools/probe_semantic.py`: 8 hits out of 16, and they are exactly the 8 solvable by word overlap. A modern multilingual model gives 12/16 but costs 1.6 GB of RAM. The cause is the domain: navec was trained on literary fiction ("language ~ programming" 0.114). Weighting words by rarity was written and reverted — zero change |
+| Distant paraphrase is out of reach | low | the limit of a light model, pinned by a test |
 
-### 3.2 Чего нет по сравнению с соседями
+### 3.2 What is missing compared to the neighbours
 
-- **Структурированных фактов.** Узел — склейка окна STM
-  (`"меня зовут Паша хлеб это еда его едят"`). Извлекатели фактов дали бы
-  `имя = Паша` отдельной сущностью. Память ассоциативная, но не
-  структурированная.
-- **Заземления.** Бот произносит «привет» потому, что вы повторяли, а не
-  потому что понимает приветствие. Рёбра со-встречаемости построены и
-  кормят только расчёт удивления.
-- **Собственной речи.** Компетенция в `claude-3.5-haiku` за HTTP. Граф
-  управляет вниманием и допуском, но не умением строить фразу. Решение
-  осознанное: LLM как речевой орган под контролем графа.
+- **Structured facts.** A node is a concatenation of an STM window. Fact
+  extractors would give `name = Pasha` as its own entity. This memory is
+  associative but not structured.
+- **Grounding.** The bot says "hello" because you repeated it, not
+  because it understands a greeting. Co-occurrence edges exist and feed
+  only the surprise computation.
+- **Speech of its own.** Competence lives in an LLM behind HTTP. The
+  graph governs attention and admission, but not the ability to build a
+  sentence. A deliberate decision: the LLM is a speech organ under the
+  graph's control.
 
 ---
 
-## 4. Измеренные утверждения
+## 4. Measured claims
 
-### 4.1 Подтверждено
+### 4.1 Confirmed
 
-**Забывание избирательно по важности, заданной пользователем.**
-`tools/compare_retention.py`, 5 сидов, 14 суток молчания:
+**Forgetting is selective by the importance the user assigns.**
+`tools/compare_retention.py`, 5 seeds, 14 days of silence, with message
+volume held equal (`--balanced`):
 
-| Хранилище | Похвалённое | Обычное | Разрыв |
+| Store | Praised | Ordinary | Gap |
 |---|---|---|---|
-| Скользящее окно | 77% | 70% | +7% |
-| Случайный отбор | 43% | 50% | −7% |
-| **Организм** | **100%** | **60%** | **+40%** |
+| Sliding window | 77% | 70% | +7% |
+| Random sample | 43% | 50% | −7% |
+| **The organism** | **100%** | **60%** | **+40%** |
 
-Конфаунд на объём проверен и отвергнут: с уравненным числом сообщений
-(`--balanced`) разрыв **+40 п.п.**, то есть работает подкрепление, а не
-попадание в лишние окна STM. У наивных хранилищ разрыв около нуля — они
-про похвалу не знают.
+The volume confound was tested and rejected — that is what "held equal"
+means here: both groups produce the same number of messages, so
+reinforcement is doing the work rather than the important topic simply
+occupying more STM windows. Without that control the gap is +30 pp
+(100% against 70%). For the naive stores it is near zero either way:
+they know nothing about praise.
 
-Числа перемерены после того, как стенды стали воспроизводимыми (см. 4.3);
-прежние значения этой таблицы гуляли на несколько пунктов между запусками
-одного и того же кода.
+**Also confirmed:**
+- surprise falls with experience: 0.750 → 0.278
+- the write rate regulates itself: 9 → 3 → 0 spikes
+- reinforcement does not saturate: joy increment 0.32 → 0.08
+- exit from the pre-verbal stage: 10 messages at demo pace (was "never")
+- compression: 38–51 episodes out of 120 exchanges
 
-**Прочие подтверждённые:**
-- удивление падает с опытом: 0.750 → 0.278
-- частота записи саморегулируется: 9 → 3 → 0 спайков
-- подкрепление не вырождается: прирост радости 0.32 → 0.08
-- выход из довербальной стадии: 10 сообщений при демо-темпе (было «никогда»)
-- сжатие: 15–27 узлов против 30–41 при равном объёме текста
+### 4.2 External benchmark: LongMemEval
 
-### 4.2 Внешний бенчмарк: LongMemEval
+The first number not from our own corpus. 60 questions, a haystack of
+~48 sessions each, recall@k — comparable with what the neighbours
+publish.
 
-Первое число не со своего корпуса. 60 вопросов, стог ~48 сессий,
-recall@k — сопоставимо с тем, что публикуют соседи.
-
-| режим | записано | R@1 | R@5 | R@10 |
+| Mode | Stored | R@1 | R@5 | R@10 |
 |---|---|---|---|---|
-| рабочий, порог 0.35 (было) | 5.5% | 13.3% | **18.3%** | 18.3% |
-| рабочий, порог 0.25 (стало) | 24.6% | 60.0% | **68.0%** | 72.0% |
-| архив | 49.6% | 76.7% | **91.7%** | 96.7% |
+| working, threshold 0.35 (before) | 5.5% | 13.3% | **18.3%** | 18.3% |
+| working, threshold 0.25 (now) | 24.6% | 60.0% | **68.0%** | 72.0% |
+| archive | 49.6% | 76.7% | **91.7%** | 96.7% |
 
-Первый прогон показал 18.3% и выглядел приговором. Ablation объяснил:
-извлечение конкурентоспособно (91.7%), а губила политика записи — гейт
-писал каждую девятую пару реплик.
+The first run showed 18.3% and looked like a verdict. The ablation
+explained it: retrieval is competitive (91.7%), and what ruined the
+number was the write policy — the gate stored one exchange in nine.
 
-**Порог записи откалиброван третий раз, и впервые по внешним данным.**
-0.35 -> 0.25 поднимает полноту втрое, удержание при этом не двигается
-(замер по порогам 0.20/0.25/0.30/0.35 дал +47/+50/+53/+50 — шум).
-Побочно исчезло отставание на равномерном покрытии (см. 4.3).
+**The write threshold was calibrated a third time, and for the first time
+against external data.** 0.35 → 0.25 triples recall while retention does
+not move (thresholds 0.20/0.25/0.30/0.35 gave +47/+50/+53/+50 — noise).
+As a side effect the deficit on uniform coverage disappeared (see §4.3).
 
-Попутно найдено: поиск молча возвращал ноль результатов в 11 случаях из
-25. Я счёл это привязкой порога к русскому языку и собирался делать
-автокалибровку — замер опроверг. Порог привязан не к языку, а к НАЛИЧИЮ
-кодировщика: с рабочим (navec на русском, potion на английском) 0.3
-разделяет верно, без него разделения нет вовсе (0.178 против 0.167).
-Автокалибровка вернула бы шум. Вместо неё — предупреждение в лог и
-флаг `stats().semantic`.
-Вариант oracle для измерения непригоден — в нём нет отвлекающих сессий.
+### 4.3 Previously REFUTED, now level
 
-### 4.3 ОПРОВЕРГНУТО
+**Uniform coverage against a random sample.** `tools/compare_memory.py`,
+5 seeds:
 
-**Равномерное покрытие не лучше случайного отбора.**
-`tools/compare_memory.py`, 5 сидов:
-
-| Хранилище | Средняя доля найденного |
+| Store | Found |
 |---|---|
-| Скользящее окно | 90.0% |
-| Случайный отбор | 90.8% |
-| Организм | **92.4%** |
+| Sliding window | 90.0% |
+| Random sample | 90.8% |
+| The organism | **92.4%** |
 
-**ОТРИЦАТЕЛЬНЫЙ РЕЗУЛЬТАТ БОЛЬШЕ НЕ ОТРИЦАТЕЛЬНЫЙ.** При прежнем пороге
-записи организм отставал (87.2 против 88.8) — и это честно публиковалось
-почти сутки. После снижения порога отставание исчезло.
+**The negative result is no longer negative.** At the previous write
+threshold the organism trailed (87.2 against 88.8) — and that was
+published honestly for the better part of a day. Lowering the threshold
+removed the deficit.
 
-Объявлять победу рано: разброс по сидам 82–98%, значит 92.4 против 90.8
-это «сравнялись», а не «обошли». Но утверждение «мы хуже случайной
-выборки» больше не соответствует замеру, и оставлять его нельзя.
+It is too early to claim a win: the spread across seeds is 82–98%, so
+92.4 against 90.8 means "level", not "ahead". But the claim "we are worse
+than a random sample" no longer matches the measurement, and leaving it
+would be lying in our own disfavour.
 
-По дороге поймана ошибка методики: бюджет считался **в узлах**, а
-`consolidate_from_stm` склеивает окно STM в один узел. По узлам выходило
-сжатие в 9 раз, по тексту — 3.1, и наивные хранилища получали втрое меньше
-памяти.
+A methodological error caught along the way: the budget was counted **in
+nodes**, while `consolidate_from_stm` merges an STM window into a single
+node. By nodes the compression looked like 9×, by text 3.1×, and the
+naive stores were being given three times less memory.
 
-**Вывод (4.2):** это не система полного поиска. Против равномерных вопросов
-несмещённый отбор непобедим по построению. Область применения — «удержать
-важное», а не «не потерять ничего».
+**Conclusion:** this is not a system for exhaustive search. Against
+uniform questions an unbiased sample is unbeatable by construction. The
+domain of application is "hold on to what matters", not "lose nothing".
 
-### 4.4 Воспроизводимость замеров
+### 4.4 Reproducibility of the measurements
 
-Все числа выше получены после того, как стенды перестали гулять. До этого
-два запуска ОДНОГО И ТОГО ЖЕ кода на одних и тех же данных расходились на
-несколько процентных пунктов, то есть точность вроде «+43 п.п.» была
-самообманом: разница между двумя вариантами системы могла целиком
-уместиться в дрожь измерения.
+Every number above was obtained after the benchmarks stopped wandering.
+Before that, two runs of the same code over the same data diverged by
+several percentage points — meaning a precision like "+43 pp" was
+self-deception: the difference between two variants of the system could
+fit entirely inside the measurement jitter.
 
-Три источника, все найдены замером, а не чтением кода:
+Three causes, all found by measurement rather than by reading code:
 
-1. **Настенные часы текли в субъективное время.** `brain_time` считается
-   как `эпоха + (настенное − эпоха) × TIME_ACCELERATION`, поэтому реальная
-   длительность прогона входила в возраст узлов, умноженная на семь. Узлы
-   у порога извлечения перескакивали его в зависимости от загрузки машины.
-   Стенды получили подменяемые часы (`ManualWallClock`) и задают паузы
-   явно.
+1. **The wall clock leaked into subjective time.** `brain_time` is
+   `epoch + (wall − epoch) × TIME_ACCELERATION`, so the real duration of
+   a run entered node ages multiplied by seven. Nodes sitting at the
+   retrieval threshold crossed it depending on machine load. The
+   benchmarks got a substitutable clock (`ManualWallClock`) and set
+   pauses explicitly.
 
-2. **Эпоха мозга бралась из `time.time()`** при создании базы — раньше,
-   чем подставлялись часы стенда. Расхождение находилось так: граф,
-   состояние генератора случайных чисел и число узлов совпадали побитово,
-   а ответы расходились с первого же сообщения; отличалась одна величина —
-   эпоха. Теперь она приходит из того же источника времени.
+2. **The brain epoch came from `time.time()`** when the database was
+   created — before the benchmark's clock was substituted. Found like
+   this: the graph, the node count and the RNG state matched bit for bit
+   (`n=25 w=5.743750000 rnd=0.590492512`) while the replies diverged on
+   the very first message; exactly one quantity differed, the epoch.
 
-3. **`ORDER BY RANDOM()` в SQL.** Пул слогов для лепета выбирал генератор
-   SQLite, который не сеется ничем и берёт энтропию у системы. Выборка
-   перенесена в Python, где генератор под контролем; распределение то же.
+3. **`ORDER BY RANDOM()` in SQL.** The syllable pool for babbling was
+   drawn by SQLite's generator, which is seeded by nothing and takes
+   entropy from the system. The sampling moved into Python, where the
+   generator is under control; the distribution is unchanged.
 
-Проверка: `simulate_learning`, `compare_retention` и `compare_memory` дают
-побайтово одинаковый вывод на трёх запусках подряд.
+Verification: `simulate_learning`, `compare_retention` and
+`compare_memory` produce byte-identical output over three consecutive
+runs.
+
+### 4.5 What the mechanisms rest on
+
+Not one of the mechanisms here was invented from nothing — they all
+rediscover things long described in the psychology of memory. The
+references are not for respectability but to separate the borrowed from
+the invented: the first has been tested for decades, the second only by
+our benchmarks.
+
+| Mechanism | Basis |
+|---|---|
+| Exponential decay | **Ebbinghaus (1885)** — the forgetting curve |
+| Two stores, STM -> LTM | **Atkinson & Shiffrin (1968)** — the dual-store model |
+| STM capacity of 16 entries (8 exchanges) | **Miller (1956)**, refined by **Cowan (2001)** — the limit of working memory |
+| `stability` grows on recall | **the spacing effect**; depth of processing — **Craik & Lockhart (1972)** |
+| Superseding versions of a fact | **Nader et al. (2000)** — reconsolidation: a memory becomes plastic when retrieved |
+| Consolidation during sleep | **McGaugh (2000)** |
+| Importance earned through use | **Anderson & Schooler (1991)** — rational analysis: the accessibility of a memory reflects the probability that it will be needed |
+| Dopamine as prediction error | **Rescorla & Wagner (1972)**; the neuroscience — **Schultz et al. (1997)** |
+
+In fairness, this list came from a neighbour: `muratg98/psychmem`
+published it in its README, and it turned out to be the most useful thing
+that project left behind. Anderson & Schooler matters most here — it is
+literally the theoretical grounding of the project's central bet, and
+until now it had never been named.
+
+**What is not in those papers, and was devised here:** the spike gate
+driven by the organism's OWN prediction error — deciding whether to store
+at all, based on how far the input diverges from the accumulated graph of
+language. Psychology describes how to forget what has been stored; here
+the question is whether to store it.
 
 ---
 
-## 4.5 На чём стоят механизмы
+## 5. Position among other approaches
 
-Ни один из механизмов здесь не придуман с нуля — все они переоткрывают
-давно описанное в психологии памяти. Ссылки нужны не для солидности, а
-чтобы отличить заимствованное от изобретённого: первое проверено
-десятилетиями, второе проверено только нашими стендами.
+The axis is **who decides what matters, and when**.
 
-| Механизм | Основание |
-|---|---|
-| Угасание по экспоненте | **Ebbinghaus (1885)** — кривая забывания |
-| Два хранилища, STM -> LTM | **Atkinson & Shiffrin (1968)** — двухуровневая модель |
-| Ёмкость STM = 16 записей (8 обменов) | **Miller (1956)**, уточнено **Cowan (2001)** — предел рабочей памяти |
-| `stability` растёт от вспоминания | **эффект интервального повторения**; глубина обработки — **Craik & Lockhart (1972)** |
-| Вытеснение версий факта | **Nader et al. (2000)** — реконсолидация: воспоминание при извлечении становится пластичным |
-| Консолидация во сне | **McGaugh (2000)** |
-| Важность зарабатывается употреблением | **Anderson & Schooler (1991)** — рациональный анализ: доступность воспоминания отражает вероятность того, что оно понадобится |
-| Дофамин по ошибке предсказания | **Rescorla & Wagner (1972)**; нейробиология — **Schultz et al. (1997)** |
-
-Список получен, по совести говоря, у соседей: его опубликовал
-`muratg98/psychmem` в своём README, и он же оказался единственным
-полезным, что от того проекта осталось. Anderson & Schooler здесь важнее
-прочих — это буквально теоретическое обоснование главной ставки
-проекта, и до сих пор оно у нас нигде не было названо.
-
-**Чего в этих работах нет и что придумано здесь:** спайк-гейт по
-СОБСТВЕННОЙ ошибке предсказания организма — решение, писать ли вообще, на
-основе расхождения входа с накопленным графом языка. Психология описывает,
-как забывать записанное; здесь решается, записывать ли.
-
----
-
-## 5. Положение среди других подходов
-
-Ось — **кто и когда решает, что важно**.
-
-| Подход | Кто решает | Когда | Забывание |
+| Approach | Who decides | When | Forgetting |
 |---|---|---|---|
-| Obsidian, Roam, Logseq | человек вручную | при записи | нет |
-| Вектор-база + RAG | никто | никогда | нет |
-| Извлекатели фактов | LLM-судья | при записи | по правилам |
-| Пагинация контекста | политика | при чтении | нет |
-| **Этот проект** | **никто заранее** | **со временем, по употреблению** | **основной механизм** |
+| Obsidian, Roam, Logseq | a human, by hand | at write time | none |
+| Vector store + RAG | nobody | never | none |
+| Fact extractors | an LLM judge | at write time | by rules |
+| Context pagination | a policy | at read time | none |
+| **This project** | **nobody in advance** | **over time, through use** | **the central mechanism** |
 
-Обсидиан — противоположность, а не конкурент: там граф это протокол мысли
-человека, инертный и полный. Извлекатели фактов ближе всех, но важность у
-них **объявляется при записи**, здесь — **зарабатывается потом**.
+Obsidian is an opposite, not a competitor: there the graph is a human's
+protocol of thought — inert and complete. Fact extractors come closest,
+but importance there is **declared at write time**, whereas here it is
+**earned afterwards**.
 
-**Что можно черпать:** важность без разметки; саморегулирующаяся запись;
-кривая забывания вместо вытеснения по лимиту; ненасыщаемое подкрепление.
-
----
-
-## 6. Развитие
-
-По убыванию отдачи:
-
-1. **Разрешение противоречий.** Ближайшее и самое нужное. Половина
-   механизма есть (`apply_reward`, ретроспективная коррекция); не хватает
-   проверки при записи и ослабления устаревшего вместо молчаливого
-   хранения обоих.
-2. **Вынести память в библиотеку.** Экономика памяти не привязана к
-   «цифровому ребёнку». Бот остаётся демонстрацией.
-3. **Стенды как отдельная ценность.** В этой области почти никто не
-   публикует опровержимых сравнений. Один из двух инструментов дал
-   отрицательный результат и остался в истории — для доверия это дороже
-   ещё одной фичи.
-4. **Заземление через употребление.** Пустить рёбра со-встречаемости в
-   выбор слов. Интеллектуально самое интересное, продуктово туманное.
-5. **Структурированные факты.** Сделает конкурентом извлекателям, но
-   потребует LLM-вызовов на запись. Отложить до ясности, продукт это или
-   исследование.
+**What can be borrowed from this:** importance without labelling; a write
+rate that regulates itself; a forgetting curve instead of eviction by
+quota; reinforcement that does not saturate.
 
 ---
 
-## 7. Эксплуатация
+## 6. Where to go next
 
-**В проде код старее репозитория.** Процесс `mindnumbness.service` не
-перезапускался после последних коммитов — семантики, единой оси
-возбуждения и когерентных часов там нет.
+In descending order of return:
+
+1. **Publish the package.** It is ready: the wheel builds, the README
+   examples are verified by tests, the licence is in place. Nothing is
+   worth much while nobody can install it.
+2. **The full benchmark run.** The numbers above come from 60 of 500
+   questions. Honest, and covering all six question types, but a public
+   claim deserves the whole set.
+3. **An English semantic model out of the box.** The bundled one adds
+   nothing beyond word overlap, and that is the first thing a buyer will
+   hit.
+4. **Grounding through use.** Feed co-occurrence edges into word choice.
+   Intellectually the most interesting, commercially the vaguest.
+5. **Structured facts.** Would make this a competitor to fact
+   extractors, but requires LLM calls on write. Postpone until it is
+   clear whether this is a product or research.
+
+---
+
+## 7. Operation
+
+**In production the code is older than the repository.** The
+`mindnumbness.service` process has not been restarted since the latest
+commits.
 
 ```bash
 sudo systemctl restart mindnumbness
-free -h    # RSS вырастет ~167 МБ -> ~550 МБ (модель эмбеддингов)
+free -h    # RSS grows ~167 MB -> ~550 MB (the embedding model)
 ```
 
-На машине 3.7 ГБ и три соседних сервиса. Если станет тесно, семантика
-отключается без правки кода: `EMBEDDINGS_ENABLED=false` в `.env` —
-поиск молча вернётся к строковому.
+The machine has 3.7 GB and three neighbouring services. If it gets
+tight, semantics can be switched off without touching code:
+`EMBEDDINGS_ENABLED=false` in `.env` — search quietly reverts to string
+matching.
 
-**Проверено работающим:** Telegram-бот (сквозной прогон на копии рабочей
-БД), инспектор памяти, мини-апп (403 без подписи Telegram), стенд, 136
-тестов. Миграции схемы идемпотентны, проверены на копии рабочей базы.
+**Verified working:** the Telegram bot (an end-to-end run against a copy
+of the live database), the memory inspector, the mini-app (403 without a
+Telegram signature), the benchmarks, 286 tests. Schema migrations are
+idempotent and were verified against a copy of the live database.
+
+---
+
+Русская версия: [AUDIT.ru.md](AUDIT.ru.md).
