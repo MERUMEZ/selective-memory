@@ -244,8 +244,18 @@ def main() -> None:
     parser.add_argument("--silence-days", type=float, default=14.0)
     parser.add_argument("--balanced", action="store_true",
                     help="уравнять число сообщений: контроль на объём, а не на награду")
+    parser.add_argument("--floor-base", type=float, default=None,
+                        help="MEMORY_FLOOR_BASE: пол угасания для неподкреплённых "
+                             "узлов. Ставится В CONFIG, а не в MemorySettings: "
+                             "стенд строит память через BrainSession, а тот берёт "
+                             "настройки из config — мимо этого моста замер молча "
+                             "покажет умолчание")
     parser.add_argument("--logs", action="store_true")
     args = parser.parse_args()
+
+    if args.floor_base is not None:
+        config.MEMORY_FLOOR_BASE = args.floor_base
+        print(f" Базовый пол угасания: {args.floor_base}")
 
     seeds = [int(s) for s in args.seeds.split(",")]
     totals: Dict[str, Dict[str, List[float]]] = {}

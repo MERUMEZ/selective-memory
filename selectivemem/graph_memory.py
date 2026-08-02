@@ -1521,7 +1521,18 @@ class MemoryGraph:
             # before. So this does not make memory immortal: only a
             # handful of nodes ever get a floor.
             expectation = row["reward_expectation"] or 0.0
-            floor = max(0.0, expectation) * self.settings.memory_floor_max
+            floor = max(
+                # Earned by approval: the more a node was reinforced, the
+                # higher it settles.
+                max(0.0, expectation) * self.settings.memory_floor_max,
+                # Earned by being written at all. Measured: without this,
+                # decay DELETED every evidence node for knowledge-update
+                # questions — 12 of 12, five instances out of five — while
+                # only a tenth of memory was removed overall. The evidence
+                # is simply the oldest thing in the store, and age alone
+                # decided its fate.
+                self.settings.memory_floor_base,
+            )
             floor = min(floor, old_weight)          # the floor never raises a weight
             new_weight = floor + (old_weight - floor) * decay_factor
 

@@ -167,6 +167,12 @@ def main() -> None:
                              "окружения: стенд строит Memory на MemorySettings, "
                              "а переменные идут в config — я дважды намерил "
                              "этим пустоту, прежде чем заметить")
+    parser.add_argument("--floor-base", type=float, default=None,
+                        help="пол угасания для неподкреплённых узлов")
+    parser.add_argument("--weight-influence", type=float, default=None,
+                        help="вклад веса узла в оценку поиска (по умолчанию 0.15). "
+                             "Вес падает от старости, поэтому это слагаемое "
+                             "работает как приоритет свежести")
     parser.add_argument("--no-decay", action="store_true",
                         help="гейт работает, забывание выключено")
     parser.add_argument("--type", default=None,
@@ -206,6 +212,10 @@ def main() -> None:
         settings_kwargs["base_plasticity_threshold"] = args.plasticity
     if args.content_tokens is not None:
         settings_kwargs["surprise_full_content_tokens"] = args.content_tokens
+    if args.floor_base is not None:
+        settings_kwargs["memory_floor_base"] = args.floor_base
+    if args.weight_influence is not None:
+        settings_kwargs["memory_weight_influence"] = args.weight_influence
     if args.topic_threshold is not None:
         # Порог темы для вытеснения устаревшего. Значение выше 1.0 делает
         # вытеснение невозможным (косинус не превышает единицу) — это

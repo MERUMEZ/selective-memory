@@ -84,6 +84,17 @@ class MemorySettings:
     # approval (reward_expectation = 1.0) settles at instead of vanishing.
     # Zero disables the floor and restores the previous behaviour.
     memory_floor_max: float = 0.25
+    # Пол для узла, которого НИКОГДА не подкрепляли и не вспоминали.
+    # Замер, ради которого он появился: в LongMemEval улики к вопросам
+    # категории knowledge-update старше вопроса в среднем на 16 дней, и
+    # угасание СТИРАЛО их все до единой — 12 узлов из 12 в каждом из пяти
+    # разобранных случаев, при том что всего удалялась лишь десятая часть
+    # памяти. Ранжирование значения не имело: данных уже не было.
+    #
+    # Ноль возвращает прежнее поведение, когда пол давала только явная
+    # похвала. Смысл ненулевого: прохождение спайк-гейта само по себе
+    # признак важности — три четверти реплик до памяти не доходят вовсе.
+    memory_floor_base: float = 0.0
     memory_keyword_weight: float = 0.3
     memory_min_keyword_length: int = 3
     memory_search_threshold: float = 0.3
