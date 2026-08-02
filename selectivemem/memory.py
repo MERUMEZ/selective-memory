@@ -111,6 +111,10 @@ class MemoryStats:
     episodes: int
     vocabulary: int
     threshold: float
+    # Работает ли поиск по смыслу. False означает, что найдётся только то,
+    # что делит с запросом слова, — и это самая частая причина недоумения
+    # "почему память ничего не находит".
+    semantic: bool = False
 
 
 class Memory:
@@ -317,6 +321,7 @@ class Memory:
             episodes=self.graph.db.count_nodes_by_type("episodic"),
             vocabulary=self.graph.get_vocabulary_size(),
             threshold=self.gate.base_threshold,
+            semantic=self.graph._encode("проверка") is not None,
         )
 
     def close(self) -> None:

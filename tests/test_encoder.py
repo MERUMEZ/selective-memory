@@ -145,3 +145,50 @@ def test_module_level_patching_still_works(monkeypatch):
 
     assert graph._encode("любой текст") is None
     graph.close()
+
+
+def test_missing_semantics_is_announced_once():
+    """
+    Поиск без кодировщика находит только то, что делит с запросом слова.
+    Молчать об этом нельзя: человек получает пустоту без намёка на
+    причину — так был потерян день на внешнем бенчмарке, пока не стало
+    понятно, что поиск не сломан, а слеп.
+
+    Ровно один раз за жизнь графа: предупреждение на каждый запрос
+    превратилось бы в шум, который перестают читать.
+    """
+    import logging
+
+    memory = Memory(":memory:", encoder=lambda text: None)
+    memory.observe("у меня аллергия на пенициллин", emotion=0.9)
+
+    logger = logging.getLogger("selectivemem.graph_memory")
+    records = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    logger.addHandler(handler)
+    try:
+        memory.recall("что мне нельзя принимать")
+        memory.recall("ещё один запрос")
+        memory.recall("и ещё")
+    finally:
+        logger.removeHandler(handler)
+
+    warnings = [r for r in records if r.levelno >= logging.WARNING
+                and "Семантики нет" in r.getMessage()]
+    assert len(warnings) == 1, f"ожидалось одно предупреждение, вышло {len(warnings)}"
+    memory.close()
+
+
+def test_stats_report_whether_semantics_works():
+    """
+    Признак должен быть доступен программе, а не только в логах: интегратор
+    вправе проверить его при старте и отказаться работать вслепую.
+    """
+    blind = Memory(":memory:", encoder=lambda text: None)
+    assert blind.stats().semantic is False
+    blind.close()
+
+    seeing = Memory(":memory:", encoder=lambda text: [1.0, 0.0])
+    assert seeing.stats().semantic is True
+    seeing.close()
