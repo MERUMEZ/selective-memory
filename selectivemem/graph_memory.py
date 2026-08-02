@@ -883,11 +883,11 @@ class MemoryGraph:
             if row["id"] == exclude_id or row["is_meta"]:
                 continue
 
-            # Сравниваем ТОЛЬКО реплики пользователя, без ответов бота.
-            # _node_vector считает вектор по паре "вопрос + ответ", и это
-            # правильно для поиска, но не здесь: факт живёт в том, что
-            # сказал ЧЕЛОВЕК, а реплика бота ("запомнил", "ага") — шум,
-            # который сдвигает вектор и решает исход сравнения.
+            # Compare ONLY what the user said, without the bot's replies.
+            # _node_vector builds its vector from the question-and-answer
+            # pair, which is right for search but wrong here: a fact lives
+            # in what the PERSON said, while the bot's "got it" or "okay"
+            # is noise that shifts the vector and decides the comparison.
             similarity = embeddings.cosine(
                 query_vector, self._encode(row["context"] or "")
             )
@@ -897,7 +897,7 @@ class MemoryGraph:
             old_words = self._extract_keywords((row["context"] or "").lower())
             overlap = self._keyword_overlap(new_words, old_words)
             if overlap >= self.settings.contradiction_repeat_threshold:
-                continue  # это повтор, а не новая версия
+                continue  # a repetition, not a new version
 
             found.append(
                 SupersededNode(
@@ -912,14 +912,14 @@ class MemoryGraph:
 
     def supersede_node(self, node_id: int, timestamp: Optional[float] = None) -> None:
         """
-        Помечает воспоминание как вытесненное: снижает вес и СБРАСЫВАЕТ
-        стабильность, то есть возвращает узел в разряд забываемых.
+        Marks a memory as superseded: lowers its weight and RESETS its
+        stability, returning the node to the forgettable pile.
 
-        Именно ослабление, а не удаление. Если факт на самом деле остался
-        верным (сработали ложно — "у меня есть кошка" против "у меня есть
-        собака"), пользователь упомянет его снова, узел получит touch_node,
-        и стабильность отрастёт. Удаление было бы необратимым, а здесь
-        ошибка стоит дёшево и исправляется сама.
+        Weakening, deliberately, rather than deletion. If the fact was in
+        truth still valid — a false positive such as "I have a cat" against
+        "I have a dog" — the user will mention it again, the node will be
+        touched and its stability will grow back. Deletion would be
+        irreversible; here a mistake is cheap and repairs itself.
         """
         row = self.db.get_node(node_id)
         if row is None:
@@ -949,10 +949,11 @@ class MemoryGraph:
         explicit_correction: bool = False,
     ) -> int:
         """
-        Сохраняет новую связь context -> response с начальным весом.
+        Stores a new link context -> response with an initial weight.
 
-        explicit_correction — пользователь явно поправил ("нет",
-        "неправильно"). Снижает порог вытеснения устаревших версий.
+        explicit_correction means the user corrected something outright
+        ("no", "that's wrong"). It lowers the bar for superseding stale
+        versions.
         """
         initial_weight = weight if weight is not None else self.settings.base_plasticity_threshold
 
@@ -963,8 +964,9 @@ class MemoryGraph:
             timestamp=timestamp,
         )
 
-        # Новая версия факта вытесняет старую: иначе память копит
-        # взаимоисключающие узлы и отдаёт случайный из них.
+        # A newer version of a fact supersedes the older one: otherwise
+        # memory piles up mutually exclusive nodes and returns an
+        # arbitrary one.
         for stale in self.find_superseded(
             context, exclude_id=node_id, explicit_correction=explicit_correction
         ):
@@ -981,23 +983,23 @@ class MemoryGraph:
         return node_id
 
     # ----------------------------------------------------------------------
-    # 2. Поиск похожего контекста (ключевые слова + нечёткое сходство)
+    # 2. Finding similar context (keywords + fuzzy similarity)
     # ----------------------------------------------------------------------
 
     def _prefilter(self, rows, query_keywords, query_vector, top_k: int):
         """
-        Дешёвый отбор кандидатов: ключевые слова, семантика, вес.
+        A cheap pre-filter over candidates: keywords, semantics, weight.
 
-        Возвращает список (row, keyword_score, semantic_score) — уже
-        посчитанные величины передаются дальше, чтобы не считать их
-        дважды.
+        Returns a list of (row, keyword_score, semantic_score) — the
+        already-computed values travel onward so nothing is calculated
+        twice.
 
-        КОСИНУСЫ СЧИТАЮТСЯ ОДНОЙ МАТРИЦЕЙ. Поштучный вызов на каждый узел
-        тратил больше времени на вызовы numpy, чем на саму арифметику;
-        одно матричное умножение делает ту же работу разом. Если numpy
-        недоступен или у узлов нет векторов, семантическая часть просто
-        обнуляется, и отбор идёт по ключевым словам и весу — та же мягкая
-        деградация, что и во всём остальном модуле.
+        COSINES ARE COMPUTED AS ONE MATRIX. Calling numpy once per node
+        spent more time on the calls than on the arithmetic; a single
+        matrix multiplication does the same work at once. If numpy is
+        unavailable or the nodes have no vectors, the semantic part simply
+        drops to zero and the filter falls back to keywords and weight —
+        the same gentle degradation as everywhere else in this module.
         """
         candidate_limit = max(
             top_k * self.settings.search_candidate_multiplier,
@@ -1032,9 +1034,9 @@ class MemoryGraph:
         if len(rows) <= candidate_limit:
             return list(zip(rows, keyword_scores, semantic_scores))
 
-        # Порядок отбора повторяет итоговую формулу, но без нечёткой
-        # составляющей — иначе кандидаты выбирались бы не по тому, по чему
-        # потом ранжируются.
+        # The pre-filter's ordering mirrors the final formula minus the
+        # fuzzy component — otherwise candidates would be chosen by one
+        # criterion and ranked by another.
         ranked = sorted(
             range(len(rows)),
             key=lambda i: (
@@ -1055,13 +1057,14 @@ class MemoryGraph:
         with_associations: bool = True,
     ) -> List[MemoryMatch]:
         """
-        Основной метод поиска по графу памяти (keyword overlap + fuzzy).
+        The main search over the memory graph (keyword overlap + fuzzy
+        similarity + semantics).
 
-        Если with_associations=True, после отбора top_k узлов выполняется
-        Spreading Activation: для каждого найденного узла подтягиваются
-        смежные узлы через рёбра с weight >= EDGE_ACTIVATION_THRESHOLD.
-        Ассоциативные узлы подмешиваются в результат как MemoryMatch с
-        similarity = activation_score (ослабленной относительно источника).
+        With with_associations=True, spreading activation runs after the
+        top_k nodes are chosen: for each match, adjacent nodes are pulled
+        in through edges with weight >= edge_activation_threshold. Those
+        associative nodes join the result as MemoryMatch entries whose
+        similarity is the activation score, weaker than their source.
         """
         effective_threshold = threshold if threshold is not None else self.settings.memory_search_threshold
 
@@ -1074,22 +1077,24 @@ class MemoryGraph:
 
         scored: List[MemoryMatch] = []
 
-        # Вектор запроса считается ОДИН раз на весь поиск. None означает,
-        # что семантика недоступна (нет модели/библиотеки) — тогда работают
-        # только строковые составляющие, как раньше.
+        # The query vector is computed ONCE per search. None means
+        # semantics is unavailable (no model, no library), and only the
+        # string components remain, as before.
         query_vector = self._encode(query)
 
-        # ПРЕДУПРЕЖДЕНИЕ ОДИН РАЗ ЗА ЖИЗНЬ ГРАФА, если семантики нет.
+        # WARN ONCE PER GRAPH LIFETIME when semantics is missing.
         #
-        # Порог поиска (memory_search_threshold) разделяет верно ТОЛЬКО
-        # при работающем кодировщике. Замер на английском: с кодировщиком
-        # релевантное даёт 0.30-0.65, нерелевантное 0.18-0.24, порог 0.3
-        # стоит ровно между. БЕЗ кодировщика — 0.178 против 0.167, то есть
-        # разделять нечем, и понижение порога вернёт шум, а не ответы.
+        # The search threshold (memory_search_threshold) separates
+        # correctly ONLY with a working encoder. Measured in English: with
+        # one, relevant queries score 0.30-0.65 and irrelevant 0.18-0.24,
+        # and the 0.3 threshold sits exactly between. WITHOUT one it is
+        # 0.178 against 0.167 — nothing to separate, and lowering the
+        # threshold returns noise rather than answers.
         #
-        # Молчать об этом нельзя: человек получает пустоту без единого
-        # намёка на причину. Именно так я потратил полдня на бенчмарке,
-        # прежде чем понять, что поиск не сломан, а слеп.
+        # Staying silent about it is not an option: the caller gets
+        # emptiness with no hint as to why. That is exactly how half a day
+        # went on the benchmark before it became clear the search was not
+        # broken, merely blind.
         if query_vector is None and not self._warned_no_semantics:
             self._warned_no_semantics = True
             logger.warning(
@@ -1100,22 +1105,22 @@ class MemoryGraph:
             )
 
         # ------------------------------------------------------------------
-        # ОТБОР КАНДИДАТОВ. Дорогое сравнение — только по выжившим.
+        # CANDIDATE PRE-FILTER. The expensive comparison runs only on survivors.
         #
-        # Замер профилировщиком на 10 000 узлов: SequenceMatcher съедал 82%
-        # времени поиска (4.49 с из 5.44), семантика — 6%. То есть дороже
-        # всего обходилась ровно та составляющая, из-за которой когда-то
-        # "кожа" обыгрывала "кота", — посимвольное сходство.
+        # Profiled over 10,000 nodes: SequenceMatcher ate 82% of search
+        # time (4.49 s out of 5.44) while semantics took 6%. The most
+        # expensive component was precisely the one that once let "skin"
+        # beat "cat" — character-level similarity.
         #
-        # Поэтому сначала по ВСЕМ узлам считаются дешёвые признаки
-        # (пересечение ключевых слов, косинус, вес), а нечёткое сходство —
-        # только для лучших кандидатов. Оно и по смыслу так работает: не
-        # находит новое, а уточняет порядок среди уже правдоподобного.
+        # So the cheap signals — keyword overlap, cosine, weight — are
+        # computed over ALL nodes, and fuzzy similarity only over the best
+        # candidates. That matches what it does anyway: it does not find
+        # anything new, it refines the order among the already plausible.
         #
-        # Запас кандидатов намеренно щедрый (в 20 раз больше запрошенного,
-        # но не меньше пятидесяти): узкий отбор экономил бы копейки и
-        # рисковал бы выкинуть узел, который вытянул бы себя нечётким
-        # сходством.
+        # The candidate pool is deliberately generous (twenty times what
+        # was asked for, but never fewer than fifty): a narrow filter would
+        # save pennies while risking the loss of a node that fuzzy
+        # similarity alone would have rescued.
         # ------------------------------------------------------------------
         prefiltered = self._prefilter(rows, query_keywords, query_vector, top_k)
 
@@ -1219,12 +1224,12 @@ class MemoryGraph:
 
     def _node_vector(self, row):
         """
-        Вектор смысла узла, с ЛЕНИВЫМ досчётом.
+        A node's meaning vector, computed LAZILY.
 
-        Узлы, созданные до появления модели (или до этой правки вообще),
-        приходят с embedding=NULL. Вместо разовой тяжёлой миграции всей
-        базы вектор считается при первом же обращении к узлу и тут же
-        сохраняется — дальше он просто читается.
+        Nodes created before the model existed arrive with embedding=NULL.
+        Rather than one heavy migration of the whole database, the vector
+        is computed the first time the node is touched and stored right
+        away; afterwards it is simply read.
 
         Смысл узла берётся из ОБЕИХ его половин: пользователь мог спросить
         одними словами, а суть оказаться в ответе бота.
