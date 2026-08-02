@@ -1,51 +1,53 @@
-# Как выпускать релиз
+# Cutting a release
 
-## Правило, из-за которого стоит быть внимательным
+## The rule that makes care worthwhile
 
-**Номер версии на PyPI сжигается навсегда.** Загрузили `0.1.0` — этот
-номер занят, даже если релиз потом удалить. Ошиблись в чём угодно, хоть
-в опечатке README, — выпускаете `0.1.1`.
+**A version number on PyPI is burned forever.** Upload `0.1.0` and that
+number is taken, even if the release is later deleted. A mistake in
+anything at all — a typo in the README included — means shipping
+`0.1.1`.
 
-**Переименовать проект нельзя.** Совсем. Можно только опубликовать под
-новым именем, а старое оставить висеть с пометкой «не ставьте».
+**A project cannot be renamed.** Not at all. You can only publish under a
+new name and leave the old one sitting there marked "do not install".
 
-Поэтому: имя и публичный интерфейс должны устояться ДО первой
-публикации на настоящий PyPI.
+Therefore: the name and the public API must settle BEFORE the first
+release to the real PyPI.
 
-## Подготовка, один раз
+## One-time setup
 
-1. Завести учётную запись на https://pypi.org и на https://test.pypi.org
-   — это **разные** сайты с разными паролями.
-2. Включить двухфакторную аутентификацию (без неё PyPI не даст
-   выкладывать).
-3. Создать API-токен: Account settings → API tokens → Add API token.
-   Для первого раза — с областью действия «весь аккаунт»; после первой
-   публикации пересоздать с областью только этого проекта.
+1. Create accounts on https://pypi.org and on https://test.pypi.org —
+   these are **different** sites with different passwords.
+2. Enable two-factor authentication (PyPI will not let you upload
+   without it).
+3. Create an API token: Account settings → API tokens → Add API token.
+   For the first upload use account-wide scope; afterwards recreate it
+   scoped to this project only.
 
-Токен выглядит как `pypi-AgEIcHlwaS5vcmc...`. Хранить его в репозитории
-нельзя ни в каком виде.
+A token looks like `pypi-AgEIcHlwaS5vcmc...`. It must never enter the
+repository in any form.
 
-## Проверка перед каждым релизом
+## Checks before every release
 
 ```bash
-./venv/bin/python -m pytest tests/ -q            # все тесты
+./venv/bin/python -m pytest tests/ -q
 ./venv/bin/python tools/compare_retention.py --balanced
 ./venv/bin/python tools/probe_semantic.py
 ```
 
-Если менялись числа — обновить их в README, AUDIT, COMMERCIAL и
-докстрингах. `tests/test_readme_examples.py` проверяет примеры README
-дословно, но таблицы с замерами он не сверяет: за них отвечает человек.
+If any numbers changed, update them in README, README.ru, AUDIT,
+COMMERCIAL and the docstrings. `tests/test_readme_examples.py` runs the
+README examples verbatim, but it does not verify the measurement tables —
+a human is responsible for those.
 
-Поднять версию в `pyproject.toml`. Правило простое:
+Bump the version in `pyproject.toml`. The rule is simple:
 
-| что изменилось | версия |
+| What changed | Version |
 |---|---|
-| исправление, поведение то же | `0.1.0` → `0.1.1` |
-| новая возможность, старый код работает | `0.1.0` → `0.2.0` |
-| сломали чужой код (переименовали метод, поле, пакет) | `0.x` → `1.0.0` |
+| A fix, same behaviour | `0.1.0` → `0.1.1` |
+| A new capability, old code still works | `0.1.0` → `0.2.0` |
+| Someone else's code breaks (a renamed method, field or package) | `0.x` → `1.0.0` |
 
-## Сборка
+## Building
 
 ```bash
 rm -rf build dist
@@ -53,20 +55,20 @@ rm -rf build dist
 ./venv/bin/python -m twine check dist/*
 ```
 
-`twine check` должен сказать `PASSED` для обоих файлов.
+`twine check` must say `PASSED` for both files.
 
-## Сначала TestPyPI
+## TestPyPI first
 
-Отдельный сервер. Имена и версии там **не резервируют** ничего на
-настоящем PyPI, поэтому пробовать можно свободно.
+A separate server. Names and versions there reserve **nothing** on the
+real PyPI, so experiment freely.
 
 ```bash
 export TWINE_USERNAME=__token__
-export TWINE_PASSWORD=pypi-ВАШ_ТОКЕН_С_TEST_PYPI
+export TWINE_PASSWORD=pypi-YOUR_TESTPYPI_TOKEN
 ./venv/bin/python -m twine upload --repository testpypi dist/*
 ```
 
-Проверить, что получилось, в чистом окружении:
+Check the result in a clean environment:
 
 ```bash
 python -m venv /tmp/check && /tmp/check/bin/pip install \
@@ -74,51 +76,53 @@ python -m venv /tmp/check && /tmp/check/bin/pip install \
 /tmp/check/bin/python -c "from selectivemem import Memory; print(Memory(':memory:').stats())"
 ```
 
-И глазами посмотреть страницу пакета: как отрисовался README, верны ли
-ссылки, на месте ли лицензия.
+And look at the project page with your own eyes: how the README rendered,
+whether the links work, whether the licence is in place.
 
-## Потом настоящий PyPI
+## Then the real PyPI
 
 ```bash
 export TWINE_USERNAME=__token__
-export TWINE_PASSWORD=pypi-ВАШ_ТОКЕН_С_PYPI
+export TWINE_PASSWORD=pypi-YOUR_PYPI_TOKEN
 ./venv/bin/python -m twine upload dist/*
 ```
 
-Дальше поставить оттуда в чистое окружение и убедиться, что всё работает.
-После этого — тег в git:
+Install from there into a clean environment and confirm it works. Then
+tag it:
 
 ```bash
-git tag -a v0.1.0 -m "Первый релиз"
+git tag -a v0.1.0 -m "First release"
 git push origin v0.1.0
 ```
 
-## Если что-то пошло не так
+## When something goes wrong
 
-**Опечатка в README, метаданных, коде.** Выпускаете следующую версию.
-Откатить нельзя.
+**A typo in the README, the metadata or the code.** Ship the next
+version. There is no rollback.
 
-**Выложили сломанное.** Пометить релиз как `yank` в веб-интерфейсе PyPI:
-он останется доступен тем, кто его уже прибил в зависимостях, но новым
-пользователям ставиться не будет. Это мягче удаления и не ломает чужие
-сборки.
+**You published something broken.** Mark the release as `yank` in the
+PyPI web interface: it stays available to anyone who already pinned it,
+but new users will not get it. That is gentler than deletion and does not
+break other people's builds.
 
-**Утёк токен.** Немедленно отозвать в настройках PyPI и создать новый.
+**A token leaked.** Revoke it in PyPI settings immediately and create a
+new one.
 
-**Нужно другое имя.** Опубликовать под новым, а у старого выпустить
-последнюю версию, которая просто зависит от нового имени, и пометить
-`yank`. Некрасиво, но работает.
+**You need a different name.** Publish under the new one, then release a
+final version of the old name that simply depends on the new one, and
+`yank` it. Ugly, but it works.
 
-## Что помнить про публичный интерфейс
+## What counts as breaking after publication
 
-После публикации ломающими изменениями становятся:
+- Renaming the `selectivemem` package — breaks everyone's imports.
+- Renaming `Memory`, `observe`, `feedback`, `recall`, `context_for`,
+  `forget` or `stats`.
+- Renaming fields of `Observation` or `MemoryStats`.
+- Removing a field from `MemorySettings` (adding new ones is safe).
 
-- переименование пакета `selectivemem` — ломает `import` у всех;
-- переименование `Memory`, `observe`, `feedback`, `recall`,
-  `context_for`, `forget`, `stats`;
-- переименование полей `Observation` и `MemoryStats`;
-- удаление поля из `MemorySettings` (добавлять новые — безопасно).
+Changing a setting's default is formally not a breaking change, but it
+changes behaviour for everyone at once. Do that in a minor version and
+write it in the changelog — as was done when the write threshold moved
+from 0.35 to 0.25.
 
-Менять умолчания настроек формально не ломает код, но меняет поведение
-у всех разом. Такое стоит делать минорной версией и писать в
-changelog — как было с порогом записи `0.35 → 0.25`.
+Русская версия: [RELEASING.ru.md](RELEASING.ru.md).

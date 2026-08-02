@@ -336,6 +336,6 @@ Copyright © 2026 MERUMEZ
 [COMMERCIAL.ru.md](COMMERCIAL.ru.md), договор —
 [LICENSE-COMMERCIAL.ru.md](LICENSE-COMMERCIAL.ru.md).
 
-Присылаете патч — прочтите [CONTRIBUTING.md](CONTRIBUTING.md): чтобы
+Присылаете патч — прочтите [CONTRIBUTING.ru.md](CONTRIBUTING.ru.md): чтобы
 двойное лицензирование оставалось возможным, нужна одна подписанная
 строка.
