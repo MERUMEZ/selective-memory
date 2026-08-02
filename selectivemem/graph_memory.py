@@ -1129,13 +1129,26 @@ class MemoryGraph:
             context_normalized = row["context"].strip().lower()
             fuzzy_score = self._compute_fuzzy_similarity(query_normalized, context_normalized)
 
-            combined_score = (
+            # RELEVANCE — how well this answers the QUESTION. Nothing about
+            # how dear the memory is: that is decided afterwards, among the
+            # candidates that already fit (see _rerank_by_importance).
+            relevance = (
                 keyword_score * self.settings.memory_keyword_weight
                 + fuzzy_score * self.settings.memory_fuzzy_weight
                 + semantic_score * self.settings.memory_semantic_weight
-                + row["weight"] * self.settings.memory_weight_influence
             )
-            combined_score = min(1.0, combined_score)
+            if self.settings.rerank_band > 0.0:
+                combined_score = min(1.0, relevance)
+            else:
+                # Old behaviour: importance is a summand competing with
+                # relevance. Measured on tools/compare_ordering.py, raising
+                # its share made BOTH groups worse — a heavy node floats to
+                # the top of every query, including the ones it answers
+                # wrongly. Kept as the default until the re-rank is proven.
+                combined_score = min(
+                    1.0,
+                    relevance + row["weight"] * self.settings.memory_weight_influence,
+                )
 
             if combined_score >= effective_threshold:
                 scored.append(
@@ -1151,6 +1164,7 @@ class MemoryGraph:
                 )
 
         scored.sort(key=lambda m: m.similarity, reverse=True)
+        scored = self._rerank_by_importance(scored)
         top_matches = scored[:top_k]
 
         for match in top_matches:
@@ -1287,6 +1301,59 @@ class MemoryGraph:
     # ----------------------------------------------------------------------
     # 3. Updating last_accessed on a touch
     # ----------------------------------------------------------------------
+
+    def _importance(self, match: "MemoryMatch") -> float:
+        """
+        How DEAR a memory is, independently of any question.
+
+        For now that is the node's weight, which reinforcement genuinely
+        reaches: measured on tools/compare_ordering.py, praised nodes end up
+        2.7 times heavier than ordinary ones (0.2806 against 0.1044).
+
+        This is the seam where the other importance signals belong —
+        connectivity, self-reference, how often the memory was actually
+        used. Each of them has to be measured on its own before it joins,
+        because a signal that sounds right is not the same as one that
+        works: spike strength sounded perfect and turned out to measure
+        novelty rather than importance.
+        """
+        return match.weight
+
+    def _rerank_by_importance(self, scored: List["MemoryMatch"]) -> List["MemoryMatch"]:
+        """
+        Reorders the HEAD of a relevance-sorted list by importance.
+
+        Why a separate stage rather than one more summand. Importance as a
+        summand competes with relevance, and measurement showed what that
+        costs: raising the weight's share from 0.15 to 0.70 dropped the
+        praised group's MRR from 0.950 to 0.649 and the ordinary group's
+        from 0.877 to 0.751. A heavy node rises to the top of EVERY query,
+        including those it answers wrongly — it displaces correct ordinary
+        answers and buries its own correct ones under other heavy nodes.
+        Both groups lose, and the gap collapses.
+
+        So importance never promotes anything irrelevant. It only decides
+        the order among answers that are ALREADY about equally fitting —
+        those within rerank_band of the best relevance. Everything below the
+        band keeps its relevance order.
+
+        rerank_band = 0 disables the stage entirely and restores the old
+        summand behaviour.
+        """
+        band = self.settings.rerank_band
+        if band <= 0.0 or len(scored) < 2:
+            return scored
+
+        cutoff = scored[0].similarity - band
+        head = [m for m in scored if m.similarity >= cutoff]
+        tail = [m for m in scored if m.similarity < cutoff]
+        head.sort(key=self._importance, reverse=True)
+
+        logger.debug(
+            "[RERANK] %d of %d candidates within band %.2f reordered by importance",
+            len(head), len(scored), band,
+        )
+        return head + tail
 
     def touch_node(self, node_id: int, timestamp: Optional[float] = None) -> None:
         ts = timestamp if timestamp is not None else time.time()

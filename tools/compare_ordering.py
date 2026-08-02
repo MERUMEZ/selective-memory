@@ -262,6 +262,8 @@ def main() -> None:
     parser.add_argument("--floor-base", type=float, default=0.06,
                         help="пол угасания. НЕ НОЛЬ по умолчанию: иначе неважное "
                              "стирается и стенд снова меряет выживание, а не порядок")
+    parser.add_argument("--rerank-band", type=float, default=None,
+                        help="полоса переупорядочивания по важности; 0 выключает")
     parser.add_argument("--weight-influence", type=float, default=None,
                         help="вклад веса узла в оценку поиска (умолчание 0.15). "
                              "Это и есть ручка, которой избирательность "
@@ -272,6 +274,9 @@ def main() -> None:
     args = parser.parse_args()
 
     config.MEMORY_FLOOR_BASE = args.floor_base
+    if args.rerank_band is not None:
+        config.RERANK_BAND = args.rerank_band
+        print(f" Полоса переупорядочивания: {args.rerank_band}")
     if args.weight_influence is not None:
         config.MEMORY_WEIGHT_INFLUENCE = args.weight_influence
         print(f" Вклад веса в оценку поиска: {args.weight_influence}")
@@ -309,7 +314,10 @@ def main() -> None:
 
     # ЗНАК ВАЖЕН. Первая версия вывода смотрела на |разрыв| и объявляла
     # "зависимость есть" даже когда важное приходило ПОЗЖЕ обычного.
-    share_gap = avg("praised_share") - 0.5
+    # ЗНАМЕНАТЕЛЬ ОБЯЗАТЕЛЕН. Доля на 0.8 узла — это не 40%, это шум, и
+    # вывод по ней уже один раз объявил "важное приходит позже" при
+    # разрыве MRR ровно 0.000.
+    share_gap = (avg("praised_share") - 0.5) if avg("share_n") >= 5 else 0.0
     if mrr_p - mrr_o > 0.05 and share_gap > 0.05:
         print(" ВЫВОД: важное приходит раньше обычного — есть что растить.")
     elif mrr_p - mrr_o < -0.05 or share_gap < -0.05:
