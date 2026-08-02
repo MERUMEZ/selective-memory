@@ -39,7 +39,14 @@ COMMERCIAL and the docstrings. `tests/test_readme_examples.py` runs the
 README examples verbatim, but it does not verify the measurement tables —
 a human is responsible for those.
 
-Bump the version in `pyproject.toml`. The rule is simple:
+Bump the version in **one** place — `__version__` in
+[selectivemem/__init__.py](selectivemem/__init__.py). `pyproject.toml`
+reads it from there, so there is no second copy to keep in step. It has to
+stay a plain string literal: setuptools extracts it by parsing the syntax,
+without importing the package, and cannot evaluate anything computed.
+`tests/test_version.py` guards both properties.
+
+The rule is simple:
 
 | What changed | Version |
 |---|---|
@@ -67,6 +74,24 @@ export TWINE_USERNAME=__token__
 export TWINE_PASSWORD=pypi-YOUR_TESTPYPI_TOKEN
 ./venv/bin/python -m twine upload --repository testpypi dist/*
 ```
+
+**`403 Forbidden` almost always means the token is from the other site.**
+pypi.org and test.pypi.org are separate systems with separate accounts;
+registering on one does nothing for the other. Check in this order: an
+account exists on TestPyPI, the token was created there, the username is
+exactly `__token__`, two-factor is on. If `~/.pypirc` exists it wins over
+the environment variables. `--verbose` prints the server's actual reason.
+
+**To look at the page a second time you need a new version number** — a
+version burns on TestPyPI too. Use a `.dev` suffix rather than the next
+real number:
+
+```bash
+sed -i 's/0\.1\.0/0.1.0.dev1/' selectivemem/__init__.py   # test only
+```
+
+Then put it back before the real upload, so the first release goes out as
+a clean `0.1.0`.
 
 Check the result in a clean environment:
 

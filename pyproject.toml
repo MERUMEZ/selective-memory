@@ -4,7 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "selective-memory"
-version = "0.1.0"
+# Версия живёт в selectivemem/__init__.py и берётся оттуда. Раньше номер
+# был записан ДВАЖДЫ, и ничто не сверяло копии: разъехались бы они молча,
+# а обнаружилось бы это на чужой отладке, где собранный пакет говорит одно,
+# а __version__ внутри него — другое.
+dynamic = ["version"]
 description = "Memory that writes selectively, forgets with time, and strengthens what proved useful"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,6 +38,11 @@ dev = ["pytest>=8.0"]
 [project.urls]
 Source = "https://github.com/MERUMEZ/mindnumbness"
 Commercial = "https://github.com/MERUMEZ/mindnumbness/blob/master/COMMERCIAL.md"
+
+[tool.setuptools.dynamic]
+# setuptools достаёт литерал разбором синтаксиса, не импортируя пакет,
+# поэтому строка обязана оставаться простым присваиванием.
+version = { attr = "selectivemem.__version__" }
 
 [tool.setuptools]
 # The package is selectivemem/ and nothing else. Everything else in the
