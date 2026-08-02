@@ -167,6 +167,8 @@ def main() -> None:
                              "окружения: стенд строит Memory на MemorySettings, "
                              "а переменные идут в config — я дважды намерил "
                              "этим пустоту, прежде чем заметить")
+    parser.add_argument("--spike-factor", type=float, default=None,
+                        help="пол = сила спайка * этот множитель")
     parser.add_argument("--floor-base", type=float, default=None,
                         help="пол угасания для неподкреплённых узлов")
     parser.add_argument("--weight-influence", type=float, default=None,
@@ -212,6 +214,8 @@ def main() -> None:
         settings_kwargs["base_plasticity_threshold"] = args.plasticity
     if args.content_tokens is not None:
         settings_kwargs["surprise_full_content_tokens"] = args.content_tokens
+    if args.spike_factor is not None:
+        settings_kwargs["memory_floor_spike_factor"] = args.spike_factor
     if args.floor_base is not None:
         settings_kwargs["memory_floor_base"] = args.floor_base
     if args.weight_influence is not None:

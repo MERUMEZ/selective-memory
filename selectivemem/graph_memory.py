@@ -1532,6 +1532,12 @@ class MemoryGraph:
                 # is simply the oldest thing in the store, and age alone
                 # decided its fate.
                 self.settings.memory_floor_base,
+                # Earned by the force of the event. A flat floor saves
+                # everything and so forgets nothing, which costs the whole
+                # praised-over-routine gap; this term keeps the gap, because
+                # routine that barely cleared the gate gets a floor below
+                # forget_threshold and still dies of old age.
+                (row["spike_strength"] or 0.0) * self.settings.memory_floor_spike_factor,
             )
             floor = min(floor, old_weight)          # the floor never raises a weight
             new_weight = floor + (old_weight - floor) * decay_factor

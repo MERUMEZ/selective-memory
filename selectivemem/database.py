@@ -139,6 +139,27 @@ ALTER_ADD_REWARD_EXPECTATION = """
 ALTER TABLE nodes ADD COLUMN reward_expectation REAL DEFAULT 0.0;
 """
 # --------------------------------------------------------------------------
+# Migration: spike_strength — the density of the event that CREATED the node.
+#
+# The initial weight already equals that density, but weight decays, so by
+# the time forgetting has to decide anything the birth signal is gone.
+#
+# Why it is needed. Decay does not merely lower a weight, it DELETES a node
+# once it falls below forget_threshold, and measurement showed what that
+# costs: for LongMemEval knowledge-update questions the evidence is about
+# 16 days older than the question, and every evidence node was erased —
+# 12 of 12 across five instances — while only a tenth of memory went. A
+# flat floor for everything fixed retrieval (18% -> 85%) and destroyed
+# selectivity in the same move (the praised-over-routine gap fell from
+# +40 pp to zero): with it, nothing is ever forgotten.
+#
+# So the floor has to remember how hard the event hit. A strong spike earns
+# protection from age; routine that barely cleared the gate earns none.
+# --------------------------------------------------------------------------
+ALTER_ADD_SPIKE_STRENGTH = """
+ALTER TABLE nodes ADD COLUMN spike_strength REAL DEFAULT NULL;
+"""
+# --------------------------------------------------------------------------
 # Migration: embedding — a node's meaning vector for semantic search.
 #
 # Stored as a BLOB (float32) and filled lazily: nodes created before the
@@ -267,7 +288,7 @@ class Database:
         cursor = self._conn.cursor()
         migrated = False
         for statement in (ALTER_ADD_STABILITY, ALTER_ADD_REWARD_EXPECTATION,
-                          ALTER_ADD_EMBEDDING):
+                          ALTER_ADD_EMBEDDING, ALTER_ADD_SPIKE_STRENGTH):
             try:
                 cursor.execute(statement)
                 migrated = True
@@ -317,10 +338,14 @@ class Database:
         cursor = self._conn.cursor()
         cursor.execute(
             """
-            INSERT INTO nodes (context, response, weight, created_at, last_accessed, last_decayed_at, node_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO nodes (context, response, weight, created_at, last_accessed,
+                               last_decayed_at, node_type, spike_strength)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (context, response, weight, ts, ts, ts, node_type),
+            # spike_strength is the birth weight, kept as it was. Weight goes
+            # on decaying; this stays, because forgetting has to be able to
+            # ask later how hard the event hit at the time.
+            (context, response, weight, ts, ts, ts, node_type, weight),
         )
         self._conn.commit()
         node_id = cursor.lastrowid

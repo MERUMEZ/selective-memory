@@ -244,6 +244,9 @@ def main() -> None:
     parser.add_argument("--silence-days", type=float, default=14.0)
     parser.add_argument("--balanced", action="store_true",
                     help="уравнять число сообщений: контроль на объём, а не на награду")
+    parser.add_argument("--spike-factor", type=float, default=None,
+                        help="MEMORY_FLOOR_SPIKE_FACTOR: пол, заработанный "
+                             "силой спайка. Как и floor-base, ставится в config")
     parser.add_argument("--floor-base", type=float, default=None,
                         help="MEMORY_FLOOR_BASE: пол угасания для неподкреплённых "
                              "узлов. Ставится В CONFIG, а не в MemorySettings: "
@@ -253,6 +256,9 @@ def main() -> None:
     parser.add_argument("--logs", action="store_true")
     args = parser.parse_args()
 
+    if args.spike_factor is not None:
+        config.MEMORY_FLOOR_SPIKE_FACTOR = args.spike_factor
+        print(f" Пол от силы спайка: {args.spike_factor}")
     if args.floor_base is not None:
         config.MEMORY_FLOOR_BASE = args.floor_base
         print(f" Базовый пол угасания: {args.floor_base}")
