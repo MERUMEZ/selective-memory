@@ -167,6 +167,12 @@ def main() -> None:
                              "окружения: стенд строит Memory на MemorySettings, "
                              "а переменные идут в config — я дважды намерил "
                              "этим пустоту, прежде чем заметить")
+    parser.add_argument("--no-decay", action="store_true",
+                        help="гейт работает, забывание выключено")
+    parser.add_argument("--type", default=None,
+                        help="мерить только этот тип вопроса")
+    parser.add_argument("--topic-threshold", type=float, default=None,
+                        help="порог темы для вытеснения; >1.0 выключает его")
     parser.add_argument("--shuffle", type=int, default=0,
                         help="перемешать с этим сидом: набор отсортирован по типам")
     parser.add_argument("--logs", action="store_true")
@@ -187,6 +193,8 @@ def main() -> None:
         # меряет одну способность и выдаёт её за общую.
         import random
         random.Random(args.shuffle).shuffle(data)
+    if args.type:
+        data = [i for i in data if i["question_type"] == args.type]
     if args.limit:
         data = data[: args.limit]
 
@@ -198,8 +206,18 @@ def main() -> None:
         settings_kwargs["base_plasticity_threshold"] = args.plasticity
     if args.content_tokens is not None:
         settings_kwargs["surprise_full_content_tokens"] = args.content_tokens
+    if args.topic_threshold is not None:
+        # Порог темы для вытеснения устаревшего. Значение выше 1.0 делает
+        # вытеснение невозможным (косинус не превышает единицу) — это
+        # способ померить, помогает механизм или мешает, не трогая код.
+        settings_kwargs["contradiction_topic_threshold"] = args.topic_threshold
     if args.mode == "archive":
         # Забывание практически выключено: узлы живут тысячелетия.
+        settings_kwargs.update({"age_t0": 1e12, "decay_rate": 1e-9})
+    if args.no_decay:
+        # Гейт РАБОТАЕТ, забывание выключено. Разница между этим режимом и
+        # обычным — цена одного лишь угасания, без вклада отбора на входе.
+        # Archive смешивает две причины и не даёт их разделить.
         settings_kwargs.update({"age_t0": 1e12, "decay_rate": 1e-9})
 
     totals = {f"r@{k}": 0 for k in KS}
