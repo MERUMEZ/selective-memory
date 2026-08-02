@@ -302,7 +302,11 @@ class Memory:
         # что, осмысленнее связи с началом длинного разговора.
         for source_id in reversed(self._recently_recalled[-limit:]):
             if source_id != node_id:
-                self.graph.connect_nodes(source_id, node_id, timestamp=timestamp)
+                self.graph.connect_nodes(
+                    source_id, node_id,
+                    weight_boost=self.settings.associate_edge_weight,
+                    timestamp=timestamp,
+                )
         self._recently_recalled = []
 
     def _remember_used(self, node_ids: List[int]) -> None:
