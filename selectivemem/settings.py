@@ -46,7 +46,7 @@ class MemorySettings:
 
     age_t0: float = 25200.0
     babbling_syllable_pool_size: int = 30
-    base_plasticity_threshold: float = 0.35
+    base_plasticity_threshold: float = 0.25
     concept_max_similar_links: int = 2
     concept_node_weight: float = 0.7
     concept_similarity_edge_weight: float = 0.25
@@ -116,7 +116,7 @@ class MemorySettings:
     stm_structural_weight: float = 0.5
     # При скольких содержательных словах реплика считается способной
     # удивить в полную силу. Меньше — удивление пропорционально урезается.
-    surprise_full_content_tokens: int = 2
+    surprise_full_content_tokens: int = 3
     surprise_lexical_weight: float = 0.6
     surprise_structural_weight: float = 0.4
     syllable_node_initial_weight: float = 0.1

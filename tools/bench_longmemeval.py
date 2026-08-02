@@ -159,6 +159,14 @@ def main() -> None:
     parser.add_argument("--encoder", choices=("none", "builtin", "potion"), default="none")
     parser.add_argument("--threshold", type=float, default=None,
                         help="порог поиска; по умолчанию из настроек")
+    parser.add_argument("--content-tokens", type=int, default=None,
+                        help="surprise_full_content_tokens: при скольких словах "
+                             "реплика удивляет в полную силу")
+    parser.add_argument("--plasticity", type=float, default=None,
+                        help="порог ЗАПИСИ. Задаётся здесь, а не переменной "
+                             "окружения: стенд строит Memory на MemorySettings, "
+                             "а переменные идут в config — я дважды намерил "
+                             "этим пустоту, прежде чем заметить")
     parser.add_argument("--shuffle", type=int, default=0,
                         help="перемешать с этим сидом: набор отсортирован по типам")
     parser.add_argument("--logs", action="store_true")
@@ -186,6 +194,10 @@ def main() -> None:
     settings_kwargs = {}
     if args.threshold is not None:
         settings_kwargs["memory_search_threshold"] = args.threshold
+    if args.plasticity is not None:
+        settings_kwargs["base_plasticity_threshold"] = args.plasticity
+    if args.content_tokens is not None:
+        settings_kwargs["surprise_full_content_tokens"] = args.content_tokens
     if args.mode == "archive":
         # Забывание практически выключено: узлы живут тысячелетия.
         settings_kwargs.update({"age_t0": 1e12, "decay_rate": 1e-9})
