@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "selective-memory"
 version = "0.1.0"
-description = "Динамическая память: пишет избирательно, забывает со временем, укрепляет то, что пригодилось"
+description = "Memory that writes selectively, forgets with time, and strengthens what proved useful"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "AGPL-3.0-only"
@@ -19,14 +19,15 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# ЗАВИСИМОСТЕЙ НЕТ. Ядро живёт на стандартной библиотеке и sqlite3.
-# Это не аскеза, а требование: пакет должен ставиться туда, где 3.7 ГБ
-# памяти на всю машину, и запускаться там, где нет ни torch, ни сети.
+# NO DEPENDENCIES. The core lives on the standard library and sqlite3.
+# That is not asceticism but a requirement: the package has to install
+# where the whole machine has 3.7 GB of RAM, and run where there is
+# neither torch nor a network.
 dependencies = []
 
 [project.optional-dependencies]
-# Семантический поиск. Без него память ищет по строковому сходству и
-# продолжает работать — деградация мягкая, а не отказ.
+# Semantic search. Without it memory matches by string similarity and
+# keeps working — the degradation is graceful, not a failure.
 semantic = ["navec>=0.10", "numpy>=1.24"]
 dev = ["pytest>=8.0"]
 
@@ -35,9 +36,10 @@ Source = "https://github.com/MERUMEZ/mindnumbness"
 Commercial = "https://github.com/MERUMEZ/mindnumbness/blob/master/COMMERCIAL.md"
 
 [tool.setuptools]
-# Пакет — только selectivemem/. Всё остальное в репозитории (бот, персонаж,
-# речевые стадии, мини-апп) это ДЕМОНСТРАЦИЯ памяти, а не сама память,
-# и в дистрибутив не едет.
+# The package is selectivemem/ and nothing else. Everything else in the
+# repository (the bot, the character, the speech stages, the mini app) is
+# a DEMONSTRATION of the memory rather than the memory itself, and does
+# not travel in the distribution.
 packages = ["selectivemem"]
 
 [tool.pytest.ini_options]
