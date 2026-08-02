@@ -327,7 +327,7 @@ class MemoryGraph:
 
 
     # ----------------------------------------------------------------------
-    # CONCEPT EXTRACTION — семантическая концептуализация (Итерация 16)
+    # CONCEPT EXTRACTION — turning explanations into concepts
     # ----------------------------------------------------------------------
 
     def create_concept_node(
@@ -338,20 +338,20 @@ class MemoryGraph:
         timestamp: Optional[float] = None,
     ) -> int:
         """
-        Создаёт (или обновляет, если понятие уже известно) concept-узел и
-        выполняет полное связывание в графе знаний (Concept Graph Linking):
+        Creates a concept node — or updates it if the concept is already
+        known — and wires it into the knowledge graph:
 
-            1. Узел сохраняется через upsert_concept_node (node_type='concept').
-            2. Автоматически создаётся/укрепляется ребро concept <-> USER_NODE
-               (источник знания — Юзер объяснил это понятие).
-            3. Если найдены семантически похожие существующие узлы (через
-               обычный keyword+fuzzy search()), прокладываются начальные
-               ассоциативные рёбра concept <-> similar_node (до
-               CONCEPT_MAX_SIMILAR_LINKS штук).
-            4. Если передан source_node_id (например, узел эпизода/сообщения,
-               из которого извлекли понятие), концепт также связывается с ним.
+            1. The node is stored through upsert_concept_node
+               (node_type='concept').
+            2. An edge concept <-> user node is created or strengthened:
+               the user is the source of this knowledge.
+            3. If semantically similar nodes already exist, initial
+               associative edges concept <-> similar_node are laid down,
+               up to concept_max_similar_links of them.
+            4. If source_node_id is given — say the episode the concept was
+               extracted from — the concept is linked to it as well.
 
-        Возвращает id concept-узла.
+        Returns the id of the concept node.
         """
         ts = timestamp if timestamp is not None else time.time()
         normalized_name = name.strip()
@@ -363,7 +363,7 @@ class MemoryGraph:
             timestamp=ts,
         )
 
-        # --- Связь с USER_MODEL (источник знания) ---
+        # --- Link to the user model: the source of this knowledge ---
         user_row = self.db.get_meta_node("user_model")
         if user_row is not None:
             self.connect_nodes(
@@ -373,7 +373,7 @@ class MemoryGraph:
                 timestamp=ts,
             )
 
-        # --- Связь с исходным узлом-источником (если передан) ---
+        # --- Link to the originating node, when one was given ---
         if source_node_id is not None:
             self.connect_nodes(
                 concept_node_id,
@@ -382,7 +382,7 @@ class MemoryGraph:
                 timestamp=ts,
             )
 
-        # --- Семантическое связывание с похожими существующими узлами ---
+        # --- Semantic linking to similar existing nodes ---
         if was_created:
             self._link_concept_to_similar_nodes(concept_node_id, normalized_name, definition, ts)
 
@@ -401,15 +401,15 @@ class MemoryGraph:
         timestamp: float,
     ) -> None:
         """
-        Ищет узлы в графе, семантически перекликающиеся с новым понятием
-        (по имени + определению), и прокладывает начальные ассоциативные
-        рёбра — до CONCEPT_MAX_SIMILAR_LINKS штук, исключая сам концепт.
+        Looks for nodes that echo the new concept — matching on its name
+        and definition — and lays down initial associative edges, up to
+        concept_max_similar_links of them, excluding the concept itself.
         """
         query_text = f"{name} {definition}"
         matches = self.search(
             query_text,
             threshold=self.settings.concept_similarity_link_threshold,
-            top_k=self.settings.concept_max_similar_links + 1,  # +1 запас на случай самосовпадения
+            top_k=self.settings.concept_max_similar_links + 1,  # +1 in case it matches itself
             timestamp=timestamp,
             with_associations=False,
         )
@@ -436,7 +436,7 @@ class MemoryGraph:
             )
 
     # ----------------------------------------------------------------------
-    # LEXICAL ACQUISITION — освоение языка "с нуля" (Итерация N+1)
+    # LEXICAL ACQUISITION — learning a language from zero
     # ----------------------------------------------------------------------
 
     def process_language_input(
@@ -445,31 +445,32 @@ class MemoryGraph:
         timestamp: Optional[float] = None,
     ) -> LexicalProcessingResult:
         """
-        Побочный процесс (не блокирует основной ответ): разбирает входящий
-        текст на слова и слоги, накапливая примитивный "словарный запас"
-        цифрового ребёнка независимо от того, был MEMORY HIT или MISS.
+        A side process that does not block the main reply: it breaks
+        incoming text into words and syllables, accumulating a primitive
+        vocabulary regardless of whether the search hit or missed.
 
-        Для каждого слова:
-            1. upsert word-узла (node_type='word') — частота появления
-               повышает вес (усвоенность слова).
-            2. Слово разбивается на слоги, каждый слог upsert-ится как
-               syllable-узел (node_type='syllable').
-            3. Слог связывается ребром с "родительским" словом
-               (SYLLABLE_WORD_EDGE_WEIGHT).
-        Соседние слова в предложении связываются рёбрами со-встречаемости
-        (WORD_COOCCURRENCE_EDGE_WEIGHT) — примитивная "грамматика по
-        смежности".
+        For every word:
+            1. A word node is upserted (node_type='word') — frequency
+               raises its weight, which is what mastery means here.
+            2. The word is split into syllables, each upserted as a
+               syllable node (node_type='syllable').
+            3. Each syllable is linked by an edge to its parent word
+               (syllable_word_edge_weight).
+        Neighbouring words in a sentence are joined by co-occurrence
+        edges (word_cooccurrence_edge_weight) — a primitive grammar of
+        adjacency.
 
-        Если LEXICAL_ACQUISITION_ENABLED=False — сразу возвращает нулевой
-        результат без обращений к БД.
+        When lexical acquisition is disabled, this returns an empty result
+        immediately, without touching the database.
         """
         if not self.settings.lexical_acquisition_enabled or not text or not text.strip():
             return LexicalProcessingResult(0, 0, 0, 0)
 
         ts = timestamp if timestamp is not None else time.time()
 
-        # Та же токенизация, что и в compute_surprise — см. комментарий там:
-        # организм обязан удивляться ровно тем единицам, которым учится.
+        # The same tokenisation as in compute_surprise — see the comment
+        # there: the organism must be surprised by exactly the units it
+        # learns.
         tokens = self._tokenize_for_lexicon(text)
 
         if not tokens:
@@ -530,49 +531,53 @@ class MemoryGraph:
         )
 
     # ----------------------------------------------------------------------
-    # SURPRISE — собственная ошибка предсказания организма
+    # SURPRISE — the organism's own prediction error
     # ----------------------------------------------------------------------
 
     def compute_surprise(self, text: str) -> SurpriseResult:
         """
-        Считает, насколько входящий текст НЕОЖИДАНЕН для этого конкретного
-        организма — по его собственному накопленному графу языка.
+        Measures how UNEXPECTED an incoming text is for this particular
+        organism, judged against the graph of language it has built up.
 
-        Раньше эту роль играла энтропия Шеннона по символам
-        (Cortex.calculate_perplexity): она измеряла свойство строки и была
-        полностью слепа к опыту — пустой мозг и мозг после 50 повторений
-        фразы выдавали одинаковое число. Спайк-гейт, уверенность,
-        структурная консолидация и любопытство — все четыре механизма
-        управлялись величиной, которая никогда не менялась от обучения.
+        This role used to be played by Shannon entropy over characters. It
+        measured a property of the string and was completely blind to
+        experience — an empty mind and one that had seen a phrase fifty
+        times produced the same number. Four mechanisms depended on it:
+        the spike gate, confidence, structural consolidation and
+        curiosity. All four were steered by a quantity that learning never
+        changed.
 
-        Две составляющие ошибки предсказания:
+        Prediction error has two components:
 
-            лексическая  — знакомы ли САМИ СЛОВА. Знакомость слова растёт
-                           с его весом (частота = освоенность) и насыщается
-                           на VOCABULARY_MASTERY_MIN_WEIGHT.
-            структурная  — привычны ли СОЧЕТАНИЯ соседних слов. Знакомость
-                           пары растёт с весом ребра со-встречаемости и
-                           насыщается на EDGE_ACTIVATION_THRESHOLD.
+            lexical     — are the WORDS THEMSELVES familiar? A word's
+                          familiarity grows with its weight (frequency
+                          equals mastery) and saturates at
+                          vocabulary_mastery_min_weight.
+            structural  — are the PAIRINGS of neighbouring words familiar?
+                          A pair's familiarity grows with the weight of the
+                          co-occurrence edge and saturates at
+                          edge_activation_threshold.
 
-        ВАЖНОЕ ОГРАНИЧЕНИЕ: рёбра хранятся ненаправленно — upsert_edge
-        нормализует пару по возрастанию id. Поэтому структурная часть
-        отвечает на вопрос «встречались ли эти слова рядом», а НЕ «идёт ли
-        одно за другим». Это не языковая модель и называть её так нельзя;
-        для ошибки предсказания такого разрешения достаточно.
+        AN IMPORTANT LIMITATION: edges are stored undirected — upsert_edge
+        normalises each pair by ascending id. The structural component
+        therefore answers "have these words appeared next to each other",
+        NOT "does one follow the other". This is not a language model and
+        must not be called one; for prediction error that resolution is
+        enough.
 
-        Токенизация намеренно совпадает с process_language_input — организм
-        обязан удивляться ровно тем единицам, которым он учится.
+        Tokenisation deliberately matches process_language_input — the
+        organism must be surprised by exactly the units it learns.
 
-        Краевые случаи:
-            пустой текст / нет токенов -> 0.0 (удивляться нечему)
-            один токен (пар нет)       -> только лексическая часть
-            пустой граф                -> 1.0 (новорождённому всё ново)
+        Edge cases:
+            empty text / no tokens -> 0.0 (nothing to be surprised by)
+            a single token (no pairs) -> the lexical component only
+            an empty graph -> 1.0 (everything is new to a newborn)
         """
         tokens = self._tokenize_for_lexicon(text)
         if not tokens:
             return SurpriseResult(0.0, 0.0, 0.0, 0, 0, 0, 0)
 
-        # --- Лексическая новизна: знакомы ли сами слова ---
+        # --- Lexical novelty: are the words themselves familiar? ---
         rows = self.db.get_lexical_nodes_by_texts("word", list(set(tokens)))
         known = {row["context"]: (row["id"], row["weight"]) for row in rows}
 
@@ -583,12 +588,12 @@ class MemoryGraph:
         ]
         lexical_surprise = 1.0 - (sum(familiarities) / len(familiarities))
 
-        # --- Структурная новизна: привычны ли сочетания соседних слов ---
+        # --- Structural novelty: are the pairings familiar? ---
         token_ids = [known[t][0] for t in tokens if t in known]
         edge_weights = {}
         for edge in self.db.get_edges_between(list(set(token_ids))):
-            # Пара хранится ненаправленно -> кладём в оба порядка, чтобы
-            # искать по фактическому порядку слов во входящем тексте.
+            # Pairs are stored undirected, so both orders go into the
+            # lookup and the actual word order of the input can be used.
             a, b, w = edge["node_from"], edge["node_to"], edge["weight"]
             edge_weights[(a, b)] = w
             edge_weights[(b, a)] = w
@@ -600,16 +605,16 @@ class MemoryGraph:
                 weight = edge_weights.get((known[left][0], known[right][0]), 0.0)
                 pair_familiarities.append(min(1.0, weight / activation))
             else:
-                # Хотя бы одно слово пары незнакомо -> сочетание тем более
+                # If either word is unfamiliar, the pairing certainly is
                 pair_familiarities.append(0.0)
 
         known_words = sum(1 for f in familiarities if f > 0.0)
         known_pairs = sum(1 for f in pair_familiarities if f > 0.0)
 
         if not pair_familiarities:
-            # Один токен: структурной информации нет вообще, поэтому итог
-            # определяется только лексикой (перенормировка вместо того,
-            # чтобы фиктивно засчитывать структурное удивление как 0 или 1).
+            # A single token carries no structural information at all, so
+            # the result rests on lexis alone — renormalised rather than
+            # crediting structural surprise with a fictitious 0 or 1.
             total = lexical_surprise
             structural_surprise = 0.0
         else:
@@ -622,21 +627,21 @@ class MemoryGraph:
             if weight_sum > 0:
                 total /= weight_sum
 
-        # --- Поправка на ОБЪЁМ содержания ---
+        # --- Correction for the AMOUNT of content ---
         #
-        # Удивление считалось средней незнакомостью, а среднее слепо к
-        # тому, СКОЛЬКО в реплике содержания: "ага" и "моя дочь Лиза ей
-        # шесть лет" на пустой памяти давали одинаковые 1.000. Для
-        # растущего бота это было неважно (он всё равно лепечет), а
-        # библиотеку в первый же день засоряло междометиями: замер на
-        # потоке, похожем на переписку с ассистентом, записал "спасибо",
-        # "окей" и "ага" наравне с аллергией на пенициллин.
+        # Surprise was the mean unfamiliarity, and a mean is blind to HOW
+        # MUCH content an utterance carries: on empty memory "uh-huh" and
+        # "my daughter Lisa is six" both scored 1.000. For a growing bot
+        # that hardly mattered — it babbles either way — but it cluttered
+        # the library with interjections from day one: a run over a stream
+        # resembling a real assistant conversation stored "thanks", "okay"
+        # and "uh-huh" alongside the penicillin allergy.
         #
-        # Одно незнакомое слово несёт меньше информации, чем шесть, — это
-        # не эвристика, а определение. Поэтому удивление умножается на
-        # долю набранного содержания, насыщающуюся на
-        # surprise_full_content_tokens: короткая реплика физически не
-        # может удивить сильно, сколь угодно новой она бы ни была.
+        # One unfamiliar word carries less information than six — that is
+        # a definition, not a heuristic. So surprise is multiplied by the
+        # fraction of content gathered, saturating at
+        # surprise_full_content_tokens: a short utterance physically
+        # cannot surprise much, however novel it may be.
         full = max(1, self.settings.surprise_full_content_tokens)
         total *= min(1.0, len(tokens) / full)
 
@@ -661,10 +666,11 @@ class MemoryGraph:
 
     def _tokenize_for_lexicon(self, text: str) -> List[str]:
         """
-        Единая токенизация для лексического слоя. Используется И при
-        обучении (process_language_input), И при расчёте удивления
-        (compute_surprise) — организм должен удивляться ровно тем единицам,
-        которые он потом запоминает, иначе измеряется не то, чему учатся.
+        One tokenisation for the whole lexical layer, shared by learning
+        (process_language_input) and by surprise (compute_surprise): the
+        organism must be surprised by exactly the units it goes on to
+        memorise, or the measurement is of something other than what is
+        being learned.
         """
         if not text or not text.strip():
             return []
@@ -676,10 +682,10 @@ class MemoryGraph:
     @staticmethod
     def _split_into_syllables(word: str) -> List[str]:
         """
-        Примитивная слоговая сегментация: слог накапливается посимвольно
-        и "закрывается" на первой встреченной гласной; хвостовые согласные
-        в конце слова прилипают к последнему найденному слогу. Не претендует
-        на лингвистическую точность — достаточно для babbling-подсистемы.
+        Primitive syllable segmentation: a syllable accumulates character
+        by character and closes on the first vowel; trailing consonants at
+        the end of a word stick to the last syllable found. It makes no
+        claim to linguistic accuracy — it is enough for babbling.
         """
         syllables: List[str] = []
         current = ""
