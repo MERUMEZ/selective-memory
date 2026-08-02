@@ -57,6 +57,31 @@ as the vectors you give it.
 Not for you if you need **completeness** — finding everything ever said.
 Use a vector store for that; the numbers below show why.
 
+### What it needs from your application
+
+`selectivemem` is a library your code calls directly. It has to sit where
+you control the message loop:
+
+    your app  ->  memory.observe(user_text)
+              ->  memory.context_for(query)  ->  into the prompt
+              ->  memory.feedback(+1.0)      when the user approves
+
+**If you cannot intercept individual messages, no memory library will
+help you** — and that is worth checking before you integrate anything.
+
+This is not a hypothetical. A neighbouring project, PsychMem, built the
+same ideas — dual-store STM/LTM, Ebbinghaus decay, learned importance —
+as a plugin for coding agents, and abandoned it after concluding that
+*"the memory model itself is sound; the architecture is wrong"*. Plugin
+hooks exposed only coarse lifecycle events, with no way to intercept a
+message or shape the context, so the only route left was injecting a fake
+user turn that polluted the conversation. They rewrote the storage, the
+write strategy and the retrieval, and hit the same ceiling every time.
+
+So: check your integration point first. If your framework hands you the
+turn, you are fine. If it only hands you `session.started`, no amount of
+decay curves will save the design.
+
 ---
 
 ## Five calls
