@@ -333,8 +333,8 @@ Copyright © 2026 MERUMEZ
 
 Для закрытых игр, закрытого SaaS и продуктов, поставляемых клиентам,
 нужна коммерческая лицензия: условия и вилки цен —
-[COMMERCIAL.md](COMMERCIAL.md), договор —
-[LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
+[COMMERCIAL.ru.md](COMMERCIAL.ru.md), договор —
+[LICENSE-COMMERCIAL.ru.md](LICENSE-COMMERCIAL.ru.md).
 
 Присылаете патч — прочтите [CONTRIBUTING.md](CONTRIBUTING.md): чтобы
 двойное лицензирование оставалось возможным, нужна одна подписанная

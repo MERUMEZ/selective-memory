@@ -1,133 +1,140 @@
-# Коммерческая лицензия selectivemem — ЧЕРНОВИК
+# Commercial licence for selectivemem — DRAFT
 
-> **Это заготовка, а не договор.** Перед первой сделкой её обязан
-> посмотреть юрист: формулировки об ответственности, применимом праве и
-> порядке расчётов зависят от юрисдикций обеих сторон, и ошибка в них
-> стоит дороже самой лицензии. Здесь зафиксировано, о чём стороны
-> договариваются по существу, — чтобы юристу было что править, а не
-> сочинять с нуля.
+> **This is a working draft, not a contract.** A lawyer must review it
+> before the first deal: the wording on liability, governing law and
+> payment depends on both parties' jurisdictions, and a mistake there
+> costs more than the licence itself. What is fixed here is the substance
+> of what the parties agree on — so that a lawyer has something to
+> correct rather than something to compose from nothing.
 
 ---
 
-## 1. Стороны и предмет
+## 1. Parties and subject
 
-**Лицензиар:** MERUMEZ, selectivemem@gmail.com
-*(заменить на полное юридическое имя или реквизиты организации)*
+**Licensor:** MERUMEZ, selectivemem@gmail.com
+*(to be replaced with a full legal name or company details)*
 
-**Лицензиат:** ______________________
+**Licensee:** ______________________
 
-**Предмет:** программная библиотека `selectivemem` (далее — Программа),
-исходный код которой опубликован по адресу
-https://github.com/MERUMEZ/mindnumbness
+**Subject:** the software library `selectivemem` (the Program), whose
+source is published at https://github.com/MERUMEZ/mindnumbness
 
-Программа распространяется публично на условиях AGPL-3.0. Настоящая
-лицензия предоставляется **дополнительно** и **вместо** AGPL: получив
-её, Лицензиат вправе не исполнять условия AGPL в отношении Программы.
+The Program is publicly distributed under AGPL-3.0. This licence is
+granted **in addition to** and **instead of** AGPL: having received it,
+the Licensee is not required to comply with AGPL in respect of the
+Program.
 
-## 2. Что разрешается
+## 2. What is permitted
 
-Лицензиар предоставляет неисключительное, непередаваемое право:
+The Licensor grants a non-exclusive, non-transferable right to:
 
-1. использовать Программу в составе Продукта Лицензиата **без раскрытия
-   исходного кода Продукта**;
-2. распространять Программу в составе Продукта в объектном или
-   исполняемом виде;
-3. предоставлять доступ к функциональности Программы **по сети** без
-   обязательств §13 AGPL (передача исходного кода пользователям);
-4. изменять Программу для нужд Продукта.
+1. use the Program within the Licensee's Product **without disclosing
+   the Product's source code**;
+2. distribute the Program within the Product in object or executable
+   form;
+3. provide access to the Program's functionality **over a network**
+   without the obligations of AGPL §13 (conveying source to users);
+4. modify the Program for the needs of the Product.
 
-**Продукт:** ______________________
-*(конкретное наименование; см. п.4 — охват)*
+**Product:** ______________________
+*(specific name; see §4 on scope)*
 
-## 3. Что не разрешается
+## 3. What is not permitted
 
-1. Распространять Программу **как самостоятельный продукт** — то есть
-   продавать или передавать её саму по себе, вне состава Продукта.
-2. Передавать права по настоящей лицензии третьим лицам, включая
-   передачу при слиянии или продаже бизнеса, без письменного согласия
-   Лицензиара.
-3. Удалять из исходных файлов указание на авторство.
-4. Использовать наименование `selectivemem` и имя Лицензиара для
-   продвижения Продукта без отдельного согласия.
+1. Distributing the Program **as a standalone product** — that is,
+   selling or conveying it on its own, outside a Product.
+2. Transferring the rights under this licence to third parties,
+   including on a merger or sale of the business, without the Licensor's
+   written consent.
+3. Removing attribution notices from the source files.
+4. Using the name `selectivemem` or the Licensor's name to promote the
+   Product without separate consent.
 
-## 4. Охват
+## 4. Scope
 
-Выбирается **одно**; от этого зависит цена.
+Choose **one**; the price depends on it.
 
-| Вариант | Что покрыто |
+| Option | What is covered |
 |---|---|
-| **Один продукт** | одно наименование, включая его обновления и переиздания |
-| **Одна игра / тайтл** | одна игра, включая дополнения и порты на другие платформы |
-| **Организация** | все продукты Лицензиата, без ограничения количества |
+| **One product** | a single named product, including its updates and re-releases |
+| **One game / title** | one game, including expansions and ports to other platforms |
+| **Organisation** | all of the Licensee's products, with no limit on their number |
 
-Выбрано: ______________________
+Chosen: ______________________
 
-## 5. Срок и версии
+## 5. Term and versions
 
-Лицензия **бессрочная** в отношении версий Программы, выпущенных в
-течение ______ (обычно 12) месяцев с даты оплаты.
+The licence is **perpetual** in respect of versions of the Program
+released within ______ (typically 12) months of payment.
 
-Это означает: Продукт, использующий такую версию, можно распространять
-и поддерживать неограниченно долго. Версии, выпущенные позже, требуют
-продления.
+That means: a Product built on such a version may be distributed and
+supported indefinitely. Versions released later require renewal.
 
-Продление на следующий период: ______ % от первоначальной суммы.
+Renewal for the next period: ______ % of the original sum.
 
-## 6. Вознаграждение
+## 6. Fee
 
-Сумма: ______________________
-Порядок оплаты: ______________________
+Amount: ______________________
+Payment terms: ______________________
 
-*(Ориентиры вилок — в [COMMERCIAL.md](COMMERCIAL.md). Итоговая сумма
-определяется охватом и масштабом.)*
+*(Reference ranges are in [COMMERCIAL.md](COMMERCIAL.md). The final sum
+is determined by scope and scale.)*
 
-## 7. Поддержка
+## 7. Support
 
-По умолчанию лицензия **не включает** поддержку и доработки.
+By default the licence **does not include** support or custom work.
 
-Если стороны договорились иначе, здесь фиксируется: время реакции,
-канал связи, объём работ. Заказная интеграция оформляется отдельно.
+If the parties agree otherwise, this section records the response time,
+the channel and the amount of work. Custom integration is contracted
+separately.
 
-## 8. Гарантии и ответственность
+## 8. Warranties and liability
 
-Программа предоставляется «как есть». Лицензиар гарантирует лишь то, что
-вправе выдать настоящую лицензию, и не гарантирует пригодности Программы
-для конкретных целей Лицензиата.
+The Program is provided "as is". The Licensor warrants only that it is
+entitled to grant this licence, and gives no warranty of fitness for the
+Licensee's particular purposes.
 
-Ответственность Лицензиара ограничена суммой, фактически уплаченной по
-настоящей лицензии.
+The Licensor's liability is limited to the sum actually paid under this
+licence.
 
-> Юристу: этот раздел — первое, что придётся привести в соответствие с
-> применимым правом. Ограничение ответственности суммой договора
-> признаётся не во всех юрисдикциях.
+> To the lawyer: this section is the first that will need aligning with
+> the governing law. Limiting liability to the contract sum is not
+> recognised in every jurisdiction.
 
-## 9. Что Лицензиат должен знать заранее
+## 9. What the Licensee should know beforehand
 
-Раздел необязательный, но он здесь намеренно. Лучше, чтобы неприятная
-правда прозвучала до сделки, чем всплыла после.
+This section is optional, and it is here deliberately. Better for an
+inconvenient truth to be said before the deal than to surface after it.
 
-- **Измеренное преимущество Программы — избирательное удержание:**
-  после двух недель молчания она помнит 100% отмеченного пользователем
-  как важное против 50% обычного (разрыв +50 п.п., пять сидов, с
-  контролем на объём).
-- **На равномерных вопросах — «найти всё, что говорилось» — Программа
-  не лучше случайной выборки** (87.2% против 88.8%). Это измерено тем же
-  стендом, который лежит в открытом репозитории.
-- **Встроенная модель семантики обучена на художественной литературе** и
-  для профессиональных областей не годится: «язык ~ программирование»
-  0.114. Под свою предметную область потребуется свой кодировщик.
-- **Поиск линейный по числу узлов.** 30 000 узлов — около 0.5 с на
-  запрос на обычной машине.
+- **The Program's measured advantage is selective retention:** after two
+  weeks of silence it recalls 100% of what the user marked as important
+  against 60% of the ordinary (a gap of +40 pp over five seeds, with
+  volume held equal).
+- **On uniform questions — "find everything that was said" — the Program
+  is merely level with a random sample** (92.4% against 90.8%, spread
+  82–98% across seeds). On the external LongMemEval benchmark it scores
+  R@5 68% against 91.7% for the same system with its write filter
+  disabled. Both figures are produced by benchmarks in the open
+  repository.
+- **The bundled semantic model was trained on literary fiction** and is
+  unsuitable for professional domains: "language ~ programming" scores
+  0.114. Your own encoder will be required for your subject area.
+- **Search is linear in the number of nodes.** 30,000 nodes take roughly
+  0.5 s per query on an ordinary machine.
 
-## 10. Применимое право и споры
+## 10. Governing law and disputes
 
 ______________________
 
-> Юристу: зависит от юрисдикций сторон. Для сделок с зарубежными
-> контрагентами отдельно продумать порядок расчётов.
+> To the lawyer: depends on both parties' jurisdictions. For deals with
+> foreign counterparties, the payment mechanics need separate thought.
 
 ---
 
-**Лицензиар:** ____________________  дата ____________
+**Licensor:** ____________________  date ____________
 
-**Лицензиат:** ____________________  дата ____________
+**Licensee:** ____________________  date ____________
+
+---
+
+Русская версия: [LICENSE-COMMERCIAL.ru.md](LICENSE-COMMERCIAL.ru.md).
