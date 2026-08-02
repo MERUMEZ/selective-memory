@@ -187,7 +187,11 @@ def _praised_share_in_top(graph, now: float) -> float:
                 counted += 1
             elif any(_is_topic(t, text) for t in PLAIN_TOPICS):
                 counted += 1
-    return praised_hits / counted if counted else 0.0
+    # Знаменатель возвращается ВМЕСТЕ с долей: 100% на двух наблюдениях и
+    # 100% на сорока — разные утверждения, и без n второе неотличимо от
+    # первого. Этот стенд уже дважды показывал красивую долю, которая
+    # держалась на одном-единственном узле.
+    return (praised_hits / counted if counted else 0.0), counted
 
 
 def run_once(seed: int, rounds: int, silence_days: float, balanced: bool,
@@ -236,7 +240,8 @@ def run_once(seed: int, rounds: int, silence_days: float, balanced: bool,
     result = {
         "mrr_praised": _mrr(graph, PRAISED_QUESTIONS, now),
         "mrr_plain": _mrr(graph, PLAIN_QUESTIONS, now),
-        "praised_share": _praised_share_in_top(graph, now),
+        "praised_share": _praised_share_in_top(graph, now)[0],
+        "share_n": _praised_share_in_top(graph, now)[1],
         "weight_praised": mean_weight(PRAISED_TOPICS),
         "weight_plain": mean_weight(PLAIN_TOPICS),
         "nodes": graph.db.count_nodes_by_type("episodic"),
@@ -288,8 +293,11 @@ def main() -> None:
     print(f" {'MRR обычного':32} {mrr_o:8.3f}")
     print(f" {'разрыв MRR':32} {mrr_p - mrr_o:+8.3f}")
     print("-" * 78)
-    print(f" {'доля похвалённого в топ-5':32} {avg('praised_share')*100:7.1f}%")
+    print(f" {'доля похвалённого в топ-5':32} {avg('praised_share')*100:7.1f}%"
+          f"   (тематических узлов в выдаче: {avg('share_n'):.1f})")
     print(f" {'случайный порядок дал бы':32} {50.0:7.1f}%")
+    spread = ", ".join(f"{r['mrr_praised']-r['mrr_plain']:+.2f}" for r in rows)
+    print(f" {'разрыв MRR по сидам':32} {spread}")
     print("=" * 78)
 
     # ЗНАК ВАЖЕН. Первая версия вывода смотрела на |разрыв| и объявляла
