@@ -262,12 +262,19 @@ def main() -> None:
     parser.add_argument("--floor-base", type=float, default=0.06,
                         help="пол угасания. НЕ НОЛЬ по умолчанию: иначе неважное "
                              "стирается и стенд снова меряет выживание, а не порядок")
+    parser.add_argument("--weight-influence", type=float, default=None,
+                        help="вклад веса узла в оценку поиска (умолчание 0.15). "
+                             "Это и есть ручка, которой избирательность "
+                             "переносится из удаления в ранжирование")
     parser.add_argument("--haystack", type=int, default=200,
                         help="сколько посторонних фраз подмешать. Без стога\n                             стенд меряет пустоту: на двадцати узлах каждый\n                             вопрос находит ответ первым за неимением соперников")
     parser.add_argument("--logs", action="store_true")
     args = parser.parse_args()
 
     config.MEMORY_FLOOR_BASE = args.floor_base
+    if args.weight_influence is not None:
+        config.MEMORY_WEIGHT_INFLUENCE = args.weight_influence
+        print(f" Вклад веса в оценку поиска: {args.weight_influence}")
 
     print("=" * 78)
     print(" ПРИХОДИТ ЛИ ВАЖНОЕ ПЕРВЫМ")
