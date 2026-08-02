@@ -167,6 +167,14 @@ def main() -> None:
                              "окружения: стенд строит Memory на MemorySettings, "
                              "а переменные идут в config — я дважды намерил "
                              "этим пустоту, прежде чем заметить")
+    parser.add_argument("--imp-weight", type=float, default=None,
+                        help="вклад веса узла в ВАЖНОСТЬ (не в релевантность)")
+    parser.add_argument("--imp-connectivity", type=float, default=None,
+                        help="вклад связности в важность")
+    parser.add_argument("--imp-self-ref", type=float, default=None,
+                        help="вклад самореференции в важность")
+    parser.add_argument("--imp-use", type=float, default=None,
+                        help="вклад использования (стабильности) в важность")
     parser.add_argument("--rerank-band", type=float, default=None,
                         help="полоса переупорядочивания по важности; 0 выключает")
     parser.add_argument("--spike-factor", type=float, default=None,
@@ -216,6 +224,13 @@ def main() -> None:
         settings_kwargs["base_plasticity_threshold"] = args.plasticity
     if args.content_tokens is not None:
         settings_kwargs["surprise_full_content_tokens"] = args.content_tokens
+    for flag, field in (("imp_weight", "importance_weight_signal"),
+                        ("imp_connectivity", "importance_connectivity"),
+                        ("imp_self_ref", "importance_self_reference"),
+                        ("imp_use", "importance_use")):
+        value = getattr(args, flag)
+        if value is not None:
+            settings_kwargs[field] = value
     if args.rerank_band is not None:
         settings_kwargs["rerank_band"] = args.rerank_band
     if args.spike_factor is not None:
