@@ -44,7 +44,7 @@ def test_observation_reports_a_reason():
     obs = memory.observe("сегодня совершенно обычная погода за окном")
 
     assert not obs.written
-    assert "не хватило" in obs.reason
+    assert "short of the threshold" in obs.reason
     assert 0.0 <= obs.surprise <= 1.0
     memory.close()
 

@@ -175,7 +175,7 @@ def test_missing_semantics_is_announced_once():
         logger.removeHandler(handler)
 
     warnings = [r for r in records if r.levelno >= logging.WARNING
-                and "Семантики нет" in r.getMessage()]
+                and "No semantics available" in r.getMessage()]
     assert len(warnings) == 1, f"ожидалось одно предупреждение, вышло {len(warnings)}"
     memory.close()
 

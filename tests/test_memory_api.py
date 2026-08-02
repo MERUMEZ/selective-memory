@@ -34,7 +34,7 @@ def test_first_encounter_is_written(memory):
     obs = memory.observe("меня зовут Паша", "приятно познакомиться", emotion=0.4)
     assert obs.written
     assert obs.surprise == pytest.approx(1.0)
-    assert "спайк" in obs.reason
+    assert "spike" in obs.reason
 
 
 def test_repetition_stops_being_surprising(memory):
@@ -50,7 +50,7 @@ def test_repetition_stops_being_surprising(memory):
 
     assert last.surprise < first.surprise
     assert not last.written, "рутина не должна попадать в память"
-    assert "не хватило" in last.reason
+    assert "short of the threshold" in last.reason
 
 
 def test_emotion_can_push_routine_over_the_threshold(memory):

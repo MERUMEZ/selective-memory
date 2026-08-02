@@ -97,10 +97,10 @@ class Observation:
     def reason(self) -> str:
         """Почему записали или почему нет — человеческим языком."""
         if self.superseded_ids and self.node_id is not None:
-            return f"противоречие с узлами {self.superseded_ids}"
+            return f"contradiction with nodes {self.superseded_ids}"
         if self.node_id is not None:
-            return f"спайк, плотность {self.decision.density:.3f}"
-        return f"рутина, не хватило {abs(self.decision.headroom):.3f} до порога"
+            return f"spike, density {self.decision.density:.3f}"
+        return f"routine, {abs(self.decision.headroom):.3f} short of the threshold"
 
 
 @dataclass

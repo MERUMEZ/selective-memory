@@ -183,7 +183,7 @@ class ReinforcementLoop:
             return ReinforcementOutcome("neutral", valence, 0.0, 0.0, None)
 
         if trace is None:
-            logger.debug("[REWARD] valence=%.2f, но действия для оценки нет", valence)
+            logger.debug("[REWARD] valence=%.2f, but there is no action to evaluate", valence)
             return ReinforcementOutcome("no_trace", valence, valence, 0.0, None)
 
         retrospective = self._check_retrospective_correction(valence, timestamp)
@@ -290,13 +290,13 @@ class ReinforcementLoop:
                 self.memory.reinforce_coactivation(
                     nodes, weight_boost=boost, timestamp=timestamp
                 )
-            logger.info("[REWARD] +%.2f -> узлы %s", valence, nodes)
+            logger.info("[REWARD] +%.2f -> nodes %s", valence, nodes)
             return "rewarded", boost
 
         penalty = abs(valence) * self.settings.reward_negative_penalty * learning_scale
         for node_id in nodes:
             self.memory.penalize_node(node_id, penalty=penalty, timestamp=timestamp)
-        logger.info("[REWARD] %.2f -> штраф узлам %s", valence, nodes)
+        logger.info("[REWARD] %.2f -> penalty to nodes %s", valence, nodes)
         return "penalized", -penalty
 
     # ----------------------------------------------------------------------
@@ -341,8 +341,8 @@ class ReinforcementLoop:
                 self.amygdala.penalize_markers(entry.matched_markers)
 
             logger.info(
-                "[RETROSPECTIVE] Опровержение: было %.2f (t=%.1f), стало %.2f (t=%.1f) "
-                "-> узел %s, откат %.3f, маркеры %s",
+                "[RETROSPECTIVE] Reversal: was %.2f (t=%.1f), now %.2f (t=%.1f) "
+                "-> node %s, reverted %.3f, markers %s",
                 entry.valence, entry.timestamp, valence, timestamp,
                 entry.node_id, reversal, entry.matched_markers,
             )

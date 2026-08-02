@@ -121,7 +121,7 @@ def _load_model():
 
         if not _settings.embeddings_enabled:
             _load_failed = True
-            logger.info("[EMBEDDINGS] Отключены настройкой — поиск останется строковым")
+            logger.info("[EMBEDDINGS] Disabled by settings — search stays lexical")
             return None
 
         try:
@@ -129,7 +129,7 @@ def _load_model():
         except ImportError:
             _load_failed = True
             logger.warning(
-                "[EMBEDDINGS] navec не установлен — поиск остаётся строковым. "
+                "[EMBEDDINGS] navec is not installed — search stays lexical. "
                 "pip install navec numpy"
             )
             return None
@@ -139,13 +139,13 @@ def _load_model():
         except Exception as exc:  # noqa: BLE001
             _load_failed = True
             logger.warning(
-                "[EMBEDDINGS] Не удалось загрузить модель (%s): %s — "
-                "поиск остаётся строковым",
+                "[EMBEDDINGS] Could not load the model (%s): %s — "
+                "search stays lexical",
                 _settings.embedding_model_path, exc,
             )
             return None
 
-        logger.info("[EMBEDDINGS] Модель загружена: %s", _settings.embedding_model_path)
+        logger.info("[EMBEDDINGS] Model loaded: %s", _settings.embedding_model_path)
         return _model
 
 

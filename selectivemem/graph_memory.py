@@ -302,7 +302,7 @@ class MemoryGraph:
             try:
                 return float(row["context"])
             except (TypeError, ValueError):
-                logger.warning("[BRAIN EPOCH] Повреждённое значение — ставлю заново")
+                logger.warning("[BRAIN EPOCH] Corrupted value — resetting")
 
         # now передаёт приложение — тем же источником времени, который
         # получат часы. Иначе эпоха берётся из настоящих time.time() и
@@ -313,7 +313,7 @@ class MemoryGraph:
         self.db.upsert_meta_node(
             node_type="brain_epoch", content=str(epoch), weight=1.0, timestamp=epoch,
         )
-        logger.info("[BRAIN EPOCH] Точка отсчёта субъективного времени: %.0f", epoch)
+        logger.info("[BRAIN EPOCH] Origin of subjective time: %.0f", epoch)
         return epoch
 
 
@@ -385,7 +385,7 @@ class MemoryGraph:
             self._link_concept_to_similar_nodes(concept_node_id, normalized_name, definition, ts)
 
         logger.info(
-            "[CONCEPT EXTRACTED] Узел '%s' (type=concept) сохранен и связан с User-Model.",
+            "[CONCEPT EXTRACTED] Node '%s' (type=concept) stored and linked to the user model",
             normalized_name,
         )
 
@@ -429,7 +429,7 @@ class MemoryGraph:
 
         if linked_count:
             logger.info(
-                "[CONCEPT LINKED] Узел concept_id=%s связан с %d похожими узлами",
+                "[CONCEPT LINKED] concept_id=%s linked to %d similar nodes",
                 concept_node_id, linked_count,
             )
 
@@ -922,8 +922,8 @@ class MemoryGraph:
         self.db.update_stability(node_id, new_stability)
 
         logger.info(
-            "[SUPERSEDED] Узел %s вытеснен новой версией: вес %.3f -> %.3f, "
-            "стабильность %.1f -> %.1f",
+            "[SUPERSEDED] Node %s replaced by a newer version: weight %.3f -> %.3f, "
+            "stability %.1f -> %.1f",
             node_id, row["weight"], new_weight, stability, new_stability,
         )
 
@@ -956,13 +956,13 @@ class MemoryGraph:
             context, exclude_id=node_id, explicit_correction=explicit_correction
         ):
             logger.info(
-                "[CONTRADICTION] %r вытесняет %r (близость %.2f, общих слов %.2f)",
+                "[CONTRADICTION] %r supersedes %r (similarity %.2f, shared words %.2f)",
                 context[:40], stale.context[:40], stale.similarity, stale.word_overlap,
             )
             self.supersede_node(stale.id, timestamp=timestamp)
 
         logger.info(
-            "[SPIKE DETECTED] Новая связь сохранена id=%s weight=%.3f",
+            "[SPIKE DETECTED] New link stored id=%s weight=%.3f",
             node_id, initial_weight,
         )
         return node_id
@@ -1080,9 +1080,9 @@ class MemoryGraph:
         if query_vector is None and not self._warned_no_semantics:
             self._warned_no_semantics = True
             logger.warning(
-                "[SEARCH] Семантики нет — поиск идёт только по совпадению слов. "
-                "Запрос другими словами, чем в записи, ничего не найдёт. "
-                "Подключите кодировщик: MemoryGraph(encoder=...) или "
+                "[SEARCH] No semantics available — matching by shared words only. "
+                "A query worded differently from the stored text will find nothing. "
+                "Attach an encoder: MemoryGraph(encoder=...) or "
                 "pip install selective-memory[semantic]"
             )
 
@@ -1139,11 +1139,11 @@ class MemoryGraph:
 
         if top_matches:
             logger.info(
-                "[MEMORY HIT] Найдено %d совпадений для %r (best score=%.3f, id=%s)",
+                "[MEMORY HIT] %d matches for %r (best score=%.3f, id=%s)",
                 len(top_matches), query[:50], top_matches[0].similarity, top_matches[0].id,
             )
         else:
-            logger.info("[MEMORY MISS] Совпадений не найдено для %r", query[:50])
+            logger.info("[MEMORY MISS] No matches for %r", query[:50])
             return top_matches
 
         # ------------------------------------------------------------------
@@ -1271,7 +1271,7 @@ class MemoryGraph:
     def touch_node(self, node_id: int, timestamp: Optional[float] = None) -> None:
         ts = timestamp if timestamp is not None else time.time()
         self.db.update_last_accessed(node_id, timestamp=ts)
-        logger.debug("[MEMORY TOUCHED] id=%s last_accessed обновлён (t=%.2f)", node_id, ts)
+        logger.debug("[MEMORY TOUCHED] id=%s last_accessed updated (t=%.2f)", node_id, ts)
 
     # ----------------------------------------------------------------------
     # 3b. АССОЦИАТИВНЫЕ РЁБРА (Semantic Edges / Spreading Activation)
@@ -1308,7 +1308,7 @@ class MemoryGraph:
         # уронит вставку исключением — просто тихо пропускаем ребро.
         if self.db.get_node(node_from) is None or self.db.get_node(node_to) is None:
             logger.debug(
-                "[ASSOCIATION SKIP] Узел %s или %s больше не существует (удалён) -> ребро не создано",
+                "[ASSOCIATION SKIP] Node %s or %s no longer exists (deleted) -> edge not created",
                 node_from, node_to,
             )
             return 0.0
@@ -1355,7 +1355,7 @@ class MemoryGraph:
                 self.connect_nodes(unique_ids[i], unique_ids[j], weight_boost=boost, timestamp=ts)
 
         logger.info(
-            "[COACTIVATION] Усилены рёбра между узлами со-активации: %s",
+            "[COACTIVATION] Edges reinforced between co-activated nodes: %s",
             unique_ids,
         )
 
@@ -1513,7 +1513,7 @@ class MemoryGraph:
         if updates:
             self.db.bulk_update_weights(updates)
             logger.info(
-                "[DECAY APPLIED] Обновлено весов: %d узлов (пропущено meta: %d)",
+                "[DECAY APPLIED] Weights updated: %d nodes (meta skipped: %d)",
                 len(updates), skipped_meta_count,
             )
 
@@ -1521,7 +1521,7 @@ class MemoryGraph:
             self.db.delete_node(node_id)
 
         if to_forget:
-            logger.info("[MEMORY FORGOTTEN] Удалено узлов (вес < FORGET_THRESHOLD): %d", len(to_forget))
+            logger.info("[MEMORY FORGOTTEN] Nodes deleted (weight < FORGET_THRESHOLD): %d", len(to_forget))
 
         return decayed_count
 
@@ -1565,7 +1565,7 @@ class MemoryGraph:
         if updates:
             self.db.bulk_update_edge_weights(updates)
             logger.info(
-                "[EDGE DECAY APPLIED] Обновлено весов: %d рёбер (t=%.2f)",
+                "[EDGE DECAY APPLIED] Weights updated: %d edges (t=%.2f)",
                 len(updates), current_time,
             )
 
@@ -1574,7 +1574,7 @@ class MemoryGraph:
 
         if to_forget:
             logger.info(
-                "[EDGE FORGOTTEN] Удалено рёбер (вес < EDGE_FORGET_THRESHOLD): %d",
+                "[EDGE FORGOTTEN] Edges deleted (weight < EDGE_FORGET_THRESHOLD): %d",
                 len(to_forget),
             )
 
@@ -1627,7 +1627,7 @@ class MemoryGraph:
 
         if orphans:
             logger.info(
-                "[SLEEP PRUNING] Удалено осиротевших узлов (weight < %.2f, без рёбер >= %.2f): %d",
+                "[SLEEP PRUNING] Orphan nodes deleted (weight < %.2f, no edges >= %.2f): %d",
                 effective_node_weight, effective_edge_weight, len(orphans),
             )
 
@@ -1723,7 +1723,7 @@ class MemoryGraph:
             used_node_ids.update(cluster.spoke_ids)
 
             logger.info(
-                "[SLEEP CLUSTER] Найден кластер: hub=%s (weight=%.2f) + spokes=%s",
+                "[SLEEP CLUSTER] Cluster found: hub=%s (weight=%.2f) + spokes=%s",
                 hub_id, hub_row["weight"], cluster.spoke_ids,
             )
 
@@ -1770,7 +1770,7 @@ class MemoryGraph:
             self.connect_nodes(abstract_node_id, source_id, weight_boost=self.settings.edge_initial_weight, timestamp=ts)
 
         logger.info(
-            "[SLEEP CONSOLIDATION] Абстрактный узел id=%s (weight=%.2f) создан из кластера %s",
+            "[SLEEP CONSOLIDATION] Abstract node id=%s (weight=%.2f) created from cluster %s",
             abstract_node_id, effective_weight, source_node_ids,
         )
 
@@ -1824,7 +1824,7 @@ class MemoryGraph:
         # пропускаем запись — контент уже сохранён.
         if already_captured_by_spike and len(entries) <= 2:
             logger.info(
-                "[CONSOLIDATION] Пропуск: обмен уже сохранён spike-узлом "
+                "[CONSOLIDATION] Skipped: the exchange is already stored as a spike node "
                 "(entries=%d)",
                 len(entries),
             )
@@ -1847,7 +1847,7 @@ class MemoryGraph:
                 timestamp=timestamp,
             )
             logger.info(
-                "[CONSOLIDATION] Эмоциональный узел id=%s weight=%.3f (max_emotion=%.3f)",
+                "[CONSOLIDATION] Emotional node id=%s weight=%.3f (max_emotion=%.3f)",
                 node_id, max_emotion, max_emotion,
             )
             return ConsolidationResult(
@@ -1866,7 +1866,7 @@ class MemoryGraph:
                 timestamp=timestamp,
             )
             logger.info(
-                "[CONSOLIDATION] Структурный узел id=%s weight=%.3f (avg_perplexity=%.3f)",
+                "[CONSOLIDATION] Structural node id=%s weight=%.3f (avg_perplexity=%.3f)",
                 node_id, self.settings.stm_structural_weight, avg_perplexity,
             )
             return ConsolidationResult(
@@ -1878,7 +1878,7 @@ class MemoryGraph:
 
         # --- c) Рутинный шум — отбрасываем без записи в БД ---
         logger.info(
-            "[STM FLUSH] Рутинный шум отброшен (max_emotion=%.3f, avg_perplexity=%.3f, %d записей)",
+            "[STM FLUSH] Routine noise discarded (max_emotion=%.3f, avg_perplexity=%.3f, %d entries)",
             max_emotion, avg_perplexity, len(entries),
         )
         return ConsolidationResult(
@@ -1908,13 +1908,13 @@ class MemoryGraph:
     def reinforce_node(self, node_id: int, boost: float = 0.1, timestamp: Optional[float] = None) -> None:
         row = self.db.get_node(node_id)
         if row is None:
-            logger.warning("[MEMORY REINFORCE] Узел id=%s не найден", node_id)
+            logger.warning("[MEMORY REINFORCE] Node id=%s not found", node_id)
             return
 
         new_weight = min(1.0, row["weight"] + boost)
         self.db.update_weight(node_id, new_weight)
         self.touch_node(node_id, timestamp=timestamp)
-        logger.info("[MEMORY REINFORCED] id=%s новый вес=%.3f", node_id, new_weight)
+        logger.info("[MEMORY REINFORCED] id=%s new weight=%.3f", node_id, new_weight)
 
     def apply_reward(
         self,
@@ -1950,8 +1950,8 @@ class MemoryGraph:
         self.db.update_reward_expectation(node_id, new_expectation)
 
         logger.info(
-            "[DOPAMINE] node=%s валентность=%+.2f ожидалось=%+.2f -> rpe=%+.2f "
-            "(новое ожидание %+.2f)",
+            "[DOPAMINE] node=%s valence=%+.2f expected=%+.2f -> rpe=%+.2f "
+            "(new expectation %+.2f)",
             node_id, valence, expected, rpe, new_expectation,
         )
         return RewardSignal(
@@ -1989,7 +1989,7 @@ class MemoryGraph:
         """
         row = self.db.get_node(node_id)
         if row is None:
-            logger.warning("[MEMORY PENALIZE] Узел id=%s не найден", node_id)
+            logger.warning("[MEMORY PENALIZE] Node id=%s not found", node_id)
             return
 
         new_weight = max(0.0, row["weight"] - penalty)

@@ -196,7 +196,7 @@ class Database:
         self._migrate_meta_columns()
         self._migrate_decay_columns()
         self._migrate_stability_column()
-        logger.info("[DB INIT] Схема nodes + edges готова (%s)", self.db_path)
+        logger.info("[DB INIT] Schema nodes + edges ready (%s)", self.db_path)
 
     def _migrate_meta_columns(self) -> None:
         """
@@ -225,7 +225,7 @@ class Database:
         self._conn.commit()
 
         if migrated_any:
-            logger.info("[MIGRATION] Таблица nodes обновлена (is_meta, node_type)")
+            logger.info("[MIGRATION] Table nodes updated (is_meta, node_type)")
 
     def _migrate_decay_columns(self) -> None:
         """
@@ -259,7 +259,7 @@ class Database:
         )
         self._conn.commit()
         if migrated_any:
-            logger.info("[MIGRATION] Таблица nodes/edges обновлена (last_decayed_at)")
+            logger.info("[MIGRATION] Tables nodes/edges updated (last_decayed_at)")
 
     def _migrate_stability_column(self) -> None:
         """
@@ -294,7 +294,7 @@ class Database:
 
         if migrated:
             logger.info(
-                "[MIGRATION] Таблица nodes обновлена (stability, reward_expectation, embedding)"
+                "[MIGRATION] Table nodes updated (stability, reward_expectation, embedding)"
             )
 
     # ----------------------------------------------------------------------
@@ -457,7 +457,7 @@ class Database:
         cursor = self._conn.cursor()
         cursor.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
         self._conn.commit()
-        logger.info("[MEMORY FORGOTTEN] id=%s удалён из БД", node_id)
+        logger.info("[MEMORY FORGOTTEN] id=%s deleted from the database", node_id)
 
     def bulk_update_weights(self, updates: List[Dict[str, Any]]) -> None:
         """
@@ -531,8 +531,8 @@ class Database:
                 # сообщения, просто пропускаем создание ребра.
                 self._conn.rollback()
                 logger.warning(
-                    "[EDGE SKIP] FOREIGN KEY constraint при создании ребра %s <-> %s "
-                    "(узел удалён?) -> пропущено",
+                    "[EDGE SKIP] FOREIGN KEY constraint while creating edge %s <-> %s "
+                    "(node deleted?) -> skipped",
                     a, b,
                 )
                 return 0.0
@@ -601,7 +601,7 @@ class Database:
         cursor = self._conn.cursor()
         cursor.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
         self._conn.commit()
-        logger.info("[EDGE FORGOTTEN] id=%s удалено из БД", edge_id)
+        logger.info("[EDGE FORGOTTEN] id=%s deleted from the database", edge_id)
 
     # ----------------------------------------------------------------------
     # SLEEP CYCLE — батч-прунинг и поиск орфанов
@@ -623,7 +623,7 @@ class Database:
             cursor.execute("DELETE FROM edges WHERE weight < ?", (min_weight,))
             self._conn.commit()
             logger.info(
-                "[SLEEP PRUNING] Удалено рёбер с weight < %.3f: %d",
+                "[SLEEP PRUNING] Edges removed with weight < %.3f: %d",
                 min_weight, deleted_count,
             )
 

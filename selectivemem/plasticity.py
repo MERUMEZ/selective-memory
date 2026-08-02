@@ -117,7 +117,7 @@ class PlasticityGate:
         is_spike = density >= threshold
 
         logger.info(
-            "[%s] плотность=%.3f (эмоция=%.3f, удивление=%.3f) %s порог=%.3f",
+            "[%s] density=%.3f (emotion=%.3f, surprise=%.3f) %s threshold=%.3f",
             "SPIKE DETECTED" if is_spike else "ROUTINE",
             density, emotion, surprise,
             ">=" if is_spike else "<",
