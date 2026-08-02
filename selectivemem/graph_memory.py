@@ -41,7 +41,7 @@ import re
 import time
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Any, Callable, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 from selectivemem.database import Database
 from selectivemem.settings import MemorySettings
@@ -1302,22 +1302,60 @@ class MemoryGraph:
     # 3. Updating last_accessed on a touch
     # ----------------------------------------------------------------------
 
-    def _importance(self, match: "MemoryMatch") -> float:
-        """
-        How DEAR a memory is, independently of any question.
+    # Говорит ли человек О СЕБЕ. Русские и английские маркеры вместе:
+    # ядро библиотеки языконезависимо, а витрина русская.
+    _SELF_REFERENCE = re.compile(
+        r"\b(я|мне|меня|мой|моя|моё|мои|мою|моего|моей|у меня|"
+        r"i|me|my|mine|myself)\b",
+        re.IGNORECASE,
+    )
 
-        For now that is the node's weight, which reinforcement genuinely
-        reaches: measured on tools/compare_ordering.py, praised nodes end up
-        2.7 times heavier than ordinary ones (0.2806 against 0.1044).
-
-        This is the seam where the other importance signals belong —
-        connectivity, self-reference, how often the memory was actually
-        used. Each of them has to be measured on its own before it joins,
-        because a signal that sounds right is not the same as one that
-        works: spike strength sounded perfect and turned out to measure
-        novelty rather than importance.
+    def _importance_scores(self, matches: List["MemoryMatch"]) -> Dict[int, float]:
         """
-        return match.weight
+        How DEAR each memory is, independently of any question.
+
+        Signals are summed with configurable weights; all but the node's
+        weight are off by default. They are switched on ONE AT A TIME and
+        measured, because this project has already been taught the
+        difference between a signal that sounds right and one that works:
+        spike strength looked like the perfect measure of importance and
+        turned out to measure novelty.
+
+        Everything needed beyond MemoryMatch is fetched in batch: this runs
+        inside search, on every recall.
+        """
+        settings = self.settings
+        ids = [m.id for m in matches]
+
+        degrees: Dict[int, int] = {}
+        if settings.importance_connectivity > 0.0:
+            degrees = self.db.get_degrees(ids)
+
+        rows: Dict[int, Any] = {}
+        if settings.importance_use > 0.0:
+            rows = {row["id"]: row for row in self.db.get_nodes_by_ids(ids)}
+
+        scores: Dict[int, float] = {}
+        for match in matches:
+            score = match.weight * settings.importance_weight_signal
+
+            if settings.importance_connectivity > 0.0:
+                degree = degrees.get(match.id, 0)
+                normalised = min(1.0, degree / max(1, settings.importance_degree_full))
+                score += normalised * settings.importance_connectivity
+
+            if settings.importance_self_reference > 0.0:
+                if self._SELF_REFERENCE.search(match.context or ""):
+                    score += settings.importance_self_reference
+
+            if settings.importance_use > 0.0:
+                row = rows.get(match.id)
+                stability = (row["stability"] if row else None) or settings.stability_initial
+                normalised = min(1.0, stability / max(1e-9, settings.stability_max))
+                score += normalised * settings.importance_use
+
+            scores[match.id] = score
+        return scores
 
     def _rerank_by_importance(self, scored: List["MemoryMatch"]) -> List["MemoryMatch"]:
         """
@@ -1347,7 +1385,9 @@ class MemoryGraph:
         cutoff = scored[0].similarity - band
         head = [m for m in scored if m.similarity >= cutoff]
         tail = [m for m in scored if m.similarity < cutoff]
-        head.sort(key=self._importance, reverse=True)
+
+        importance = self._importance_scores(head)
+        head.sort(key=lambda m: importance[m.id], reverse=True)
 
         logger.debug(
             "[RERANK] %d of %d candidates within band %.2f reordered by importance",

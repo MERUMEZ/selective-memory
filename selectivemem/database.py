@@ -1070,6 +1070,47 @@ class Database:
         )
         return cursor.fetchall()
 
+    def get_degrees(self, node_ids: List[int]) -> Dict[int, int]:
+        """
+        How many edges each of these nodes has, in ONE query.
+
+        Connectivity is a candidate importance signal: a memory woven into
+        many others is, in memory research, better retained than an
+        isolated one ("depth of processing"). The graph has held this all
+        along and nothing has ever asked it.
+
+        A single query rather than a loop for the same reason as
+        get_edges_between: this runs inside search, on every recall.
+        """
+        if not node_ids:
+            return {}
+
+        placeholders = ",".join("?" for _ in node_ids)
+        cursor = self._conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT node_id, COUNT(*) AS degree FROM (
+                SELECT node_from AS node_id FROM edges
+                 WHERE node_from IN ({placeholders})
+                UNION ALL
+                SELECT node_to AS node_id FROM edges
+                 WHERE node_to IN ({placeholders})
+            ) GROUP BY node_id
+            """,
+            (*node_ids, *node_ids),
+        )
+        return {row["node_id"]: row["degree"] for row in cursor.fetchall()}
+
+    def get_nodes_by_ids(self, node_ids: List[int]) -> List[sqlite3.Row]:
+        """The given nodes in one query — for re-ranking, which needs
+        columns MemoryMatch does not carry (stability, spike_strength)."""
+        if not node_ids:
+            return []
+        placeholders = ",".join("?" for _ in node_ids)
+        cursor = self._conn.cursor()
+        cursor.execute(f"SELECT * FROM nodes WHERE id IN ({placeholders})", tuple(node_ids))
+        return cursor.fetchall()
+
     def get_top_nodes_by_type(self, node_type: str, limit: int) -> List[sqlite3.Row]:
         """
         Up to `limit` nodes of a given node_type sorted by descending
