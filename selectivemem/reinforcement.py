@@ -12,35 +12,33 @@
 # COMMERCIAL.md.
 """
 ================================================================================
- REINFORCEMENT.PY — Контур подкрепления: важность из реакции пользователя
+ REINFORCEMENT.PY — The reinforcement loop: importance from the user
 ================================================================================
-ЯДРО, а не персона. Это тот самый механизм, ради которого проект вообще
-имеет ценность: важность воспоминания НЕ ОБЪЯВЛЯЕТСЯ при записи и не
-определяется LLM-судьёй — она зарабатывается тем, как человек
-отреагировал.
+CORE, not persona. This is the mechanism the whole project rests on:
+the importance of a memory is NOT declared at write time and is not
+decided by an LLM judge — it is earned by how the person reacted.
 
-Измерено (tools/compare_retention.py, 5 сидов, 14 суток молчания):
-    похвалённое  97%   против  обычного 53%
-    у наивных хранилищ разрыв около нуля — они про реакцию не знают
+Measured (tools/compare_retention.py, 5 seeds, 14 days of silence):
+    praised  100%   against  ordinary 60%
+    naive stores show a gap near zero — they know nothing about reactions
 
-Вынесено из core/cortex.py, где 300 строк контура подкрепления были
-перемешаны с генерацией речи, речевыми стадиями и сборкой промптов. Для
-переиспользования как библиотеки памяти это разделение обязательно:
-подкрепление работает с узлами и не должно ничего знать ни про лепет, ни
-про настроение, ни про LLM.
+Extracted from core/cortex.py, where 300 lines of the reinforcement loop
+were tangled with speech generation, speech stages and prompt assembly.
+For reuse as a memory library that split is mandatory: reinforcement
+works with nodes and must know nothing about babbling, mood or LLMs.
 
-ЧТО ЗДЕСЬ ЕСТЬ:
-    - дофаминовый сигнал: ошибка предсказания награды (Рескорла-Вагнер),
-      из-за которой привычная похвала перестаёт действовать;
-    - применение эффекта к узлам: усиление/штраф, масштабированные
-      неожиданностью;
-    - ретроспективная коррекция: если пользователь сам себя опроверг
-      (сарказм, "нет, стой, неправильно"), прежний эффект откатывается, а
-      доверие к сработавшим маркерам понижается.
+WHAT LIVES HERE:
+    - the dopamine signal: reward prediction error (Rescorla-Wagner),
+      which is why habitual praise stops having an effect;
+    - applying the effect to nodes: reinforcement or penalty, scaled by
+      how unexpected the outcome was;
+    - retrospective correction: if the user contradicts themselves
+      (sarcasm, "no, wait, that is wrong"), the previous effect is rolled
+      back and trust in the markers that fired is lowered.
 
-ЧЕГО ЗДЕСЬ НЕТ И БЫТЬ НЕ ДОЛЖНО: настроения, эхолалии, речевых стадий,
-промптов. Вызывающий код получает ReinforcementOutcome и сам решает, какие
-последствия это имеет для его персонажа (см. Cortex.apply_feedback).
+WHAT MUST NEVER LIVE HERE: mood, echolalia, speech stages, prompts. The
+caller receives a ReinforcementOutcome and decides for itself what that
+means for its persona (see Cortex.apply_feedback).
 ================================================================================
 """
 
@@ -57,12 +55,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ActionTrace:
     """
-    След связки Вход -> Действие, ожидающий оценки на СЛЕДУЮЩЕМ шаге.
+    A trace of input -> action, awaiting a rating on the NEXT turn.
 
-    node_id   — единичный узел (использовался ли конкретный фрагмент памяти).
-    node_ids  — несколько узлов (лепет задействует набор слогов, ответ на
-                однословной стадии — набор слов). None, если действие не
-                опиралось на память вообще.
+    node_id   — a single node (whether one particular memory was used).
+    node_ids  — several nodes (babbling draws on a set of syllables, a
+                one-word reply on a set of words). None when the action
+                did not lean on memory at all.
     """
     user_input: str
     bot_output: str
@@ -73,7 +71,7 @@ class ActionTrace:
 
 @dataclass
 class FeedbackHistoryEntry:
-    """Один уже применённый эффект — окно для ретроспективной коррекции."""
+    """One already-applied effect — the window for retrospective correction."""
     timestamp: Optional[float]
     valence: float
     matched_markers: List[str]
@@ -88,7 +86,7 @@ class FeedbackHistoryEntry:
 
 @dataclass
 class RetrospectiveCorrectionResult:
-    """Результат проверки на отложенное опровержение прошлой оценки."""
+    """Outcome of checking whether an earlier rating was later reversed."""
     triggered: bool
     reversed_entry: Optional[FeedbackHistoryEntry] = None
     reversal_delta: float = 0.0
@@ -98,13 +96,13 @@ class RetrospectiveCorrectionResult:
 @dataclass
 class ReinforcementOutcome:
     """
-    Что подкрепление сделало с ПАМЯТЬЮ. Всё, что касается персонажа
-    (настроение, склонность к эхолалии), вызывающий код решает сам по
-    этим данным — ядру такие понятия неизвестны.
+    What reinforcement did to MEMORY. Anything persona-related (mood, a
+    tendency towards echolalia) is for the caller to derive from this
+    data — the core knows no such notions.
 
-    congruence — ошибка предсказания награды. Именно она, а не сырая
-    валентность, годится как вход для эмоции: привычная похвала не должна
-    радовать.
+    congruence — the reward prediction error. That, rather than raw
+    valence, is the right input for an emotion: habitual praise should not
+    feel good.
     """
     effect: str  # "rewarded" | "penalized" | "neutral" | "no_trace"
     valence: float
@@ -116,9 +114,9 @@ class ReinforcementOutcome:
 
 class ReinforcementLoop:
     """
-    Превращает реакцию человека в изменение памяти.
+    Turns a human reaction into a change in memory.
 
-    Использование:
+    Usage:
         loop = ReinforcementLoop(memory=graph, amygdala=amygdala)
         loop.record_action(user_input, bot_output, node_id=..., action_type=...)
         outcome = loop.apply(valence=0.8, timestamp=brain_time)
@@ -126,11 +124,11 @@ class ReinforcementLoop:
 
     def __init__(self, memory, amygdala, settings: Optional[MemorySettings] = None):
         self.memory = memory
-        # По умолчанию берём настройки самой памяти: контур подкрепления и
-        # граф обязаны жить по одним и тем же константам.
+        # Default to the memory's own settings: the reinforcement loop and
+        # the graph must live by the same constants.
         self.settings = settings or getattr(memory, "settings", None) or MemorySettings()
-        # Нужна ТА ЖЕ инстанция амигдалы, что детектирует маркеры: штрафы и
-        # реабилитация доверия должны влиять на последующие разборы реплик.
+        # It must be the SAME amygdala instance that detects markers:
+        # penalties and trust recovery have to affect later parsing.
         self.amygdala = amygdala
         self.last_action_trace: Optional[ActionTrace] = None
         self.feedback_history: "deque[FeedbackHistoryEntry]" = deque(
@@ -138,7 +136,7 @@ class ReinforcementLoop:
         )
 
     # ----------------------------------------------------------------------
-    # Фиксация действия
+    # Recording an action
     # ----------------------------------------------------------------------
 
     def record_action(
@@ -149,7 +147,7 @@ class ReinforcementLoop:
         action_type: str,
         node_ids: Optional[List[int]] = None,
     ) -> ActionTrace:
-        """Запоминает связку, чтобы оценить её реакцией на следующем шаге."""
+        """Remembers the pairing so the next reaction can rate it."""
         self.last_action_trace = ActionTrace(
             user_input=user_input,
             bot_output=bot_output,
@@ -160,7 +158,7 @@ class ReinforcementLoop:
         return self.last_action_trace
 
     # ----------------------------------------------------------------------
-    # Применение оценки
+    # Applying a rating
     # ----------------------------------------------------------------------
 
     def apply(
@@ -170,11 +168,12 @@ class ReinforcementLoop:
         matched_markers: Optional[List[str]] = None,
     ) -> ReinforcementOutcome:
         """
-        Применяет реакцию пользователя к предыдущему действию.
+        Applies the user's reaction to the previous action.
 
-        Порядок важен: сначала ретроспективная коррекция (не опровергает ли
-        эта реакция уже применённую оценку), затем дофаминовый сигнал (он
-        задаёт ТЕМП закрепления), и только потом сам эффект на узлах.
+        The order matters: retrospective correction first (does this
+        reaction reverse a rating already applied?), then the dopamine
+        signal (which sets the RATE of consolidation), and only then the
+        effect on the nodes themselves.
         """
         trace = self.last_action_trace
         matched_markers = list(matched_markers or [])
@@ -188,19 +187,20 @@ class ReinforcementLoop:
 
         retrospective = self._check_retrospective_correction(valence, timestamp)
 
-        # --- ДОФАМИН: ошибка предсказания награды ---
-        # Считается ДО применения эффектов, потому что именно она, а не сама
-        # валентность, задаёт темп закрепления: неожиданная похвала
-        # закрепляет сильно, полностью предсказанная — почти никак.
-        # Награду получают ВСЕ узлы, задействованные в действии: и только
-        # что записанный, и те, на которые действие опиралось.
+        # --- DOPAMINE: reward prediction error ---
+        # Computed BEFORE any effects, because it — not raw valence — sets
+        # the rate of consolidation: unexpected praise consolidates
+        # strongly, fully predicted praise almost not at all.
+        # ALL nodes involved in the action are rewarded: both the one
+        # just written and the ones the action leaned on.
         #
-        # Раньше стояло "либо-либо", и это молча теряло главный случай:
-        # если ход что-то записал, вспомненное не получало ничего. У
-        # ассистента похвала обычно относится к ответу, построенному на
-        # памяти, — то есть подкрепляться должно именно вспомненное.
-        # Замер через фасад: восемь похвал подряд давали то же ожидание
-        # награды 0.300, что и одна, потому что доходила только первая.
+        # This used to be either/or, which silently lost the main case:
+        # if a turn wrote something, what was recalled got nothing. With
+        # an assistant, praise usually lands on an answer built from
+        # memory — so it is the recalled part that must be reinforced.
+        # Measured through the facade: eight consecutive praises produced
+        # the same expectation of 0.300 as one, because only the first
+        # ever arrived.
         reward_nodes = list(dict.fromkeys(
             ([trace.node_id] if trace.node_id is not None else [])
             + list(trace.node_ids or [])
@@ -211,14 +211,14 @@ class ReinforcementLoop:
                 for node_id in reward_nodes
             ) if s is not None
         ]
-        # Один множитель на всё действие: сила самого неожиданного из
-        # задействованных узлов. Действие оценивается целиком.
+        # One multiplier for the whole action: the strength of the most
+        # unexpected node involved. The action is rated as a whole.
         learning_scale = (
             max(self.memory.learning_scale(s.prediction_error) for s in signals)
             if signals else 1.0
         )
-        # Если действие не опиралось ни на один узел, ожидать было нечему —
-        # тогда неожиданностью считается сама оценка.
+        # If the action leaned on no node at all there was nothing to
+        # expect, so the rating itself counts as the surprise.
         congruence = (
             max((s.prediction_error for s in signals), key=abs) if signals else valence
         )
@@ -253,13 +253,13 @@ class ReinforcementLoop:
 
     def _involved_nodes(self, trace) -> List[int]:
         """
-        Все узлы, задействованные в действии: записанный плюс те, на
-        которые действие опиралось.
+        Every node involved in the action: the one written plus the ones
+        the action leaned on.
 
-        Раньше здесь было "либо-либо" — если ход что-то записал, до
-        вспомненного оценка не доходила. Это молча теряло главный случай
-        ассистента: похвала относится к хорошему ответу ПО ПАМЯТИ, то
-        есть подкреплять надо именно вспомненное.
+        This used to be either/or — if a turn wrote something, the rating
+        never reached what was recalled. That silently lost the main
+        assistant case: praise applies to a good answer BUILT FROM MEMORY,
+        so it is the recalled part that must be reinforced.
         """
         return list(dict.fromkeys(
             ([trace.node_id] if trace.node_id is not None else [])
@@ -267,7 +267,7 @@ class ReinforcementLoop:
         ))
 
     def _apply_effect(self, trace, valence, learning_scale, timestamp):
-        """Усиливает или штрафует задействованные узлы."""
+        """Reinforces or penalises the nodes involved."""
         nodes = self._involved_nodes(trace)
         if not nodes:
             return "neutral", 0.0
@@ -276,17 +276,18 @@ class ReinforcementLoop:
             boost = valence * self.settings.reward_positive_boost * learning_scale
             for node_id in nodes:
                 self.memory.reinforce_node(node_id, boost=boost, timestamp=timestamp)
-                # Метка доступа продвигается вперёд: узел выглядит свежее,
-                # чем есть, и угасает медленнее.
+                # The access mark is pushed forward: the node looks
+                # fresher than it is and decays more slowly.
                 if timestamp is not None:
                     self.memory.touch_node(
                         node_id,
                         timestamp=timestamp + self.settings.reward_positive_freshness_bonus,
                     )
             if len(nodes) > 1:
-                # Удачная комбинация усиливается целиком, а связи МЕЖДУ её
-                # частями укрепляются: так из повторяющегося удачного набора
-                # выкристаллизовывается устойчивая связка.
+                # A successful combination is reinforced as a whole and
+                # the links BETWEEN its parts are strengthened: that is how
+                # a repeatedly successful set crystallises into a stable
+                # association.
                 self.memory.reinforce_coactivation(
                     nodes, weight_boost=boost, timestamp=timestamp
                 )
@@ -300,18 +301,18 @@ class ReinforcementLoop:
         return "penalized", -penalty
 
     # ----------------------------------------------------------------------
-    # Ретроспективная коррекция
+    # Retrospective correction
     # ----------------------------------------------------------------------
 
     def _check_retrospective_correction(
         self, valence: float, timestamp: Optional[float]
     ) -> RetrospectiveCorrectionResult:
         """
-        Ищет в окне истории ещё не откатанную оценку ПРОТИВОПОЛОЖНОГО знака.
-        Если находит — трактует текущую реакцию как отложенное опровержение
-        (сарказм, "нет, стой, неправильно"): откатывает прежний эффект
-        усиленной коррекцией и понижает доверие к маркерам, которые к нему
-        привели.
+        Looks through the history window for a not-yet-reverted rating of
+        the OPPOSITE sign. If one is found, the current reaction is read as
+        a delayed reversal (sarcasm, "no, wait, that is wrong"): the
+        earlier effect is rolled back with an amplified correction, and
+        trust in the markers that caused it is lowered.
         """
         if not self.settings.retrospective_correction_enabled:
             return RetrospectiveCorrectionResult(triggered=False)
@@ -328,8 +329,8 @@ class ReinforcementLoop:
             if elapsed < 0 or elapsed > self.settings.retrospective_time_window_seconds:
                 continue
 
-            # Подтверждённая ложная оценка — куда более сильный обучающий
-            # сигнал, чем обычный однократный фидбэк, отсюда множитель.
+            # A confirmed false rating is a far stronger learning signal
+            # than ordinary one-off feedback, hence the multiplier.
             reversal = -entry.applied_delta * self.settings.retrospective_reversal_strength
             if reversal > 0:
                 self.memory.reinforce_node(entry.node_id, boost=reversal, timestamp=timestamp)
@@ -358,9 +359,9 @@ class ReinforcementLoop:
 
     def _record_history(self, entry: FeedbackHistoryEntry) -> None:
         """
-        Кладёт запись в окно. Если вытесняется самая старая и она НИКОГДА не
-        была опровергнута — её маркеры выжили всё окно и заслуживают
-        восстановления доверия.
+        Puts an entry into the window. If the oldest one is evicted and
+        was NEVER reversed, its markers survived the whole window and have
+        earned some trust back.
         """
         if len(self.feedback_history) == self.feedback_history.maxlen:
             oldest = self.feedback_history[0]
