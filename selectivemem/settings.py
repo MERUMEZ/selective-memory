@@ -1,38 +1,39 @@
 # Copyright (C) 2026 MERUMEZ <selectivemem@gmail.com>
 #
-# Эта программа — свободное ПО: вы можете распространять и изменять её
-# на условиях GNU Affero General Public License версии 3, изданной
-# Free Software Foundation. Полный текст — в файле LICENSE.
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU Affero General Public License version 3 as
+# published by the Free Software Foundation. See LICENSE for the full text.
 #
-# Программа распространяется В НАДЕЖДЕ, ЧТО БУДЕТ ПОЛЕЗНОЙ, но БЕЗ
-# ВСЯКИХ ГАРАНТИЙ, включая подразумеваемые гарантии товарного
-# состояния и пригодности для определённой цели.
+# It is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.
 #
-# Для использования в закрытых продуктах существует коммерческая
-# лицензия — см. COMMERCIAL.md.
+# A commercial licence is available for use in closed products — see
+# COMMERCIAL.md.
 """
 ================================================================================
- SETTINGS.PY — Настройки ядра памяти
+ SETTINGS.PY — Settings of the memory core
 ================================================================================
-Третий шаг выделения пакета: ядро больше НЕ ЧИТАЕТ глобальный config.
+The third step of extracting the package: the core NO LONGER READS the
+application's global config.
 
-Раньше memory/* импортировал config.py — модуль на тысячу строк с
-телеграм-токеном, промптами и настройками персонажа. Для библиотеки,
-которую ставят через pip, это неприемлемо: у неё должна быть своя
-конфигурация, а не зависимость от файла конкретного приложения.
+memory/* used to import config.py — a thousand-line module holding a
+Telegram token, prompts and persona settings. Unacceptable for a library
+installed via pip: it must carry its own configuration rather than depend
+on one particular application's file.
 
-Значения по умолчанию — те же, что были откалиброваны замерами (см.
-AUDIT.md). Приложение может передать свои:
+The defaults are the values calibrated by measurement (see AUDIT.md). An
+application may pass its own:
 
     graph = MemoryGraph(db=db, settings=MemorySettings(decay_rate=0.02))
 
-или собрать из своего конфига целиком:
+or build them from its config wholesale:
 
     graph = MemoryGraph(db=db, settings=MemorySettings.from_module(config))
 
-Файл СГЕНЕРИРОВАН из config.py, чтобы значения гарантированно совпали:
-переписывание семидесяти констант руками — верный способ незаметно
-что-нибудь поменять. Тест test_settings.py сверяет их при каждом прогоне.
+This file was GENERATED from config.py so the values are guaranteed to
+match: retyping seventy constants by hand is a reliable way to change
+something without noticing. test_settings.py checks them on every run.
 ================================================================================
 """
 
@@ -42,7 +43,7 @@ from typing import Any
 
 @dataclass
 class MemorySettings:
-    """Параметры ядра памяти. Имена — те же, что в config.py, но в нижнем регистре."""
+    """Memory core parameters. Names mirror config.py, lower-cased."""
 
     age_t0: float = 25200.0
     babbling_syllable_pool_size: int = 30
@@ -58,7 +59,12 @@ class MemorySettings:
     contradiction_topic_threshold: float = 0.8
     contradiction_weight_penalty: float = 0.25
     decay_rate: float = 0.05
-    default_user_model: str = 'Мой наставник и учитель (Юзер). Он занимается со мной, учит меня программированию, созданию игр и правильному общению.'
+    # Fallback text for the "user model" meta-node. This is PERSONA
+    # content, not a memory parameter — it only exists because
+    # get_user_model_content needs something to return before the
+    # application has written its own. Anything meaningful here comes from
+    # the application; the default is deliberately neutral.
+    default_user_model: str = "The person I am talking to. I know nothing about them yet."
     edge_activation_decay: float = 0.6
     edge_activation_threshold: float = 0.3
     edge_boost_step: float = 0.15
@@ -74,9 +80,9 @@ class MemorySettings:
     lexical_max_tokens_per_input: int = 20
     lexical_min_token_length: int = 2
     memory_fuzzy_weight: float = 0.1
-    # Максимальная высота пола угасания: до какого веса может опуститься
-    # узел с полностью заслуженным одобрением (reward_expectation = 1.0).
-    # Ноль отключает пол и возвращает прежнее поведение.
+    # Ceiling of the decay floor: the weight a node with fully earned
+    # approval (reward_expectation = 1.0) settles at instead of vanishing.
+    # Zero disables the floor and restores the previous behaviour.
     memory_floor_max: float = 0.25
     memory_keyword_weight: float = 0.3
     memory_min_keyword_length: int = 3
@@ -102,11 +108,11 @@ class MemorySettings:
     stability_growth_factor: float = 1.5
     stability_initial: float = 1.0
     plasticity_stress_modifier: float = 0.25
-    # Запас кандидатов для нечёткого сравнения. Нечёткое сходство стоит
-    # дорого (замер: 82% времени поиска), поэтому считается не по всем
-    # узлам, а по лучшим из дешёвого отбора. Поставить минимум заведомо
-    # больше числа узлов — значит вернуться к полному перебору; так этот
-    # компромисс и проверяется тестом.
+    # Candidate pool for the fuzzy comparison. Fuzzy similarity is
+    # expensive (measured: 82% of search time), so it runs on the best
+    # candidates from the cheap pre-filter rather than on every node.
+    # Setting the minimum above the node count restores the exhaustive
+    # scan — which is exactly how the test verifies this trade-off.
     search_candidate_multiplier: int = 20
     search_candidate_minimum: int = 50
     stability_max: float = 40.0
@@ -114,8 +120,8 @@ class MemorySettings:
     stm_emotional_threshold: float = 0.6
     stm_structural_threshold: float = 0.55
     stm_structural_weight: float = 0.5
-    # При скольких содержательных словах реплика считается способной
-    # удивить в полную силу. Меньше — удивление пропорционально урезается.
+    # How many content words an utterance needs to surprise at full
+    # strength. Below that, surprise is scaled down proportionally.
     surprise_full_content_tokens: int = 3
     surprise_lexical_weight: float = 0.6
     surprise_structural_weight: float = 0.4
@@ -127,21 +133,21 @@ class MemorySettings:
     word_node_initial_weight: float = 0.15
     word_node_reinforce_step: float = 0.04
 
-    # Путь к файлу базы. Это единственное поле, которое не является
-    # параметром поведения памяти, — но конструктору Database он нужен,
-    # а тащить ради него глобальный config незачем.
+    # Path to the database file. The only field here that is not a
+    # behavioural parameter — but Database needs it, and dragging in a
+    # global config just for that would defeat the point.
     db_path: str = "memory.db"
 
-    # Имена, которые в config.py названы иначе. Список держится коротким
-    # намеренно: расхождение имён — источник тихих рассогласований.
+    # Names spelled differently in config.py. Kept deliberately short:
+    # diverging names are a source of silent mismatches.
     _ALIASES = {"db_path": "BRAIN_DB_PATH"}
 
     @classmethod
     def from_module(cls, module: Any) -> "MemorySettings":
         """
-        Собирает настройки из модуля с константами В ВЕРХНЕМ РЕГИСТРЕ.
-        Отсутствующие поля берут значение по умолчанию — приложение вправе
-        переопределить только часть.
+        Builds settings from a module of UPPER_CASE constants. Missing
+        fields keep their defaults — an application may override only part
+        of them.
         """
         values = {}
         for f in fields(cls):

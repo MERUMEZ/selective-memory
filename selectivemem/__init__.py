@@ -1,28 +1,29 @@
 # Copyright (C) 2026 MERUMEZ <selectivemem@gmail.com>
 #
-# Эта программа — свободное ПО: вы можете распространять и изменять её
-# на условиях GNU Affero General Public License версии 3, изданной
-# Free Software Foundation. Полный текст — в файле LICENSE.
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU Affero General Public License version 3 as
+# published by the Free Software Foundation. See LICENSE for the full text.
 #
-# Программа распространяется В НАДЕЖДЕ, ЧТО БУДЕТ ПОЛЕЗНОЙ, но БЕЗ
-# ВСЯКИХ ГАРАНТИЙ, включая подразумеваемые гарантии товарного
-# состояния и пригодности для определённой цели.
+# It is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.
 #
-# Для использования в закрытых продуктах существует коммерческая
-# лицензия — см. COMMERCIAL.md.
+# A commercial licence is available for use in closed products — see
+# COMMERCIAL.md.
 """
-selectivemem — динамическая память: пишет избирательно, забывает со временем,
-укрепляет то, что пригодилось.
+selectivemem — dynamic memory: stores selectively, fades with time,
+strengthens what turned out to be useful.
 
     from selectivemem import Memory
 
     memory = Memory("brain.db")
-    memory.observe("меня зовут Паша", "приятно познакомиться", emotion=0.4)
+    memory.observe("my name is Pasha", "nice to meet you", emotion=0.4)
     memory.feedback(+1.0)
-    memory.recall("как меня зовут")
+    memory.recall("what is my name")
 
-Всё остальное — MemoryGraph, PlasticityGate, ReinforcementLoop — доступно
-по своим модулям: фасад покрывает обычный случай, но ничего не запирает.
+Everything else — MemoryGraph, PlasticityGate, ReinforcementLoop — stays
+available through its own module: the facade covers the ordinary case
+without locking anything away.
 """
 
 from selectivemem.memory import Memory, MemoryStats, Observation

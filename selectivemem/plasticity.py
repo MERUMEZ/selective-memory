@@ -1,46 +1,46 @@
 # Copyright (C) 2026 MERUMEZ <selectivemem@gmail.com>
 #
-# Эта программа — свободное ПО: вы можете распространять и изменять её
-# на условиях GNU Affero General Public License версии 3, изданной
-# Free Software Foundation. Полный текст — в файле LICENSE.
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU Affero General Public License version 3 as
+# published by the Free Software Foundation. See LICENSE for the full text.
 #
-# Программа распространяется В НАДЕЖДЕ, ЧТО БУДЕТ ПОЛЕЗНОЙ, но БЕЗ
-# ВСЯКИХ ГАРАНТИЙ, включая подразумеваемые гарантии товарного
-# состояния и пригодности для определённой цели.
+# It is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.
 #
-# Для использования в закрытых продуктах существует коммерческая
-# лицензия — см. COMMERCIAL.md.
+# A commercial licence is available for use in closed products — see
+# COMMERCIAL.md.
 """
 ================================================================================
- PLASTICITY.PY — Порог записи: что вообще достойно памяти
+ PLASTICITY.PY — The write threshold: what is worth remembering at all
 ================================================================================
-Принцип, ради которого построен весь проект: информация сохраняется НЕ
-всегда, а только когда эмоциональная плотность или ошибка предсказания
-превышают порог пластичности.
+The principle the whole project is built around: information is NOT always
+stored. It is stored when emotional density or prediction error exceeds
+the plasticity threshold.
 
-    плотность = (эмоция + удивление) / 2
-    писать, если плотность >= порог
+    density = (emotion + surprise) / 2
+    store if density >= threshold
 
-Половина на половину — не подобранный коэффициент, а утверждение: у
-организма два независимых повода запомнить, и они равноправны. Первый —
-"это меня задело", второй — "я этого не ожидал". Ни один не главнее.
+Half and half is not a tuned coefficient but a claim: the organism has two
+independent reasons to remember, and they are equal. One is "this affected
+me", the other is "I did not see this coming". Neither outranks the other.
 
-ПОРОГ ПОДВИЖЕН. При перегрузке он поднимается: организм под нагрузкой
-хуже усваивает новое. Это не украшение, а самосохранение — иначе поток
-незнакомого входа в стрессе забивал бы память шумом. Величина подъёма
-задаётся plasticity_stress_modifier.
+THE THRESHOLD MOVES. Under load it rises: an overloaded organism absorbs
+new things worse. That is not decoration but self-preservation — otherwise
+a stream of unfamiliar input under stress would flood memory with noise.
+The size of the rise is set by plasticity_stress_modifier.
 
-ЗДЕСЬ ТОЛЬКО РЕШЕНИЕ, НЕ ЗАПИСЬ. Гейт отвечает на вопрос "стоит ли", а
-писать или нет — дело вызывающего: у него могут быть свои причины
-сохранить рутину (например, противоречие с уже известным — см.
-MemoryGraph.find_superseded, где сам факт исправления служит поводом
-записать вопреки низкой плотности).
+THIS IS THE DECISION ONLY, NOT THE WRITE. The gate answers "is it worth
+it"; whether to store is up to the caller, who may have reasons of their
+own to keep routine input. See MemoryGraph.find_superseded, where the very
+fact of a correction justifies storing despite low density.
 
-ПОЧЕМУ ЭТО В ЯДРЕ. Раньше решение принимала Amygdala из core/ — вместе с
-распознаванием русских маркеров похвалы. Две очень разные вещи: порог
-записи это память, а "молодец" и "неверно" — конкретный язык конкретного
-продукта. Разделены, чтобы пакет памяти можно было использовать с любым
-языком и любым источником оценки.
+WHY THIS LIVES IN THE CORE. The decision used to be made by Amygdala in
+core/, together with recognising Russian words of praise. Two very
+different things: a write threshold belongs to memory, while "well done"
+and "wrong" belong to one particular language of one particular product.
+They were split so the memory package can be used with any language and
+any source of evaluation.
 ================================================================================
 """
 
@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PlasticityDecision:
-    """Решение гейта и всё, из чего оно сложилось."""
+    """The gate's decision and everything it was made of."""
 
     emotion: float
     surprise: float
@@ -66,18 +66,18 @@ class PlasticityDecision:
     @property
     def headroom(self) -> float:
         """
-        Насколько плотность превысила порог (или не дотянула, если минус).
+        By how much density cleared the threshold (negative if it fell short).
 
-        Нужна для настройки: когда пользователь жалуется, что бот чего-то
-        не запомнил, ответ "не хватило 0.185 до порога" полезнее, чем
-        "не сработало".
+        Useful when tuning: when someone complains that the bot failed to
+        remember something, "0.185 short of the threshold" is a better
+        answer than "it did not fire".
         """
         return self.density - self.threshold
 
 
 class PlasticityGate:
     """
-    Решает, достойно ли входящее событие записи в долговременную память.
+    Decides whether an incoming event deserves long-term storage.
 
         gate = PlasticityGate(settings)
         decision = gate.evaluate(emotion=0.2, surprise=0.9)
@@ -99,8 +99,8 @@ class PlasticityGate:
 
     def effective_threshold(self, load: float = 0.0) -> float:
         """
-        Порог с поправкой на нагрузку. load в [0, 1]: ноль — покой,
-        единица — перегрузка.
+        The threshold adjusted for load. `load` is in [0, 1]: zero means
+        calm, one means overload.
         """
         load = max(0.0, min(1.0, load))
         return min(1.0, self.base_threshold + load * self.settings.plasticity_stress_modifier)
@@ -111,7 +111,7 @@ class PlasticityGate:
         surprise: float = 0.0,
         load: float = 0.0,
     ) -> PlasticityDecision:
-        """Плотность против порога. Логирует оба исхода, не только спайк."""
+        """Density against the threshold. Logs both outcomes, not just spikes."""
         density = (emotion * 0.5) + (surprise * 0.5)
         threshold = self.effective_threshold(load)
         is_spike = density >= threshold

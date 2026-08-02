@@ -1,27 +1,27 @@
 # Copyright (C) 2026 MERUMEZ <selectivemem@gmail.com>
 #
-# Эта программа — свободное ПО: вы можете распространять и изменять её
-# на условиях GNU Affero General Public License версии 3, изданной
-# Free Software Foundation. Полный текст — в файле LICENSE.
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU Affero General Public License version 3 as
+# published by the Free Software Foundation. See LICENSE for the full text.
 #
-# Программа распространяется В НАДЕЖДЕ, ЧТО БУДЕТ ПОЛЕЗНОЙ, но БЕЗ
-# ВСЯКИХ ГАРАНТИЙ, включая подразумеваемые гарантии товарного
-# состояния и пригодности для определённой цели.
+# It is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.
 #
-# Для использования в закрытых продуктах существует коммерческая
-# лицензия — см. COMMERCIAL.md.
+# A commercial licence is available for use in closed products — see
+# COMMERCIAL.md.
 """
 ================================================================================
- WORKING_MEMORY.PY — Кратковременная память (STM) "Динамического Мозга"
+ WORKING_MEMORY.PY — Short-term memory (STM)
 ================================================================================
-WorkingMemory — буфер последних N реплик диалога (роль, текст, emotion_score,
-perplexity, timestamp), реализующий "рабочую память": удержание нити текущего
-разговора "здесь и сейчас", независимо от того, попадёт ли что-то из этого
-в долгосрочную память (LTM/GraphMemory).
+WorkingMemory is a buffer of the last N turns (role, text, emotion_score,
+perplexity, timestamp) — working memory in the psychological sense: it
+holds the thread of the current conversation here and now, regardless of
+whether any of it ever reaches long-term storage.
 
-STM НЕ решает, что важно — это делает GraphMemory.consolidate_from_stm()
-(Избирательная Консолидация). WorkingMemory — чистый буфер с ограниченной
-ёмкостью (deque), без "биологической" логики принятия решений.
+STM does NOT decide what matters — GraphMemory.consolidate_from_stm()
+does (selective consolidation). WorkingMemory is a plain bounded buffer
+(deque) with no decision logic of its own.
 ================================================================================
 """
 
@@ -34,7 +34,7 @@ from selectivemem.settings import MemorySettings
 
 @dataclass
 class STMEntry:
-    """Одна запись в кратковременной памяти."""
+    """A single entry in short-term memory."""
     role: str          # "user" | "bot"
     text: str
     emotion_score: float = 0.0
@@ -44,15 +44,15 @@ class STMEntry:
 
 class WorkingMemory:
     """
-    Буфер кратковременной памяти (STM) на основе collections.deque.
+    Short-term memory buffer built on collections.deque.
 
-    Использование:
+    Usage:
         stm = WorkingMemory()
-        stm.add_message("user", "привет!", emotion_score=0.2, perplexity=0.3)
-        stm.add_message("bot", "привет, как дела?")
+        stm.add_message("user", "hello!", emotion_score=0.2, perplexity=0.3)
+        stm.add_message("bot", "hi, how are you?")
 
         if stm.is_full():
-            episode = stm.consume_all()  # забрать всё и очистить буфер
+            episode = stm.consume_all()  # take everything and clear the buffer
     """
 
     def __init__(
@@ -73,8 +73,8 @@ class WorkingMemory:
         timestamp: Optional[float] = None,
     ) -> None:
         """
-        Добавляет новую реплику в буфер STM. Если буфер уже заполнен,
-        deque автоматически вытесняет самую старую запись (FIFO).
+        Appends a turn to the buffer. Once it is full, deque evicts the
+        oldest entry automatically (FIFO).
         """
         entry = STMEntry(
             role=role,
@@ -87,13 +87,13 @@ class WorkingMemory:
 
     def get_context_string(self) -> str:
         """
-        Возвращает срезовый контекст текущего диалога в виде читаемой
-        строки, готовой к подмешиванию в system-промпт LLM.
+        The current conversation as a readable string, ready to be mixed
+        into a system prompt.
 
-        Формат:
-            User: привет!
-            Bot: привет, как дела?
-            User: расскажи о себе
+        Format:
+            User: hello!
+            Bot: hi, how are you?
+            User: tell me about yourself
         """
         if not self._buffer:
             return ""
@@ -106,33 +106,33 @@ class WorkingMemory:
         return "\n".join(lines)
 
     def is_full(self) -> bool:
-        """Возвращает True, если буфер STM заполнен до отказа."""
+        """True when the buffer is full."""
         return len(self._buffer) >= self.capacity
 
     def size(self) -> int:
-        """Текущее количество элементов в буфере."""
+        """How many entries the buffer currently holds."""
         return len(self._buffer)
 
     def get_status_string(self) -> str:
-        """Строка вида '4/6 items in buffer' — для [BRAIN DEBUG]."""
+        """A string like '4/6 items in buffer' for debug output."""
         return f"{len(self._buffer)}/{self.capacity} items in buffer"
 
     def get_entries(self) -> List[STMEntry]:
-        """Возвращает копию текущих записей без очистки буфера."""
+        """A copy of the current entries, leaving the buffer intact."""
         return list(self._buffer)
 
     def consume_all(self) -> List[STMEntry]:
         """
-        Забирает ВСЕ текущие записи из STM и полностью очищает буфер.
-        Используется перед консолидацией в LTM (GraphMemory), чтобы
-        избежать повторной обработки одних и тех же реплик.
+        Takes ALL current entries and empties the buffer. Called before
+        consolidation into long-term storage so the same turns are never
+        processed twice.
         """
         entries = list(self._buffer)
         self._buffer.clear()
         return entries
 
     def clear(self) -> None:
-        """Полностью очищает буфер без возврата содержимого."""
+        """Empties the buffer without returning its contents."""
         self._buffer.clear()
 
     def __len__(self) -> int:

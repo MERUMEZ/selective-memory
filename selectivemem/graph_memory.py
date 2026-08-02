@@ -1,15 +1,15 @@
 # Copyright (C) 2026 MERUMEZ <selectivemem@gmail.com>
 #
-# Эта программа — свободное ПО: вы можете распространять и изменять её
-# на условиях GNU Affero General Public License версии 3, изданной
-# Free Software Foundation. Полный текст — в файле LICENSE.
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU Affero General Public License version 3 as
+# published by the Free Software Foundation. See LICENSE for the full text.
 #
-# Программа распространяется В НАДЕЖДЕ, ЧТО БУДЕТ ПОЛЕЗНОЙ, но БЕЗ
-# ВСЯКИХ ГАРАНТИЙ, включая подразумеваемые гарантии товарного
-# состояния и пригодности для определённой цели.
+# It is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.
 #
-# Для использования в закрытых продуктах существует коммерческая
-# лицензия — см. COMMERCIAL.md.
+# A commercial licence is available for use in closed products — see
+# COMMERCIAL.md.
 """
 ================================================================================
  GRAPH_MEMORY.PY — Биологический слой памяти "Динамического Мозга" (LTM)
@@ -318,7 +318,7 @@ class MemoryGraph:
 
 
     def get_user_model_content(self) -> str:
-        """Возвращает текущий текст User-Model (fallback на config-дефолт)."""
+        """Current text of the user model, falling back to the default."""
         row = self.db.get_meta_node("user_model")
         return row["context"] if row is not None else self.settings.default_user_model
 
