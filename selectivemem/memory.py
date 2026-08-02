@@ -147,6 +147,10 @@ class Memory:
         # amygdala=None: the reinforcement loop only consults it for
         # marker trust, and markers belong to the application, not memory.
         self.loop = ReinforcementLoop(memory=self.graph, amygdala=None, settings=self.settings)
+        # Что было вспомнено с прошлой записи. Нужен ОТДЕЛЬНЫЙ список, а не
+        # trace.node_ids: тот принадлежит уже созданному действию, а связывать
+        # новый узел надо с тем, что было активно ДО его появления.
+        self._recently_recalled: List[int] = []
 
     # ----------------------------------------------------------------------
     # 1. Observing
@@ -204,6 +208,7 @@ class Memory:
             node_id = self.graph.save_connection(
                 context=text, response=response, weight=weight, timestamp=ts,
             )
+            self._associate_with_recalled(node_id, ts)
 
         learned = self.graph.process_language_input(text, timestamp=ts)
 
@@ -258,7 +263,47 @@ class Memory:
             query, top_k=top_k, timestamp=ts, with_associations=with_associations,
         )
         self._remember_used([m.id for m in matches])
+        # То, что было активно сейчас, свяжется со следующей записью — см.
+        # associate_recalled_limit в observe.
+        for match in matches:
+            if match.id not in self._recently_recalled:
+                self._recently_recalled.append(match.id)
         return matches
+
+    def _associate_with_recalled(self, node_id: Optional[int], timestamp: float) -> None:
+        """
+        Links a fresh memory to whatever was ACTIVE when it appeared.
+
+        Measured gap this closes: after 200 observe() calls the store held
+        201 episodic nodes and ZERO edges between them. Not few — none. The
+        library never linked memories to each other at all; the edges seen
+        in the demo are created by the showcase (core/brain_session.py),
+        which orchestrates recall and write together and therefore has both
+        ends in hand.
+
+        For a library user that meant two things at once: connectivity
+        could never serve as an importance signal, and spreading activation
+        — advertised as multi-hop retrieval and occupying a fair share of
+        the search code — had nothing to travel along.
+
+        The rule is Hebbian: what fires together wires together. What the
+        application had just pulled out of memory is exactly the context in
+        which the new memory formed.
+
+        associate_recalled_limit = 0 disables this and restores the
+        previous behaviour.
+        """
+        limit = self.settings.associate_recalled_limit
+        if node_id is None or limit <= 0 or not self._recently_recalled:
+            self._recently_recalled = []
+            return
+
+        # Свежайшие вспоминания первыми: связь с тем, что доставали только
+        # что, осмысленнее связи с началом длинного разговора.
+        for source_id in reversed(self._recently_recalled[-limit:]):
+            if source_id != node_id:
+                self.graph.connect_nodes(source_id, node_id, timestamp=timestamp)
+        self._recently_recalled = []
 
     def _remember_used(self, node_ids: List[int]) -> None:
         """
