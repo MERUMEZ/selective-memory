@@ -106,21 +106,30 @@ licence.
 This section is optional, and it is here deliberately. Better for an
 inconvenient truth to be said before the deal than to surface after it.
 
-- **The Program's measured advantage is selective retention:** after two
-  weeks of silence it recalls 100% of what the user marked as important
-  against 60% of the ordinary (a gap of +40 pp over five seeds, with
-  volume held equal).
-- **On uniform questions — "find everything that was said" — the Program
-  is merely level with a random sample** (92.4% against 90.8%, spread
-  82–98% across seeds). On the external LongMemEval benchmark it scores
-  R@5 68% against 91.7% for the same system with its write filter
-  disabled. Both figures are produced by benchmarks in the open
-  repository.
-- **The bundled semantic model was trained on literary fiction** and is
-  unsuitable for professional domains: "language ~ programming" scores
-  0.114. Your own encoder will be required for your subject area.
-- **Search is linear in the number of nodes.** 30,000 nodes take roughly
-  0.5 s per query on an ordinary machine.
+- **The Program's measured advantage is telling apart memories that look
+  alike.** Under 200 near-duplicates it puts the right one first 83% of
+  the time against 50% for weight-and-recency scoring.
+- **On a store of unrelated topics that advantage disappears entirely**
+  (76.0% either way on LongMemEval). If your data is topically diverse,
+  an ordinary vector store is no worse and this Program is not worth
+  paying for.
+- **Selective writing costs recall.** On the external LongMemEval
+  benchmark, 500 questions at stock settings: R@5 84.0% while storing
+  24.7% of the turns, against 93.2% for the same engine with the write
+  filter removed. Nine points for three quarters of the storage.
+- **A prior claim of "+40 pp selective retention" has been withdrawn.**
+  It measured deletion rather than preference; removing that deletion
+  raised recall by 18.6 points. The audit records this in full. It is
+  named here because a buyer who reads older material should hear it
+  from us first.
+- **A mismatched encoder CORRUPTS memory, it does not merely search
+  badly.** Russian vectors over English text score unrelated sentences at
+  0.808, above the supersession threshold: 3080 spurious weakenings
+  across 79 writes. Pass an encoder for your language.
+- **Preference questions are the weak row:** R@5 49.6% against 76.8% for
+  the unfiltered engine.
+- **Search is linear in the number of nodes.** Roughly 14 ms per 1000
+  nodes on an ordinary machine once the vector cache is warm.
 
 ## 10. Governing law and disputes
 

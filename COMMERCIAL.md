@@ -68,23 +68,38 @@ draft: a lawyer reviews it before signing.
 
 ## What to say honestly, up front
 
-selectivemem's measured advantage is **selective retention**: after two
-weeks of silence it recalls 100% of what the user marked as important
-against 60% of the ordinary — a gap of +40 pp over five seeds, with
-message volume held equal.
+selectivemem's measured advantage is **telling apart memories that look
+alike**. Bury six facts under 200 near-duplicates — same words, different
+subject — and ranking by earned strength puts the right one first **83%
+of the time against 50%** for the usual weight-and-recency scoring.
 
-On **uniform** questions — "find everything that was ever said" — it is
-merely level with a random sample (92.4% against 90.8%, with a spread of
-82–98% across seeds). On the external LongMemEval benchmark it scores
-R@5 68%, against 91.7% for the same system with its write filter turned
-off. That difference is the price of the forgetting policy, stated as a
-number.
+That is the niche stated plainly: one user, one subject returned to over
+months. Support histories, a player and one NPC, a personal assistant
+after a year. **On a store of unrelated topics the same change moves
+nothing at all** (76.0% either way on LongMemEval) — there, an ordinary
+vector store is no worse, and we will say so before you buy.
+
+**What it costs.** On the external LongMemEval benchmark, all 500
+questions at stock settings: R@5 **84.0%** while storing 24.7% of the
+turns. The same engine with the write filter removed scores 93.2%. So
+selective writing costs about nine points of recall and saves three
+quarters of the storage.
+
+**A claim we withdrew, because you would find it anyway.** Until recently
+this page led with "+40 pp selective retention". That number was measured
+honestly and meant something other than advertised: the memory was not
+ranking important material higher, it was deleting the rest. Removing
+that deletion raised recall by 18.6 points and collapsed the gap to zero.
+The audit records this in full (§4.1), and `compare_retention.py` shows
++0 today. What replaced it is arguably the better claim: **34 nodes
+against 52 for a random sample, with complete recall against its 56–67%.**
 
 All of this is measured by benchmarks that sit in the open repository.
-You are welcome to rerun them.
+You are welcome to rerun them; they are the reason we found the mistake
+above ourselves.
 
 If what you need is completeness of search, use a vector store.
-selectivemem is about what to forget.
+selectivemem is about which memory surfaces first when many look alike.
 
 ## Contact
 
