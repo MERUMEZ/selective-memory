@@ -905,6 +905,13 @@ class MemoryGraph:
             overlap = self._keyword_overlap(new_words, old_words)
             if overlap >= self.settings.contradiction_repeat_threshold:
                 continue  # a repetition, not a new version
+            if overlap < self.settings.contradiction_min_overlap:
+                # Слишком мало общих слов — защита от чужого кодировщика,
+                # см. тот же охранник в _superseded_via_search. Здесь он
+                # нужнее: этот путь стоит по умолчанию, и на английском
+                # тексте с русской моделью он срабатывал 3080 раз на 79
+                # записей, ослабляя по сорок узлов на каждую запись.
+                continue
 
             found.append(
                 SupersededNode(
@@ -978,6 +985,19 @@ class MemoryGraph:
             overlap = self._keyword_overlap(new_words, old_words)
             if overlap >= self.settings.contradiction_repeat_threshold:
                 continue          # повтор, а не новая версия
+            if overlap < self.settings.contradiction_min_overlap:
+                # СЛИШКОМ МАЛО ОБЩИХ СЛОВ — защита от чужого кодировщика.
+                # Замер: русская модель (та, что в пакете) на английском
+                # тексте даёт "my dog is called Rex" против "the price of
+                # bread went up" косинус 0.808 при пороге 0.8. Порог сидит
+                # внутри шума, и память начинает ослаблять факт про собаку,
+                # потому что подорожал хлеб. На том же тексте прежний путь
+                # срабатывал 3080 раз на 79 записей — сорок ослаблений на
+                # каждую запись.
+                #
+                # Общее слово подделать эмбеддингом нельзя, поэтому проверка
+                #языконезависима и стоит один проход по множеству.
+                continue
 
             found.append(
                 SupersededNode(
