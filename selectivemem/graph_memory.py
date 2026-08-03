@@ -1046,6 +1046,7 @@ class MemoryGraph:
         weight: Optional[float] = None,
         timestamp: Optional[float] = None,
         explicit_correction: bool = False,
+        node_type: str = "episodic",
     ) -> int:
         """
         Stores a new link context -> response with an initial weight.
@@ -1061,6 +1062,7 @@ class MemoryGraph:
             response=response,
             weight=initial_weight,
             timestamp=timestamp,
+            node_type=node_type,
         )
 
         # A newer version of a fact supersedes the older one: otherwise
@@ -2306,11 +2308,29 @@ class MemoryGraph:
 
         # --- b) Structural node ---
         if avg_perplexity >= self.settings.stm_structural_threshold:
+            # СВЁРТКА — ОТДЕЛЬНЫЙ ТИП, и она НЕ УЧАСТВУЕТ в обычном поиске.
+            #
+            # Замер: с консолидацией на равных R@1 падает с 76% до 52%.
+            # Понижение силы помогает монотонно, но не спасает — 56% при
+            # x0.5 и 60% при x0.2. Причина видна из чисел: сила входит в
+            # оценку долей 0.15, а свёрнутый узел выигрывает НА
+            # РЕЛЕВАНТНОСТИ. Восемь обменов содержат столько слов, что
+            # совпадают почти с любым запросом; штрафом по важности
+            # преимущество по смыслу не отменить.
+            #
+            # R@10 при этом стабильно 92% во всех вариантах: улика в
+            # памяти есть всегда, ломается только порядок.
+            #
+            # Правильное разделение: схема достаётся ДРУГИМ ЗАПРОСОМ, а не
+            # соревнуется с эпизодом за одну полку. Человека спрашивают
+            # "какой антибиотик выписали" — он не перебирает "мы обсуждали
+            # лекарства" как кандидата; общее знание достаётся иначе.
             node_id = self.save_connection(
                 context=packed_context,
                 response=packed_response,
                 weight=self.settings.stm_structural_weight,
                 timestamp=timestamp,
+                node_type="episode_summary",
             )
             # СВЁРТКА УСТУПАЕТ ПОДРОБНОСТИ. Свёрнутый эпизод — это восемь
             # обменов в одном узле: он широко совпадает почти с любым

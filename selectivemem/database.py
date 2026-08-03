@@ -424,6 +424,12 @@ class Database:
         cursor.execute("SELECT * FROM nodes")
         return cursor.fetchall()
 
+    def fetch_summary_nodes(self) -> List[sqlite3.Row]:
+        """Только свёрнутые эпизоды — схемы разговора."""
+        cursor = self._conn.cursor()
+        cursor.execute("SELECT * FROM nodes WHERE node_type = 'episode_summary'")
+        return cursor.fetchall()
+
     def fetch_searchable_nodes(self) -> List[sqlite3.Row]:
         """
         Only the nodes fit for semantic search over conversational

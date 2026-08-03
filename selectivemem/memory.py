@@ -310,6 +310,29 @@ class Memory:
                 self._recently_recalled.append(match.id)
         return matches
 
+    def summaries(self, limit: int = 5) -> List[str]:
+        """
+        Свёрнутые эпизоды — «о чём вообще был разговор».
+
+        ОТДЕЛЬНЫЙ ВЫЗОВ, а не часть recall, и это измерено. Со свёртками в
+        общей выдаче R@1 падает с 76% до 52%: восемь обменов в одном узле
+        содержат столько слов, что совпадают почти с любым запросом и
+        занимают первое место. Понижение их силы помогает монотонно, но не
+        спасает (56% при x0.5, 60% при x0.2) — сила входит в оценку долей
+        0.15, а выигрывают свёртки НА РЕЛЕВАНТНОСТИ, и штрафом по важности
+        преимущество по смыслу не отменить.
+
+        R@10 при этом остаётся 92% в любом варианте: подробность из памяти
+        никуда не девается, ломается только порядок.
+
+        Так и у людей: схема и эпизод достаются РАЗНЫМИ ходами. На вопрос
+        "какой антибиотик выписали" человек не перебирает "мы обсуждали
+        лекарства" как кандидата.
+        """
+        rows = self.graph.db.fetch_summary_nodes()
+        rows.sort(key=lambda r: r["created_at"], reverse=True)
+        return [row["context"] for row in rows[:limit]]
+
     def sleep(self, timestamp: Optional[float] = None, summarise=None) -> "SleepReport":
         """
         Housekeeping the memory cannot do while it is being used: pruning
