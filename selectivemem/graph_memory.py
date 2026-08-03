@@ -1077,6 +1077,21 @@ class MemoryGraph:
             node_type=node_type,
         )
 
+        # ВЕКТОР СЧИТАЕТСЯ ПРИ ЗАПИСИ, а не лениво при первом поиске.
+        #
+        # Ленивый расчёт растягивал стоимость на первое обращение, и
+        # платил за него пользователь: замер показал 781 мс на первом
+        # поиске по тысяче узлов против 14 мс на прогретом. То есть
+        # человек, открывший бота утром, ждал почти секунду — а потом
+        # всё летало, и в отчётах об ошибках это выглядело бы загадкой.
+        #
+        # При записи та же работа стоит один вызов кодировщика на узел и
+        # размазана ровно там, где её ждут.
+        if node_id is not None:
+            vector = self._encode(f"{context} {response}".strip())
+            if vector is not None:
+                self.db.update_embedding(node_id, embeddings.to_blob(vector))
+
         # A newer version of a fact supersedes the older one: otherwise
         # memory piles up mutually exclusive nodes and returns an
         # arbitrary one.
