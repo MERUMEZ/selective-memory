@@ -1548,8 +1548,72 @@ class MemoryGraph:
 
         decayed_count = self._decay_nodes(current_time)
         self._decay_edges(current_time)
+        self._evict_over_capacity()
 
         return decayed_count
+
+    def _keep_score(self, row: Any) -> float:
+        """
+        How much a memory DESERVES to stay when the store is full.
+
+        Deliberately does NOT use weight. Weight is dominated by age —
+        decay is built into it — so evicting by weight would evict the
+        oldest, which is exactly the failure already measured: for
+        knowledge-update questions the evidence was on average 16 days
+        older than the question and age alone erased all of it, 12 nodes
+        out of 12.
+
+        What is used instead survives the passage of time:
+            reward_expectation — approval the user actually gave;
+            stability          — grows 1.5x on every recall, so it counts
+                                 how often the memory PROVED USEFUL;
+            spike_strength     — how hard the event hit when it happened.
+        """
+        expectation = max(0.0, row["reward_expectation"] or 0.0)
+        stability = (row["stability"] or self.settings.stability_initial)
+        stability_norm = min(1.0, stability / max(1e-9, self.settings.stability_max))
+        spike = row["spike_strength"] or 0.0
+        return expectation + stability_norm + spike
+
+    def _evict_over_capacity(self) -> int:
+        """
+        Keeps the store within memory_capacity by dropping the LEAST
+        DESERVING memories rather than the oldest.
+
+        Why capacity rather than age. Age-based deletion cannot be told
+        apart from importance-based deletion by anyone looking at the
+        result, and measurement showed it was deciding on its own: a tenth
+        of memory was removed on every pass, and the answers to later
+        questions were always inside that tenth.
+
+        Capacity is also what an application actually wants to control.
+        A game designer sets "this character remembers two hundred things";
+        nobody wants to set "this character forgets after eleven days".
+
+        memory_capacity = 0 means unlimited and nothing is evicted.
+        """
+        capacity = self.settings.memory_capacity
+        if capacity <= 0:
+            return 0
+
+        rows = [
+            row for row in self.db.fetch_all_nodes()
+            if not row["is_meta"]
+            and row["node_type"] not in MemoryGraph.LEXICAL_NODE_TYPES
+        ]
+        if len(rows) <= capacity:
+            return 0
+
+        rows.sort(key=self._keep_score)
+        doomed = rows[: len(rows) - capacity]
+        for row in doomed:
+            self.db.delete_node(row["id"])
+
+        logger.info(
+            "[CAPACITY] %d memories evicted, %d kept (limit %d)",
+            len(doomed), capacity, capacity,
+        )
+        return len(doomed)
 
     # Lexical nodes are the infrastructure of language rather than
     # episodes of a conversation, so they live on their own, far longer
@@ -1651,7 +1715,7 @@ class MemoryGraph:
             floor = min(floor, old_weight)          # the floor never raises a weight
             new_weight = floor + (old_weight - floor) * decay_factor
 
-            if new_weight < self.settings.forget_threshold:
+            if new_weight < self.settings.forget_threshold and self.settings.delete_on_decay:
                 to_forget.append(row["id"])
             else:
                 updates.append({

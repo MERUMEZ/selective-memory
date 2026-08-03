@@ -167,6 +167,10 @@ def main() -> None:
                              "окружения: стенд строит Memory на MemorySettings, "
                              "а переменные идут в config — я дважды намерил "
                              "этим пустоту, прежде чем заметить")
+    parser.add_argument("--capacity", type=int, default=None,
+                        help="сколько воспоминаний держать; 0 = без предела")
+    parser.add_argument("--keep-all", action="store_true",
+                        help="не удалять по возрасту (delete_on_decay=False)")
     parser.add_argument("--imp-weight", type=float, default=None,
                         help="вклад веса узла в ВАЖНОСТЬ (не в релевантность)")
     parser.add_argument("--imp-connectivity", type=float, default=None,
@@ -224,6 +228,10 @@ def main() -> None:
         settings_kwargs["base_plasticity_threshold"] = args.plasticity
     if args.content_tokens is not None:
         settings_kwargs["surprise_full_content_tokens"] = args.content_tokens
+    if args.capacity is not None:
+        settings_kwargs["memory_capacity"] = args.capacity
+    if args.keep_all:
+        settings_kwargs["delete_on_decay"] = False
     for flag, field in (("imp_weight", "importance_weight_signal"),
                         ("imp_connectivity", "importance_connectivity"),
                         ("imp_self_ref", "importance_self_reference"),
