@@ -306,6 +306,7 @@ class Memory:
                     source_id, node_id,
                     weight_boost=self.settings.associate_edge_weight,
                     timestamp=timestamp,
+                    edge_type="association",
                 )
         self._recently_recalled = []
 

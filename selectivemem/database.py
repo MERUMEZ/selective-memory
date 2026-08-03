@@ -160,6 +160,24 @@ ALTER_ADD_SPIKE_STRENGTH = """
 ALTER TABLE nodes ADD COLUMN spike_strength REAL DEFAULT NULL;
 """
 # --------------------------------------------------------------------------
+# Migration: edges.edge_type — what kind of link this is.
+#
+# Everything used to fade at one rate, and the rate was calibrated for the
+# WORD graph, where a link is reinforced by every repetition of a phrase
+# and must go stale quickly if the word stops being said.
+#
+# Associations between episodes have no such repetition: a conversation
+# does not return to the same PAIR of remarks ten times. Measured: links
+# created during a conversation vanish entirely between the fourth and the
+# eleventh day, taking multi-hop retrieval with them — the benefit falls
+# from +6.7 points to zero after a week of silence.
+#
+# NULL means the old kind (lexical/concept) and keeps the old rate.
+# --------------------------------------------------------------------------
+ALTER_ADD_EDGE_TYPE = """
+ALTER TABLE edges ADD COLUMN edge_type TEXT DEFAULT NULL;
+"""
+# --------------------------------------------------------------------------
 # Migration: embedding — a node's meaning vector for semantic search.
 #
 # Stored as a BLOB (float32) and filled lazily: nodes created before the
@@ -288,7 +306,8 @@ class Database:
         cursor = self._conn.cursor()
         migrated = False
         for statement in (ALTER_ADD_STABILITY, ALTER_ADD_REWARD_EXPECTATION,
-                          ALTER_ADD_EMBEDDING, ALTER_ADD_SPIKE_STRENGTH):
+                          ALTER_ADD_EMBEDDING, ALTER_ADD_SPIKE_STRENGTH,
+                          ALTER_ADD_EDGE_TYPE):
             try:
                 cursor.execute(statement)
                 migrated = True
@@ -510,6 +529,7 @@ class Database:
         weight_boost: float,
         timestamp: Optional[float] = None,
         max_weight: float = 1.0,
+        edge_type: Optional[str] = None,
     ) -> float:
         """
         Creates a new edge node_from -> node_to with initial weight
@@ -536,10 +556,11 @@ class Database:
             try:
                 cursor.execute(
                     """
-                    INSERT INTO edges (node_from, node_to, weight, last_activated, last_decayed_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO edges (node_from, node_to, weight, last_activated,
+                                       last_decayed_at, edge_type)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (a, b, initial_weight, ts, ts),
+                    (a, b, initial_weight, ts, ts, edge_type),
                 )
                 self._conn.commit()
             except sqlite3.IntegrityError:

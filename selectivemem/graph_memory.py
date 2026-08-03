@@ -1410,6 +1410,7 @@ class MemoryGraph:
         node_to: int,
         weight_boost: Optional[float] = None,
         timestamp: Optional[float] = None,
+        edge_type: Optional[str] = None,
     ) -> float:
         """
         Creates or strengthens an associative edge between two long-term
@@ -1449,6 +1450,7 @@ class MemoryGraph:
             node_to=node_to,
             weight_boost=boost,
             timestamp=ts,
+            edge_type=edge_type,
         )
 
         logger.info(
@@ -1699,7 +1701,19 @@ class MemoryGraph:
                 continue
 
             old_weight = edge["weight"]
-            decay_factor = math.exp(-self.settings.edge_decay_rate * dt / self.settings.age_t0)
+            # Ассоциации между эпизодами тают МЕДЛЕННЕЕ словарных связей, и
+            # это не вкусовщина. Словарное ребро подкрепляется каждым
+            # повтором фразы и обязано выветриваться быстро, если слово
+            # перестали произносить. Пара реплик не повторяется никогда, и
+            # на общей скорости связи исчезали между четвёртыми и
+            # одиннадцатыми сутками — вместе с многошаговым извлечением,
+            # выигрыш от которого падал с +6.7 пункта до нуля за неделю.
+            rate = (
+                self.settings.associate_edge_decay_rate
+                if edge["edge_type"] == "association"
+                else self.settings.edge_decay_rate
+            )
+            decay_factor = math.exp(-rate * dt / self.settings.age_t0)
             new_weight = old_weight * decay_factor
 
             if new_weight < self.settings.edge_forget_threshold:
