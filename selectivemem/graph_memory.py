@@ -1948,6 +1948,14 @@ class MemoryGraph:
         edges_pruned = self.prune_weak_edges()
         orphan_nodes_pruned = self.prune_orphan_nodes()
 
+        # Печатается ВСЕГДА, даже когда резать нечего. Иначе "механизм не
+        # вызывали" и "механизм отработал вхолостую" выглядят одинаково —
+        # tools/check_liveness.py считает срабатывания по логам и объявил
+        # подрезку мёртвой, хотя она честно отработала на пустом графе.
+        logger.info(
+            "[SLEEP PRUNING] Pass complete: %d edges, %d orphan nodes removed",
+            edges_pruned, orphan_nodes_pruned,
+        )
         return PruningReport(
             edges_pruned=edges_pruned,
             orphan_nodes_pruned=orphan_nodes_pruned,

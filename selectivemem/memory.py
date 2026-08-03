@@ -78,6 +78,14 @@ from selectivemem.reinforcement import ReinforcementLoop, ReinforcementOutcome
 from selectivemem.settings import MemorySettings
 from selectivemem.working_memory import WorkingMemory
 
+
+@dataclass
+class SleepReport:
+    """Что сделал сон: подрезал связей, убрал сирот, свернул кластеров."""
+    edges_pruned: int
+    orphan_nodes_pruned: int
+    clusters_consolidated: int
+
 logger = logging.getLogger(__name__)
 
 
@@ -293,6 +301,57 @@ class Memory:
             if match.id not in self._recently_recalled:
                 self._recently_recalled.append(match.id)
         return matches
+
+    def sleep(self, timestamp: Optional[float] = None, summarise=None) -> "SleepReport":
+        """
+        Housekeeping the memory cannot do while it is being used: pruning
+        weak links and folding dense clusters into one abstract memory.
+
+        CALL IT EXPLICITLY, like forget(). The library has no scheduler and
+        does not start threads; the application decides when it is idle —
+        after a session, on a timer, overnight.
+
+        Why this method exists at all. Pruning, hub clusters and abstract
+        nodes are all written in this package, and NOTHING in the package
+        called them: the only caller was the showcase's sleep cycle
+        (core/sleep_cycle.py). So a library user got none of it, though it
+        is described as part of how the memory works. That is the same gap
+        that association and consolidation turned out to have, and it was
+        found the same way — tools/check_liveness.py counts how often each
+        mechanism fires, and these three showed zero.
+
+        summarise(cluster) -> (context, response) turns a cluster into the
+        text of the abstract memory. Without it the hub's own text is used:
+        the library has no language model and will not invent one, but an
+        application that has one can pass it in.
+        """
+        ts = timestamp if timestamp is not None else self.clock()
+
+        report = self.graph.run_synaptic_pruning()
+        clusters = self.graph.find_hub_clusters(limit=1, timestamp=ts)
+
+        abstracts = 0
+        for cluster in clusters:
+            if summarise is not None:
+                context, response = summarise(cluster)
+            else:
+                # Без языковой модели свернуть смысл нечем. Берём текст
+                # хаба: он и так самый связный узел кластера, а спицы
+                # уходят в архив, что и есть суть консолидации.
+                context, response = cluster.hub_context, cluster.hub_response
+            self.graph.create_abstract_node(
+                summary_context=context,
+                summary_response=response,
+                source_node_ids=[cluster.hub_id] + list(cluster.spoke_ids),
+                timestamp=ts,
+            )
+            abstracts += 1
+
+        return SleepReport(
+            edges_pruned=report.edges_pruned,
+            orphan_nodes_pruned=report.orphan_nodes_pruned,
+            clusters_consolidated=abstracts,
+        )
 
     def _associate_with_recalled(self, node_id: Optional[int], timestamp: float) -> None:
         """
