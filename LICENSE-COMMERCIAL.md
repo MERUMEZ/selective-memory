@@ -114,7 +114,7 @@ inconvenient truth to be said before the deal than to surface after it.
   an ordinary vector store is no worse and this Program is not worth
   paying for.
 - **Selective writing costs recall.** On the external LongMemEval
-  benchmark, 500 questions at stock settings: R@5 84.0% while storing
+  benchmark, 500 questions at stock settings: R@5 83.4% while storing
   24.7% of the turns, against 93.2% for the same engine with the write
   filter removed. Nine points for three quarters of the storage.
 - **A prior claim of "+40 pp selective retention" has been withdrawn.**
@@ -126,7 +126,7 @@ inconvenient truth to be said before the deal than to surface after it.
   badly.** Russian vectors over English text score unrelated sentences at
   0.808, above the supersession threshold: 3080 spurious weakenings
   across 79 writes. Pass an encoder for your language.
-- **Preference questions are the weak row:** R@5 49.6% against 76.8% for
+- **Preference questions are the weak row:** R@5 46.6% against 76.8% for
   the unfiltered engine.
 - **Search is linear in the number of nodes.** Roughly 14 ms per 1000
   nodes on an ordinary machine once the vector cache is warm.

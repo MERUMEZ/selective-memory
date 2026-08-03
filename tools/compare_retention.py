@@ -101,7 +101,7 @@ os.environ.setdefault("SPEECH_DEMO_PACE", "false")
 
 import config  # noqa: E402
 from tools.compare_memory import build_baseline_store, is_hit, store_size  # noqa: E402
-from tools.simulate_learning import install_llm_stub  # noqa: E402
+from selectivemem import Memory  # noqa: E402
 
 # Две группы тем, ОДИНАКОВЫЕ по структуре и частоте. Разница только в
 # том, хвалит ли пользователь ответ — то есть в сигнале, а не в статистике.
@@ -155,57 +155,46 @@ def build_stream(rng: random.Random, rounds: int) -> List[Tuple[str, bool]]:
 
 
 def run_once(seed: int, rounds: int, silence_days: float, balanced: bool = False) -> Dict[str, Dict[str, float]]:
-    install_llm_stub()
-    random.seed(seed)
+    """
+    ЧЕРЕЗ БИБЛИОТЕКУ, А НЕ ЧЕРЕЗ ВИТРИНУ, и это исправление серьёзной
+    неточности.
+
+    Прежняя версия строила BrainSession — то есть организм целиком, с
+    миндалиной и восприятием. Витрина считает эмоцию сама и зовёт
+    save_connection НАПРЯМУЮ, минуя Memory.observe(). Значит стенд мерил
+    конфигурацию, которой у покупателя нет: у библиотечного пользователя
+    emotion по умолчанию 0.0, и половина формулы гейта не работает.
+
+    Числа от этого падают, и это честно: столько и получает тот, кто
+    поставил пакет и не передаёт валентность сам. Оценку важности здесь
+    даёт feedback(+1.0) — ровно так, как это делало бы приложение.
+    """
     rng = random.Random(seed)
-
-    from core.brain_session import BrainSession, ManualWallClock
-
-    # Часы стенда НЕ идут сами. Раньше источником настенного времени был
-    # time.time(), а он входит в субъективное с множителем
-    # TIME_ACCELERATION, поэтому в возраст узлов подмешивалась реальная
-    # длительность прогона — и два запуска одного и того же кода
-    # расходились. Паузы между сессиями стенд задаёт явно, ниже.
-    #
-    # Шаг НУЛЕВОЙ намеренно: так замер сохраняет прежний смысл, а правка
-    # убирает только случайность. Разговор с паузами в полминуты между
-    # репликами — отдельный, более реалистичный режим, и включать его
-    # надо осознанно, перемеряв все числа заново.
-    #
-    # Точка отсчёта ФИКСИРОВАННАЯ, а не "сейчас": из неё же берётся эпоха
-    # мозга, а эпоха входит в каждую метку времени в базе. Пока она была
-    # настоящим временем запуска, два прогона расходились уже на первом
-    # сообщении — при побитово одинаковом графе и одинаковом состоянии
-    # генератора случайных чисел. Паузы задаются wall.advance() ниже.
-    wall = ManualWallClock(start=1_700_000_000.0, seconds_per_call=0.0)
-    session = BrainSession(db_path=":memory:", wall_clock=wall)
+    now = [1_700_000_000.0]
+    memory = Memory(":memory:", clock=lambda: now[0])
     exchanges: List[Tuple[str, str]] = []
 
-    stream = build_stream(rng, rounds)
-    for index, (text, praise) in enumerate(stream, start=1):
-        response = session.process_message(text)
-        exchanges.append((text, response.text))
+    for index, (text, praise) in enumerate(build_stream(rng, rounds), start=1):
+        memory.observe(text, response="понятно")
+        exchanges.append((text, "понятно"))
         if praise:
-            # Похвала идёт СЛЕДУЮЩЕЙ репликой — так её и даёт живой человек
-            marker = rng.choice(PRAISE)
-            reply = session.process_message(marker)
-            exchanges.append((marker, reply.text))
+            memory.feedback(+1.0)
+            exchanges.append((rng.choice(PRAISE), "понятно"))
         elif balanced:
-            # Контроль на объём: обычная тема тоже получает вторую реплику,
-            # но без всякой валентности
-            marker = rng.choice(NEUTRAL)
-            reply = session.process_message(marker)
-            exchanges.append((marker, reply.text))
+            # Контроль на объём: обычная тема тоже даёт вторую реплику,
+            # но без всякой оценки.
+            memory.observe(rng.choice(NEUTRAL), response="понятно")
+            exchanges.append((rng.choice(NEUTRAL), "понятно"))
+        now[0] += 300.0
         if index % 24 == 0:
-            wall.advance(8 * 3600.0)
-            session.memory.apply_decay(now=session.clock.get_brain_time())
+            now[0] += 8 * 3600.0
+            memory.forget(now=now[0])
 
-    # ДОЛГОЕ МОЛЧАНИЕ — то, ради чего всё затевалось
-    wall.advance(silence_days * 86400.0)
-    now = session.clock.get_brain_time()
-    session.memory.apply_decay(now=now)
+    now[0] += silence_days * 86400.0
+    memory.forget(now=now[0])
+    now_ts = now[0]
 
-    budget = store_size(session.memory)
+    budget = store_size(memory.graph)
     total = len(exchanges)
     order = list(range(total))
     rng.shuffle(order)
@@ -213,13 +202,13 @@ def run_once(seed: int, rounds: int, silence_days: float, balanced: bool = False
     stores = {
         "случайные (контроль)": build_baseline_store(exchanges, order, budget),
         "последние (окно)": build_baseline_store(exchanges, range(total - 1, -1, -1), budget),
-        "организм": session.memory,
+        "организм": memory.graph,
     }
 
     def recall(graph, topics: Sequence[str]) -> float:
         hits = 0
         for topic in topics:
-            found = graph.search(topic, top_k=1, timestamp=now, with_associations=False)
+            found = graph.search(topic, top_k=1, timestamp=now_ts, with_associations=False)
             if found and is_hit(topic, f"{found[0].context} {found[0].response}"):
                 hits += 1
         return hits / max(1, len(topics))
@@ -231,7 +220,7 @@ def run_once(seed: int, rounds: int, silence_days: float, balanced: bool = False
             "plain": recall(graph, PLAIN_TOPICS),
             "nodes": graph.db.count_nodes_by_type("episodic"),
         }
-    session.close()
+    memory.close()
     return result
 
 

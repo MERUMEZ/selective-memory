@@ -80,7 +80,7 @@ nothing at all** (76.0% either way on LongMemEval) — there, an ordinary
 vector store is no worse, and we will say so before you buy.
 
 **What it costs.** On the external LongMemEval benchmark, all 500
-questions at stock settings: R@5 **84.0%** while storing 24.7% of the
+questions at stock settings: R@5 **83.4%** while storing 24.7% of the
 turns. The same engine with the write filter removed scores 93.2%. So
 selective writing costs about nine points of recall and saves three
 quarters of the storage.

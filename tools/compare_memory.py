@@ -188,6 +188,44 @@ def evaluate(graph, probes: Sequence[str]) -> Dict[str, float]:
 # Прогон
 # --------------------------------------------------------------------------
 
+class _LibraryRun:
+    """
+    Тонкая обёртка, чтобы стенд говорил с библиотекой теми же словами,
+    какими говорил с витриной. Ровно то, что делает приложение: показать
+    событие и подвинуть часы.
+
+    Заведена вместо BrainSession, потому что витрина считает эмоцию сама
+    и зовёт save_connection напрямую, минуя Memory.observe(). Прежние
+    числа описывали конфигурацию, которой у покупателя нет.
+    """
+
+    class _Reply:
+        __slots__ = ("text",)
+
+        def __init__(self, text):
+            self.text = text
+
+    def __init__(self, memory, now):
+        self.memory_facade = memory
+        self.memory = memory.graph
+        self._now = now
+
+    def process_message(self, text):
+        self.memory_facade.observe(text, response="понятно")
+        self._now[0] += 300.0
+        return self._Reply("понятно")
+
+    @property
+    def clock(self):
+        return self
+
+    def get_brain_time(self):
+        return self._now[0]
+
+    def close(self):
+        self.memory_facade.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Сравнивает экономику памяти с наивным «сохранить всё»"
@@ -216,7 +254,10 @@ def main() -> None:
     random.seed(args.seed)
     rng = random.Random(args.seed)
 
-    from core.brain_session import BrainSession, ManualWallClock
+    # ЧЕРЕЗ БИБЛИОТЕКУ, А НЕ ЧЕРЕЗ ВИТРИНУ. Витрина считает эмоцию сама
+    # и зовёт save_connection напрямую, минуя Memory.observe(), поэтому
+    # прежние числа описывали конфигурацию, которой у покупателя нет.
+    from selectivemem import Memory
 
     stream = build_message_stream(args.messages, 7, rng, tail_ratio=0.3)
 
@@ -237,14 +278,16 @@ def main() -> None:
     # настоящим временем запуска, два прогона расходились уже на первом
     # сообщении — при побитово одинаковом графе и одинаковом состоянии
     # генератора случайных чисел. Паузы задаются wall.advance() ниже.
-    wall = ManualWallClock(start=1_700_000_000.0, seconds_per_call=0.0)
-    session = BrainSession(db_path=":memory:", wall_clock=wall)
+    # Часы стенда НЕ идут сами: паузы задаются явно, иначе два прогона
+    # одного кода расходятся на длительности самого прогона.
+    _now = [1_700_000_000.0]
+    session = _LibraryRun(Memory(":memory:", clock=lambda: _now[0]), _now)
     exchanges: List[Tuple[str, str]] = []
     for i, text in enumerate(stream, start=1):
         response = session.process_message(text)
         exchanges.append((text, response.text))
         if args.session_length and args.gap_hours and i % args.session_length == 0:
-            wall.advance(args.gap_hours * 3600.0)
+            _now[0] += args.gap_hours * 3600.0
             session.memory.apply_decay(now=session.clock.get_brain_time())
 
     kept = session.memory.db.count_nodes_by_type("episodic")

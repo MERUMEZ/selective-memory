@@ -7,7 +7,7 @@ into a vector store means paying to keep noise and drowning in it at
 retrieval. `selectivemem` writes about a quarter of what it is shown, and
 ranks what it kept by what has actually earned its place.
 
-Measured on LongMemEval, 500 questions, at stock settings: **R@5 84.0%**
+Measured on LongMemEval, 500 questions, at stock settings: **R@5 83.4%**
 while storing 24.7% of the turns. The same system with the write filter
 removed and forgetting off scores 93.2% — so selective writing costs
 about nine points of recall and saves three quarters of the storage.
@@ -281,7 +281,7 @@ flags.
 
 | mode | stored | R@1 | R@5 |
 |---|---|---|---|
-| stock | 24.7% | 66.6% | **84.0%** |
+| stock | 24.7% | 66.0% | **83.4%** |
 | archive (gate bypassed, forgetting off) | 49.6% | 76.7% | **93.2%** |
 
 The gap between the rows is the price of writing selectively: **9 points
@@ -292,18 +292,18 @@ By question type, because the average hides the interesting part:
 | type | n | R@5 | archive |
 |---|---:|---:|---:|
 | single-session-assistant | 56 | 96.4% | 98.2% |
-| multi-session | 133 | 93.3% | 94.2% |
+| multi-session | 133 | 92.6% | 94.2% |
 | knowledge-update | 78 | 88.4% | 98.9% |
 | temporal-reasoning | 133 | 82.6% | 91.0% |
-| single-session-user | 70 | 68.6% | 92.9% |
-| single-session-preference | 30 | 49.6% | 76.8% |
+| single-session-user | 70 | 67.1% | 92.9% |
+| single-session-preference | 30 | 46.6% | 76.8% |
 
 `knowledge-update` — questions where a fact CHANGED and the current value
 is wanted — used to score 20.8% here. The cause was measured and it was
 not the write filter: evidence for those questions is on average 16 days
 older than the question, and age-based deletion erased all of it, 12
 nodes out of 12 in every instance examined. Removing that deletion is
-what moved the overall figure from 64.8% to 84.0%.
+what moved the overall figure from 64.8% to 83.4%.
 
 Preferences remain the weak row and are not dressed up.
 

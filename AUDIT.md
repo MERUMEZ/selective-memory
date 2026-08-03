@@ -346,7 +346,7 @@ neighbours publish. Stock settings, no flags.
 |---|---|---|---|
 | threshold 0.35, deletion on (a year ago) | 5.5% | 13.3% | **18.3%** |
 | threshold 0.25, deletion on | 24.8% | 50.8% | **64.8%** |
-| **stock today** | 24.7% | 66.6% | **84.0%** |
+| **stock today** | 24.7% | 66.0% | **83.4%** |
 | archive (no gate, no forgetting) | 49.6% | 76.7% | **93.2%** |
 
 Two calibrations moved this number, and both were forced by measurement
@@ -366,11 +366,11 @@ By question type, since the average hides the interesting part:
 | Type | n | R@5 | archive |
 |---|---:|---:|---:|
 | single-session-assistant | 56 | 96.4% | 98.2% |
-| multi-session | 133 | 93.3% | 94.2% |
+| multi-session | 133 | 92.6% | 94.2% |
 | knowledge-update | 78 | 88.4% | 98.9% |
 | temporal-reasoning | 133 | 82.6% | 91.0% |
-| single-session-user | 70 | 68.6% | 92.9% |
-| single-session-preference | 30 | 49.6% | 76.8% |
+| single-session-user | 70 | 67.1% | 92.9% |
+| single-session-preference | 30 | 46.6% | 76.8% |
 
 **What this benchmark CANNOT show, and it took four empty measurements to
 learn.** LongMemEval loads a haystack with `observe()` and calls `recall`
