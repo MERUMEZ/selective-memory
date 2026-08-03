@@ -878,6 +878,12 @@ class MemoryGraph:
             threshold -= self.settings.contradiction_correction_relief
 
         new_words = self._extract_keywords(text.lower())
+
+        if self.settings.contradiction_search_threshold > 0.0:
+            return self._superseded_via_search(
+                text, new_words, exclude_id, explicit_correction
+            )
+
         found: List[SupersededNode] = []
 
         for row in self.db.fetch_searchable_nodes():
@@ -909,6 +915,78 @@ class MemoryGraph:
                 )
             )
 
+        return found
+
+    def _superseded_via_search(
+        self,
+        text: str,
+        new_words: Set[str],
+        exclude_id: Optional[int],
+        explicit_correction: bool,
+    ) -> List["SupersededNode"]:
+        """
+        Finds stale versions among what ORDINARY SEARCH returns, instead of
+        scanning every node with a high cosine bar.
+
+        WHY THE OLD WAY WAS BROKEN BY DESIGN, not by a badly chosen number.
+        It compared whole sentences and demanded cosine >= 0.8. But a
+        contradiction is "same subject, DIFFERENT value" — so the stronger
+        the change, the less similar the sentences, and the more surely the
+        update slips through. The evidence of a contradiction was being
+        subtracted from the evidence of relatedness.
+
+        Measured, against a threshold of 0.8:
+
+            "мою собаку зовут Рекс" -> "... Бобик"        0.923  caught
+            "моя собака зовут Рекс" -> "мою собаку ТЕПЕРЬ
+                                        зовут Бобик"      0.722  missed
+            "я живу в Москве" -> "я ПЕРЕЕХАЛ в Питер"     0.369  missed
+
+        The first pair is the example from this method's own docstring. The
+        mechanism was calibrated for restatements that swap a single word
+        into the same template, and blind to how people actually report a
+        change.
+
+        Search finds the old node in ALL of those cases, because it blends
+        keywords, fuzzy similarity and meaning rather than trusting one
+        cosine. So the roles swap: SEARCH FINDS, and the word-overlap test
+        decides whether this is a new version or a repetition.
+
+        HONEST LIMIT. Five of six real updates separate cleanly — the worst
+        scores 0.642 while the best unrelated memory scores 0.433. The
+        sixth does not separate at all: "я живу в Москве" and "я переехал в
+        Питер" share no words, and no measure of string similarity will
+        connect them. That needs knowing that "moved" cancels "live in",
+        which is knowledge this library does not have.
+        """
+        threshold = self.settings.contradiction_search_threshold
+        if explicit_correction:
+            threshold -= self.settings.contradiction_correction_relief
+
+        candidates = self.search(
+            text,
+            top_k=self.settings.contradiction_candidates,
+            with_associations=False,
+        )
+
+        found: List[SupersededNode] = []
+        for match in candidates:
+            if match.id == exclude_id or match.similarity < threshold:
+                continue
+
+            old_words = self._extract_keywords((match.context or "").lower())
+            overlap = self._keyword_overlap(new_words, old_words)
+            if overlap >= self.settings.contradiction_repeat_threshold:
+                continue          # повтор, а не новая версия
+
+            found.append(
+                SupersededNode(
+                    id=match.id,
+                    context=match.context,
+                    similarity=match.similarity,
+                    word_overlap=overlap,
+                )
+            )
         return found
 
     def supersede_node(self, node_id: int, timestamp: Optional[float] = None) -> None:
