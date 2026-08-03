@@ -422,6 +422,25 @@ naive stores were being given three times less memory.
 uniform questions an unbiased sample is unbeatable by construction. The
 domain of application is "hold on to what matters", not "lose nothing".
 
+**What the assistant volunteers is what the user marked.** When memory is
+asked a general question — "what do you remember about me" — and fills a
+prompt on its own, `compare_ordering.py` measures which memories get in:
+
+| | selectivemem | random order |
+|---|---:|---:|
+| share of praised material in the top 5 | **88.9%** | 50% |
+| MRR, praised topics | 0.889 | |
+| MRR, ordinary topics | 0.833 | |
+
+Eighteen topical memories reached the answers across three seeds, so the
+share is a measurement rather than a coin toss — an earlier version of
+this bench reported 40% on a denominator of 0.6 and was rightly ignored.
+
+The MRR gap is small (+0.056) and consistent across seeds. Ranking by
+earned strength is a nudge on targeted questions and decisive on open
+ones: nine of ten memories the assistant volunteers are the ones the user
+called important.
+
 ### 4.6 Where selectivity actually pays: near-duplicates
 
 `tools/compare_interference.py`. The same six facts, buried under a

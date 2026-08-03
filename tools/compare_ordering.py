@@ -72,7 +72,7 @@ import config  # noqa: E402
 from tools.compare_retention import (  # noqa: E402
     NEUTRAL, PLAIN_TOPICS, PRAISE, PRAISED_TOPICS, build_stream,
 )
-from tools.simulate_learning import install_llm_stub  # noqa: E402
+
 
 # СПРАШИВАТЬ НАДО ВОПРОСОМ, А НЕ ТЕКСТОМ ТЕМЫ. Первая версия стенда
 # запрашивала дословную формулировку, узел находил сам себя первым, и MRR
@@ -196,14 +196,18 @@ def _praised_share_in_top(graph, now: float) -> float:
 
 def run_once(seed: int, rounds: int, silence_days: float, balanced: bool,
              haystack: int = 200) -> Dict[str, float]:
-    install_llm_stub()
     random.seed(seed)
     rng = random.Random(seed)
 
-    from core.brain_session import BrainSession, ManualWallClock
+    # ЧЕРЕЗ БИБЛИОТЕКУ, А НЕ ЧЕРЕЗ ВИТРИНУ. Витрина считает эмоцию сама и
+    # зовёт save_connection напрямую, минуя Memory.observe(), поэтому
+    # прежние числа описывали конфигурацию, которой у покупателя нет.
+    # Оценку важности здесь даёт feedback(+1.0) — ровно так, как это
+    # делало бы приложение.
+    from selectivemem import Memory
 
-    wall = ManualWallClock(start=1_700_000_000.0, seconds_per_call=0.0)
-    session = BrainSession(db_path=":memory:", wall_clock=wall)
+    now = [1_700_000_000.0]
+    memory = Memory(":memory:", clock=lambda: now[0])
 
     # Темы перемешаны со стогом: иначе конкурировать не с чем.
     stream = [(text, praise) for text, praise in build_stream(rng, rounds)]
@@ -211,20 +215,21 @@ def run_once(seed: int, rounds: int, silence_days: float, balanced: bool,
     rng.shuffle(stream)
 
     for index, (text, praise) in enumerate(stream, start=1):
-        session.process_message(text)
+        memory.observe(text, response="понятно")
         if praise:
-            session.process_message(rng.choice(PRAISE))
+            memory.feedback(+1.0)
         elif balanced:
-            session.process_message(rng.choice(NEUTRAL))
+            memory.observe(rng.choice(NEUTRAL), response="понятно")
+        now[0] += 300.0
         if index % 24 == 0:
-            wall.advance(8 * 3600.0)
-            session.memory.apply_decay(now=session.clock.get_brain_time())
+            now[0] += 8 * 3600.0
+            memory.forget(now=now[0])
 
-    wall.advance(silence_days * 86400.0)
-    now = session.clock.get_brain_time()
-    session.memory.apply_decay(now=now)
+    now[0] += silence_days * 86400.0
+    memory.forget(now=now[0])
+    now_ts = now[0]
 
-    graph = session.memory
+    graph = memory.graph
 
     # Веса по группам — это ОСНОВА, из которой порядок обязан получаться.
     # Если веса различаются, а MRR нет, значит вес просто не доходит до
@@ -238,15 +243,15 @@ def run_once(seed: int, rounds: int, silence_days: float, balanced: bool,
         return statistics.mean(values) if values else 0.0
 
     result = {
-        "mrr_praised": _mrr(graph, PRAISED_QUESTIONS, now),
-        "mrr_plain": _mrr(graph, PLAIN_QUESTIONS, now),
-        "praised_share": _praised_share_in_top(graph, now)[0],
-        "share_n": _praised_share_in_top(graph, now)[1],
+        "mrr_praised": _mrr(graph, PRAISED_QUESTIONS, now_ts),
+        "mrr_plain": _mrr(graph, PLAIN_QUESTIONS, now_ts),
+        "praised_share": _praised_share_in_top(graph, now_ts)[0],
+        "share_n": _praised_share_in_top(graph, now_ts)[1],
         "weight_praised": mean_weight(PRAISED_TOPICS),
         "weight_plain": mean_weight(PLAIN_TOPICS),
         "nodes": graph.db.count_nodes_by_type("episodic"),
     }
-    session.close()
+    memory.close()
     return result
 
 
