@@ -886,7 +886,18 @@ class MemoryGraph:
 
         found: List[SupersededNode] = []
 
-        for row in self.db.fetch_searchable_nodes():
+        # КАНДИДАТЫ ИЗ ИНДЕКСА, а не перебор всей базы. Проверка на
+        # устаревание идёт при каждой записи, и полный скан с косинусом на
+        # каждый узел делал запись невыносимой задолго до того, как
+        # замедлялся поиск: три тысячи узлов не записывались за две минуты.
+        #
+        # Отбор по общим словам ничего не теряет: вытеснение всё равно
+        # требует пересечения не ниже contradiction_min_overlap, то есть
+        # узел без единого общего слова был бы отвергнут дальше.
+        candidates = self.db.fetch_candidates_by_text(
+            sorted(new_words), self.settings.supersede_scan_limit,
+        )
+        for row in candidates:
             if row["id"] == exclude_id or row["is_meta"]:
                 continue
 
@@ -974,6 +985,7 @@ class MemoryGraph:
             text,
             top_k=self.settings.contradiction_candidates,
             with_associations=False,
+            touch=False,          # проверка, а не использование
         )
 
         found: List[SupersededNode] = []
@@ -1156,6 +1168,7 @@ class MemoryGraph:
         top_k: int = 1,
         timestamp: Optional[float] = None,
         with_associations: bool = True,
+        touch: bool = True,
     ) -> List[MemoryMatch]:
         """
         The main search over the memory graph (keyword overlap + fuzzy
@@ -1281,8 +1294,17 @@ class MemoryGraph:
         scored = self._rerank_by_importance(scored)
         top_matches = scored[:top_k]
 
-        for match in top_matches:
-            self.touch_node(match.id, timestamp=timestamp)
+        # ВНУТРЕННЯЯ ПРОВЕРКА — НЕ ИСПОЛЬЗОВАНИЕ. Поиск растит силу
+        # найденному: извлечение и есть доказательство пользы. Но
+        # вытеснение устаревшего тоже зовёт поиск, и без этого флага
+        # КАЖДАЯ ЗАПИСЬ незаметно подкрепляла соседей.
+        #
+        # Замер поймал это тестом: похвалённый узел вытеснялся толпой
+        # проходных, набравших силу 2.90 против его собственной, — их
+        # трогали десятки раз при проверках на противоречие.
+        if touch:
+            for match in top_matches:
+                self.touch_node(match.id, timestamp=timestamp)
 
         # ПОДАВЛЕНИЕ КОНКУРЕНТОВ. Кандидаты, которые прошли порог, но в
         # выдачу не попали, слабеют.

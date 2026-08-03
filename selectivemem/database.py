@@ -84,6 +84,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_unique_pair ON edges(node_from, node
 """
 
 # --------------------------------------------------------------------------
+# Полнотекстовый индекс — чтобы ЗАПИСЬ перестала перебирать всю базу.
+#
+# Проверка на устаревание вызывается при КАЖДОЙ записи и сканировала все
+# узлы, считая косинус для каждого. Замер: три тысячи узлов не удавалось
+# записать за две минуты, тогда как прогретый ПОИСК по тем же трём тысячам
+# занимает миллисекунды.
+#
+# То есть при росте памяти первой становится невыносимой запись, а не
+# чтение, — и индексировать надо ради вставки.
+#
+# FTS5 входит в сам SQLite (проверено: версия 3.45.1, модуль доступен),
+# поэтому обещание "ноль зависимостей" остаётся в силе. Токенизатор
+# unicode61 работает с кириллицей.
+#
+# content='nodes' означает внешнее хранилище: индекс не дублирует тексты,
+# а ссылается на строки таблицы nodes по rowid.
+# --------------------------------------------------------------------------
+FTS_SCHEMA = """
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+    context, response, content='nodes', content_rowid='id', tokenize='unicode61'
+);
+"""
+
+# --------------------------------------------------------------------------
 # Migration: meta-nodes for the self model and the user model
 # --------------------------------------------------------------------------
 ALTER_ADD_IS_META = """
@@ -254,6 +278,14 @@ class Database:
         cursor.execute(INDEX_EDGE_FROM)
         cursor.execute(INDEX_EDGE_TO)
         cursor.execute(UNIQUE_EDGE_PAIR)
+        cursor.execute(FTS_SCHEMA)
+        # Разовое наполнение для баз, созданных до появления индекса.
+        cursor.execute("SELECT count(*) FROM nodes_fts")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute(
+                "INSERT INTO nodes_fts(rowid, context, response) "
+                "SELECT id, context, response FROM nodes"
+            )
         self._conn.commit()
         self._migrate_meta_columns()
         self._migrate_decay_columns()
@@ -403,8 +435,12 @@ class Database:
             # because time passed. See ALTER_ADD_STRENGTH.
             (context, response, weight, ts, ts, ts, node_type, weight, weight),
         )
-        self._conn.commit()
         node_id = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO nodes_fts(rowid, context, response) VALUES (?, ?, ?)",
+            (node_id, context, response),
+        )
+        self._conn.commit()
         logger.info(
             "[MEMORY SAVED] id=%s weight=%.3f node_type=%s context=%r",
             node_id, weight, node_type, context[:50],
@@ -423,6 +459,37 @@ class Database:
         cursor = self._conn.cursor()
         cursor.execute("SELECT * FROM nodes")
         return cursor.fetchall()
+
+    def fetch_candidates_by_text(self, words: List[str], limit: int) -> List[sqlite3.Row]:
+        """
+        Узлы, делящие с запросом хоть одно слово, — через полнотекстовый
+        индекс, а не перебором.
+
+        Ради этого индекс и заведён: проверка на устаревание идёт при
+        КАЖДОЙ записи и раньше сканировала всю базу с косинусом на каждый
+        узел. Замер: три тысячи узлов не записывались за две минуты.
+
+        Пустой список означает "ни одного общего слова" — тогда звать
+        нечего, и это ЧЕСТНЫЙ ответ: вытеснение всё равно требует
+        пересечения не ниже contradiction_min_overlap.
+        """
+        terms = [w for w in words if len(w) >= 2]
+        if not terms:
+            return []
+        # Кавычки вокруг каждого слова: иначе FTS примет его за оператор.
+        query = " OR ".join('"' + t.replace('"', '') + '"' for t in terms)
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT n.* FROM nodes_fts f JOIN nodes n ON n.id = f.rowid "
+                "WHERE nodes_fts MATCH ? AND n.node_type IN ('episodic', 'concept') "
+                "ORDER BY rank LIMIT ?",
+                (query, limit),
+            )
+            return cursor.fetchall()
+        except sqlite3.OperationalError:
+            # Непарсимый запрос не должен ронять запись.
+            return []
 
     def fetch_summary_nodes(self) -> List[sqlite3.Row]:
         """Только свёрнутые эпизоды — схемы разговора."""
@@ -561,6 +628,7 @@ class Database:
     def delete_node(self, node_id: int) -> None:
         """Physically deletes a node (used by the sleep cycle when forgetting)."""
         cursor = self._conn.cursor()
+        cursor.execute("DELETE FROM nodes_fts WHERE rowid = ?", (node_id,))
         cursor.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
         self._conn.commit()
         logger.info("[MEMORY FORGOTTEN] id=%s deleted from the database", node_id)
