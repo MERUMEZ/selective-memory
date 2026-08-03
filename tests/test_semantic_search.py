@@ -19,7 +19,15 @@ SequenceMatcher по целым строкам. Замер на реальном
 """
 import pytest
 
-import config
+# Порог УВЕРЕННОЙ подстановки — понятие приложения, а не памяти: он
+# решает, вставлять ли найденное в промпт. В библиотеке его нет, и
+# правильно. Здесь он нужен как число, чтобы проверить, что похожая, но
+# не та запись НЕ выдаётся за уверенное совпадение.
+_CONFIDENT_THRESHOLD = 0.55
+
+from selectivemem.settings import MemorySettings as _LibrarySettings
+
+config = _LibrarySettings()
 from selectivemem.database import Database
 from selectivemem.graph_memory import MemoryGraph
 from selectivemem import embeddings
@@ -61,7 +69,7 @@ def test_paraphrase_is_found_at_all(mg):
     "расскажи про кота" не пересекается с "у меня есть кошка" ни одним
     содержательным словом.
     """
-    assert score(mg, "расскажи про кота") >= config.MEMORY_SEARCH_THRESHOLD
+    assert score(mg, "расскажи про кота") >= config.memory_search_threshold
 
 
 @requires_model
@@ -101,19 +109,19 @@ def test_lookalike_is_not_presented_as_confident(mg):
     честно помечаться как смутное — иначе бот уверенно подмешает в ответ
     воспоминание не по теме.
     """
-    assert score(mg, "у меня есть кожа") < config.MEMORY_INJECTION_CONFIDENT_THRESHOLD
+    assert score(mg, "у меня есть кожа") < _CONFIDENT_THRESHOLD
 
 
 @requires_model
 def test_exact_match_still_wins(mg):
     exact = score(mg, "у меня есть кошка")
     assert exact > score(mg, "у меня есть кот")
-    assert exact >= config.MEMORY_INJECTION_CONFIDENT_THRESHOLD
+    assert exact >= _CONFIDENT_THRESHOLD
 
 
 @requires_model
 def test_unrelated_query_is_not_found(mg):
-    assert score(mg, "квантовая хромодинамика") < config.MEMORY_SEARCH_THRESHOLD
+    assert score(mg, "квантовая хромодинамика") < config.memory_search_threshold
 
 
 @requires_model
@@ -124,7 +132,7 @@ def test_proper_names_survive_without_semantics(mg):
     """
     mg.save_connection("меня зовут Паша Морозов", "приятно познакомиться",
                        weight=0.8, timestamp=0.0)
-    assert score(mg, "как зовут Морозова") >= config.MEMORY_SEARCH_THRESHOLD
+    assert score(mg, "как зовут Морозова") >= config.memory_search_threshold
 
 
 # ---------------------------------------------------------------------------

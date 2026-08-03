@@ -20,7 +20,12 @@
 """
 import pytest
 
-import config
+# Константы берутся из настроек БИБЛИОТЕКИ, а не из config витрины:
+# витрина уезжает в свой репозиторий, а проверка ядра обязана остаться
+# здесь и работать у всякого, кто поставил пакет.
+from selectivemem.settings import MemorySettings as _LibrarySettings
+
+config = _LibrarySettings()
 from selectivemem.database import Database
 from selectivemem.graph_memory import MemoryGraph
 

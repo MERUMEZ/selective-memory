@@ -18,7 +18,15 @@
 """
 import pytest
 
-import config
+# Ускорение субъективного времени — понятие ВИТРИНЫ: организм живёт
+# быстрее настенных часов, чтобы демонстрация не тянулась неделями. В
+# библиотеке время задаёт приложение через clock, поэтому здесь просто
+# множитель для перевода суток в секунды стенда.
+_TIME_ACCELERATION = 7.0
+
+from selectivemem.settings import MemorySettings as _LibrarySettings
+
+config = _LibrarySettings()
 from selectivemem.database import Database
 from selectivemem.graph_memory import MemoryGraph
 from selectivemem import embeddings
@@ -123,7 +131,7 @@ def test_superseded_node_is_weakened_not_deleted(mg):
     row = mg.db.get_node(node_id)
     assert row is not None, "вытесненный узел не должен удаляться"
     assert row["weight"] < before
-    assert row["stability"] <= config.STABILITY_INITIAL * 2
+    assert row["stability"] <= config.stability_initial * 2
 
 
 @requires_model
@@ -154,7 +162,7 @@ def test_time_separates_stale_from_current(mg):
     for i in range(3):
         mg.touch_node(fresh_id, timestamp=200.0 + i)
 
-    mg.apply_decay(now=300.0 + 3 * 86400 * config.TIME_ACCELERATION)
+    mg.apply_decay(now=300.0 + 3 * 86400 * _TIME_ACCELERATION)
 
     # МОДЕЛЬ СМЕНИЛАСЬ. Раньше здесь требовалось, чтобы устаревший факт
     # ИСЧЕЗ. Замер отменил: удаление по возрасту стоит 18.6 пункта полноты

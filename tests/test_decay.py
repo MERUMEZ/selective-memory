@@ -20,7 +20,12 @@ import math
 
 import pytest
 
-import config
+# Константы берутся из настроек БИБЛИОТЕКИ, а не из config витрины:
+# витрина уезжает в свой репозиторий, а проверка ядра обязана остаться
+# здесь и работать у всякого, кто поставил пакет.
+from selectivemem.settings import MemorySettings as _LibrarySettings
+
+config = _LibrarySettings()
 from selectivemem.database import Database
 from selectivemem.graph_memory import MemoryGraph
 
@@ -49,7 +54,7 @@ def test_node_decay_no_compounding(mg):
     row = mg.db.get_node(node_id)
     assert row is not None, "узел не должен быть забыт: корректный вес выше FORGET_THRESHOLD"
 
-    expected = 1.0 * math.exp(-config.DECAY_RATE * (n_ticks * tick) / config.AGE_T0)
+    expected = 1.0 * math.exp(-config.decay_rate * (n_ticks * tick) / config.age_t0)
     assert row["weight"] == pytest.approx(expected, rel=1e-6)
 
 
@@ -67,7 +72,7 @@ def test_edge_decay_no_compounding(mg):
     edges = mg.db.fetch_all_edges()
     assert len(edges) == 1, "ребро не должно быть забыто раньше срока"
 
-    expected = 0.5 * math.exp(-config.EDGE_DECAY_RATE * (n_ticks * tick) / config.AGE_T0)
+    expected = 0.5 * math.exp(-config.edge_decay_rate * (n_ticks * tick) / config.age_t0)
     assert edges[0]["weight"] == pytest.approx(expected, rel=1e-6)
 
 # ---------------------------------------------------------------------------
@@ -94,7 +99,7 @@ def test_touch_node_resets_decay_clock(mg):
     # эффект распределённого повторения (см. блок 7 ниже).
     stability_after_touch = row["stability"]
     assert stability_after_touch == pytest.approx(
-        config.STABILITY_INITIAL * config.STABILITY_GROWTH_FACTOR
+        config.stability_initial * config.stability_growth_factor
     )
 
     # dt=0 сразу после touch -> decay не должен ничего изменить
@@ -107,7 +112,7 @@ def test_touch_node_resets_decay_clock(mg):
     mg.apply_decay(now=1100.0)
     row = mg.db.get_node(node_id)
     expected = weight_after_first_decay * math.exp(
-        -config.DECAY_RATE * 100.0 / (config.AGE_T0 * stability_after_touch)
+        -config.decay_rate * 100.0 / (config.age_t0 * stability_after_touch)
     )
     assert row["weight"] == pytest.approx(expected, rel=1e-6)
 
@@ -188,7 +193,7 @@ def test_meta_node_decay_is_skipped_regardless_of_null(mg):
 
 
 # ---------------------------------------------------------------------------
-# 5. ЛЕКСИКА ЖИВЁТ НА СВОЕЙ ШКАЛЕ ВРЕМЕНИ (config.LEXICAL_AGE_T0).
+# 5. ЛЕКСИКА ЖИВЁТ НА СВОЕЙ ШКАЛЕ ВРЕМЕНИ (config.lexical_age_t0).
 #
 # Контекст: с единым AGE_T0=1час освоенное слово (weight 0.20) падало ниже
 # порога освоения за 6 часов паузы и УДАЛЯЛОСЬ из БД за ~28 часов. То есть
@@ -209,7 +214,7 @@ def test_lexical_nodes_decay_slower_than_episodic(mg, node_type):
     # Окно задаётся ОТНОСИТЕЛЬНО характерного времени эпизода, а не в
     # абсолютных сутках: иначе тест ломается при каждой перекалибровке
     # шкалы времени (так и случилось при переходе на когерентные часы).
-    window = 20 * config.AGE_T0
+    window = 20 * config.age_t0
     mg.apply_decay(now=window)
 
     lexical_weight = mg.db.get_node(lexical_id)["weight"]
@@ -218,10 +223,10 @@ def test_lexical_nodes_decay_slower_than_episodic(mg, node_type):
 
     # Обе кривые считаются по своей шкале времени
     assert lexical_weight == pytest.approx(
-        0.5 * math.exp(-config.DECAY_RATE * window / config.LEXICAL_AGE_T0), rel=1e-6
+        0.5 * math.exp(-config.decay_rate * window / config.lexical_age_t0), rel=1e-6
     )
     assert episodic_weight == pytest.approx(
-        0.5 * math.exp(-config.DECAY_RATE * window / config.AGE_T0), rel=1e-6
+        0.5 * math.exp(-config.decay_rate * window / config.age_t0), rel=1e-6
     )
 
     # Суть разделения: за 20 характерных времён эпизода слово почти не
@@ -239,8 +244,8 @@ def test_mastered_word_survives_a_weekend(mg):
     for i in range(3):
         word_id, _ = mg.db.upsert_lexical_node(
             "word", "мама",
-            initial_weight=config.WORD_NODE_INITIAL_WEIGHT,
-            reinforce_step=config.WORD_NODE_REINFORCE_STEP,
+            initial_weight=config.word_node_initial_weight,
+            reinforce_step=config.word_node_reinforce_step,
             timestamp=float(i),
         )
     assert mg.get_vocabulary_size() == 1, "три повторения должны давать освоенное слово"
@@ -293,7 +298,7 @@ def test_new_node_starts_with_initial_stability(mg):
     node_id = mg.db.insert_node(
         context="x", response="y", weight=0.8, timestamp=0.0, node_type="episodic"
     )
-    assert mg.db.get_node(node_id)["stability"] == pytest.approx(config.STABILITY_INITIAL)
+    assert mg.db.get_node(node_id)["stability"] == pytest.approx(config.stability_initial)
 
 
 def test_recall_grows_stability_up_to_the_cap(mg):
@@ -311,7 +316,7 @@ def test_recall_grows_stability_up_to_the_cap(mg):
     # Потолок: вечной памяти у организма быть не должно
     for i in range(100):
         mg.touch_node(node_id, timestamp=float(100 + i))
-    assert mg.db.get_node(node_id)["stability"] == pytest.approx(config.STABILITY_MAX)
+    assert mg.db.get_node(node_id)["stability"] == pytest.approx(config.stability_max)
 
 
 def test_recalled_memory_outlives_forgotten_one():
@@ -320,7 +325,7 @@ def test_recalled_memory_outlives_forgotten_one():
     потому, что к одному организм возвращался, а к другому нет.
     """
     # Тоже относительно характерного времени, а не в абсолютных неделях
-    long_silence = 80 * config.AGE_T0
+    long_silence = 80 * config.age_t0
 
     forgotten = MemoryGraph(db=Database(db_path=":memory:"))
     cold_id = forgotten.db.insert_node(
