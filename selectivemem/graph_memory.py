@@ -1243,9 +1243,23 @@ class MemoryGraph:
                 # its share made BOTH groups worse — a heavy node floats to
                 # the top of every query, including the ones it answers
                 # wrongly. Kept as the default until the re-rank is proven.
+                # В модели интерференции слагаемым идёт НАКОПЛЕННАЯ СИЛА, а
+                # не вес. Разница принципиальная: вес определяется возрастом
+                # (затухание встроено), поэтому он тянул выдачу к свежему —
+                # замерено, переупорядочивание по нему роняло R@1 с 32% до
+                # 18%. Сила часам не подчиняется и меняется только от
+                # подкрепления, пользы и ПОДАВЛЕНИЯ при проигрыше.
+                #
+                # Без этого провода подавление конкурентов бессмысленно:
+                # сила менялась бы, ни на что не влияя.
+                if self.settings.use_relative_strength:
+                    base = (row["strength"] if row["strength"] is not None
+                            else row["weight"]) / max(1e-9, self.settings.strength_max)
+                else:
+                    base = row["weight"]
                 combined_score = min(
                     1.0,
-                    relevance + row["weight"] * self.settings.memory_weight_influence,
+                    relevance + base * self.settings.memory_weight_influence,
                 )
 
             if combined_score >= effective_threshold:
@@ -1267,6 +1281,39 @@ class MemoryGraph:
 
         for match in top_matches:
             self.touch_node(match.id, timestamp=timestamp)
+
+        # ПОДАВЛЕНИЕ КОНКУРЕНТОВ. Кандидаты, которые прошли порог, но в
+        # выдачу не попали, слабеют.
+        #
+        # В психологии памяти это вызванное забывание: извлечение одного
+        # следа активно ТОРМОЗИТ соседние по признаку, и именно поэтому
+        # нужное остаётся находимым среди похожих. Забывание существует не
+        # ради места — долговременная память не переполняется, — а чтобы
+        # извлечение оставалось возможным.
+        #
+        # Замер, ради которого это сделано: на 50 почти-двойниках R@1
+        # падает со 100% до 50%, на 800 держится 50% при R@5 83.3%.
+        # Нужный узел ЛЕЖИТ в выдаче, но не первым — его топят соседи с
+        # теми же словами.
+        #
+        # Шаг маленький намеренно: одно извлечение не должно ничего
+        # решать. И риск честный — подавление ЗАКРЕПЛЯЕТ нынешний порядок,
+        # так что ошибка первого ранга самоподдерживается. У людей ровно
+        # так же; лечится это подкреплением, которое сильнее шага.
+        if self.settings.retrieval_suppression > 0.0 and top_matches:
+            winners = {m.id for m in top_matches}
+            losers = [m.id for m in scored if m.id not in winners]
+            for node_id in losers[: self.settings.retrieval_suppression_limit]:
+                self.db.add_strength(
+                    node_id,
+                    -self.settings.retrieval_suppression,
+                    self.settings.strength_max,
+                )
+            if losers:
+                logger.debug(
+                    "[SUPPRESSION] %d competitors weakened after retrieval",
+                    min(len(losers), self.settings.retrieval_suppression_limit),
+                )
 
         if top_matches:
             logger.info(

@@ -95,12 +95,17 @@ def build_distractors(rng: random.Random, count: int) -> List[str]:
     return out[:count]
 
 
-def run_once(seed: int, distractors: int, top_k: int) -> Dict[str, float]:
+def run_once(seed: int, distractors: int, top_k: int,
+             suppression: float = 0.0, rehearsals: int = 0) -> Dict[str, float]:
     rng = random.Random(seed)
     now = [1_700_000_000.0]
     memory = Memory(
         ":memory:",
-        settings=MemorySettings(delete_on_decay=False),
+        settings=MemorySettings(
+            delete_on_decay=False,
+            use_relative_strength=True,
+            retrieval_suppression=suppression,
+        ),
         clock=lambda: now[0],
     )
 
@@ -111,6 +116,12 @@ def run_once(seed: int, distractors: int, top_k: int) -> Dict[str, float]:
     for text in build_distractors(rng, distractors):
         memory.graph.save_connection(text, "понятно", weight=0.7, timestamp=now[0])
         now[0] += 60.0
+
+    # Подавление КОПИТСЯ: одно извлечение ничего не решает, как и у людей.
+    for _ in range(rehearsals):
+        for _fact, question in TARGETS:
+            memory.recall(question, top_k=top_k, timestamp=now[0],
+                          with_associations=False)
 
     hits_1 = hits_k = 0
     for fact, question in TARGETS:
@@ -132,6 +143,10 @@ def main() -> None:
     parser.add_argument("--levels", default="0,50,200,800")
     parser.add_argument("--seeds", default="1,7,13")
     parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--suppression", type=float, default=0.0,
+                        help="подавление проигравших конкурентов при извлечении")
+    parser.add_argument("--rehearsals", type=int, default=0,
+                        help="сколько раз спросить ДО замера: подавление копится")
     parser.add_argument("--logs", action="store_true")
     args = parser.parse_args()
 
@@ -150,7 +165,8 @@ def main() -> None:
     first = None
     last = None
     for level in levels:
-        rows = [run_once(seed, level, args.top_k) for seed in seeds]
+        rows = [run_once(seed, level, args.top_k, args.suppression, args.rehearsals)
+                for seed in seeds]
         r1 = statistics.mean(r["r1"] for r in rows)
         rk = statistics.mean(r["rk"] for r in rows)
         nodes = statistics.mean(r["nodes"] for r in rows)
