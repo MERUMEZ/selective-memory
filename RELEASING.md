@@ -30,9 +30,21 @@ repository in any form.
 
 ```bash
 ./venv/bin/python -m pytest tests/ -q
+./venv/bin/python tools/check_liveness.py       # exits non-zero on a dead mechanism
+./venv/bin/python tools/compare_interference.py
 ./venv/bin/python tools/compare_retention.py --balanced
 ./venv/bin/python tools/probe_semantic.py
 ```
+
+`check_liveness.py` exits non-zero when a mechanism stops firing OR keeps
+firing while doing nothing. Both have happened here and neither was
+caught by the test suite; treat a red run as a release blocker.
+
+**Check what a stranger gets, not what your machine gets.** The default
+path to the semantic model once pointed at the author's own disk, so
+semantics was off for every user and 23 tests passed only on one
+computer. Install the wheel into a clean virtualenv and confirm
+`stats().semantic` is True with the `[semantic]` extra and False without.
 
 If any numbers changed, update them in README, README.ru, AUDIT,
 COMMERCIAL and the docstrings. `tests/test_readme_examples.py` runs the

@@ -57,11 +57,31 @@ before and after, produced by a run, are. The repository has benchmarks
 for exactly that:
 
 ```bash
-python tools/simulate_learning.py --messages 120 --session-length 20 --gap-hours 8
+python tools/check_liveness.py          # does every mechanism still FIRE?
+python tools/compare_interference.py    # the niche: near-duplicates
 python tools/compare_retention.py --balanced
+python tools/compare_dialogue.py        # recall and write interleaved
 python tools/compare_memory.py --seed 42
+python tools/simulate_learning.py --messages 120 --session-length 20 --gap-hours 8
 python tools/probe_semantic.py
 ```
+
+**Run `check_liveness.py` first, and take a zero seriously.** Seven
+mechanisms in this project were described in the README, covered by green
+tests and never ran once in live use — none of them a coding error, each
+an interaction between a threshold and a decay rate that nobody had
+measured end to end. An ordinary test checks that a mechanism behaves
+correctly when called with suitable data; it does not check that such
+data ever arises.
+
+That bench counts OUTCOMES, not calls, and the distinction is not
+pedantic: consolidation was invoked faithfully and decided "do nothing"
+in 100% of cases, and the first version of the bench called it alive.
+
+**Before measuring any mechanism, check that it fires at all.** Four
+ablations in this project returned byte-identical numbers in a row
+because the mechanism under test was never triggered by the bench —
+"no difference" was read as "no use" every time.
 
 **A negative result is a result too, and it does not get thrown away.**
 `tools/compare_memory.py` used to show that the organism was no better
