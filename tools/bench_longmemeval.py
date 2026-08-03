@@ -173,6 +173,8 @@ def main() -> None:
                              "окружения: стенд строит Memory на MemorySettings, "
                              "а переменные идут в config — я дважды намерил "
                              "этим пустоту, прежде чем заметить")
+    parser.add_argument("--consolidate", action="store_true",
+                        help="включить консолидацию эпизодов в фасаде")
     parser.add_argument("--associate", type=int, default=None,
                         help="со сколькими вспомненными связывать запись; "
                              "БЕЗ ЭТОГО растекание бессмысленно — рёбер не будет")
@@ -239,6 +241,8 @@ def main() -> None:
         settings_kwargs["base_plasticity_threshold"] = args.plasticity
     if args.content_tokens is not None:
         settings_kwargs["surprise_full_content_tokens"] = args.content_tokens
+    if args.consolidate:
+        settings_kwargs["consolidate_from_stm"] = True
     if args.associate is not None:
         settings_kwargs["associate_recalled_limit"] = args.associate
     if args.capacity is not None:

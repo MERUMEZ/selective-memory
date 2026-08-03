@@ -90,7 +90,8 @@ FILLER = [
 ]
 
 
-def run_once(seed: int, associate: int, silence_days: float, top_k: int) -> Dict[str, float]:
+def run_once(seed: int, associate: int, silence_days: float, top_k: int,
+             spreading: bool = True) -> Dict[str, float]:
     """
     Один прогон разговора. Возвращает долю вопросов, на которые нужный
     факт нашёлся, и среднюю степень узлов — чтобы видеть, образовался
@@ -134,7 +135,7 @@ def run_once(seed: int, associate: int, silence_days: float, top_k: int) -> Dict
 
     hits = 0
     for fact, _bridge, question in TRIPLETS:
-        found = memory.recall(question, top_k=top_k, with_associations=True)
+        found = memory.recall(question, top_k=top_k, with_associations=spreading)
         texts = " | ".join(f"{m.context} {m.response}" for m in found)
         if fact.lower() in texts.lower():
             hits += 1
@@ -158,6 +159,9 @@ def main() -> None:
     parser.add_argument("--seeds", default="1,7,13,42,99")
     parser.add_argument("--silence-days", type=float, default=7.0)
     parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--no-spreading", action="store_true",
+                        help="связи создавать, но растекание при поиске выключить — "
+                             "так виден вклад ИМЕННО растекания, а не связей")
     parser.add_argument("--logs", action="store_true")
     args = parser.parse_args()
 
@@ -173,7 +177,8 @@ def main() -> None:
 
     results = {}
     for associate in (0, 3):
-        rows = [run_once(seed, associate, args.silence_days, args.top_k) for seed in seeds]
+        rows = [run_once(seed, associate, args.silence_days, args.top_k,
+                         spreading=not args.no_spreading) for seed in seeds]
         hit = statistics.mean(r["hit_rate"] for r in rows)
         deg = statistics.mean(r["mean_degree"] for r in rows)
         nodes = statistics.mean(r["nodes"] for r in rows)
