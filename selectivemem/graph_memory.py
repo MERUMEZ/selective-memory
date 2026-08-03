@@ -1045,6 +1045,20 @@ class MemoryGraph:
         self.db.update_weight(node_id, new_weight)
         self.db.update_stability(node_id, new_stability)
 
+        # ШТРАФ ОБЯЗАН ДОХОДИТЬ ДО ТОГО, ЧТО РЕШАЕТ ВЫДАЧУ. После перехода
+        # на модель интерференции ранжирование смотрит на накопленную силу,
+        # а вытеснение понижало только вес — и штраф перестал доходить.
+        #
+        # Тест поймал это сразу: на запрос "как зовут мою собаку" первым
+        # снова шёл устаревший "Рекс" вместо актуального "Бобика", то есть
+        # вернулась ровно та болезнь, ради которой механизм и написан.
+        if self.settings.use_relative_strength:
+            self.db.add_strength(
+                node_id,
+                -self.settings.contradiction_weight_penalty,
+                self.settings.strength_max,
+            )
+
         logger.info(
             "[SUPERSEDED] Node %s replaced by a newer version: weight %.3f -> %.3f, "
             "stability %.1f -> %.1f",

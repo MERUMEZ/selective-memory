@@ -336,12 +336,33 @@ def test_recalled_memory_outlives_forgotten_one():
         recalled.touch_node(warm_id, timestamp=float(i))
     recalled.apply_decay(now=long_silence)
 
-    assert forgotten.db.get_node(cold_id) is None, (
-        "невостребованный эпизод обязан забыться — экономия памяти это суть проекта"
-    )
+    # МОДЕЛЬ СМЕНИЛАСЬ, и утверждение вместе с ней. Раньше здесь стояло
+    # "невостребованный эпизод обязан ИСЧЕЗНУТЬ — экономия памяти это суть
+    # проекта". Замер показал, что удаление по возрасту стоит 18.6 пункта
+    # полноты на 500 вопросах LongMemEval: улики к вопросам о меняющихся
+    # фактах старше вопроса на 16 дней и стирались все до единой.
+    #
+    # Экономия памяти никуда не делась, но живёт теперь в двух других
+    # местах: спайк-гейт не пускает три четверти реплик, а переполнение
+    # ёмкости вытесняет наименее заслуживших. Возраст судьбу не решает.
+    #
+    # Свойство, ради которого тест написан, СОХРАНЯЕТСЯ: два одинаковых
+    # эпизода расходятся, потому что к одному возвращались. Только
+    # выражается это разницей силы, а не наличием строки в таблице.
+    cold_row = forgotten.db.get_node(cold_id)
     warm_row = recalled.db.get_node(warm_id)
-    assert warm_row is not None, "эпизод, к которому возвращались 10 раз, не должен исчезнуть"
-    assert warm_row["weight"] > config.FORGET_THRESHOLD
+    assert cold_row is not None, "узлы больше не удаляются по возрасту"
+    assert warm_row is not None
+
+    cold_strength = cold_row["strength"] or 0.0
+    warm_strength = warm_row["strength"] or 0.0
+    assert warm_strength > cold_strength, (
+        "эпизод, к которому возвращались 10 раз, обязан быть СИЛЬНЕЕ "
+        "невостребованного — иначе возвращение ничего не значит"
+    )
+    assert warm_row["weight"] > cold_row["weight"], (
+        "и заметнее при извлечении"
+    )
 
 
 def test_stability_survives_null_for_legacy_rows(mg):
