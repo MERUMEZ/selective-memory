@@ -118,6 +118,8 @@ def run(messages: int, seed: int) -> Dict[str, int]:
         rerank_band=0.05,
         memory_capacity=40,
         delete_on_decay=False,
+        contradiction_search_threshold=0.5,
+        consolidate_from_stm=True,
     )
     memory = Memory(":memory:", settings=settings, clock=lambda: now[0])
 

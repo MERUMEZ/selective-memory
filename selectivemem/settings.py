@@ -81,6 +81,17 @@ class MemorySettings:
     contradiction_search_threshold: float = 0.0
     # Сколько кандидатов брать из поиска при проверке на устаревание.
     contradiction_candidates: int = 5
+    # Включает КОНСОЛИДАЦИЮ в фасаде Memory: накапливать кратковременный
+    # буфер и по его заполнении сворачивать эпизод.
+    #
+    # Механизм был написан в пакете и не использовался им — consolidate_from_stm
+    # звала только витрина (core/brain_session.py). Библиотечный пользователь
+    # не получал ни абстрактных узлов, ни свёртки эпизодов, хотя они
+    # описаны как часть памяти. Найдено tools/check_liveness.py, который
+    # считает срабатывания механизмов: у консолидации был ноль.
+    #
+    # Тот же разряд расхождения витрины с пакетом, что и с ассоциациями.
+    consolidate_from_stm: bool = False
     contradiction_weight_penalty: float = 0.25
     decay_rate: float = 0.05
     # Fallback text for the "user model" meta-node. This is PERSONA

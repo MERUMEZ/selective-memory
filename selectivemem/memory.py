@@ -76,6 +76,7 @@ from selectivemem.graph_memory import MemoryGraph, MemoryMatch
 from selectivemem.plasticity import PlasticityDecision, PlasticityGate
 from selectivemem.reinforcement import ReinforcementLoop, ReinforcementOutcome
 from selectivemem.settings import MemorySettings
+from selectivemem.working_memory import WorkingMemory
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,12 @@ class Memory:
         # trace.node_ids: тот принадлежит уже созданному действию, а связывать
         # новый узел надо с тем, что было активно ДО его появления.
         self._recently_recalled: List[int] = []
+        # Кратковременная память фасада. Была написана в пакете и не
+        # использовалась им: консолидацию звала только витрина
+        # (core/brain_session.py), поэтому библиотечный пользователь её не
+        # получал вовсе — то же расхождение витрины с пакетом, что было с
+        # ассоциациями. Найдено tools/check_liveness.py.
+        self.stm = WorkingMemory(settings=self.settings)
 
     # ----------------------------------------------------------------------
     # 1. Observing
@@ -209,6 +216,23 @@ class Memory:
                 context=text, response=response, weight=weight, timestamp=ts,
             )
             self._associate_with_recalled(node_id, ts)
+
+        self._consolidation = None
+        if self.settings.consolidate_from_stm:
+            self.stm.add_message("user", text, emotion_score=emotion, timestamp=ts)
+            if response:
+                self.stm.add_message("bot", response, timestamp=ts)
+            if self.stm.is_full():
+                # Консолидация ТОЛЬКО по заполнению буфера. В витрине её
+                # когда-то дёргал ещё и спайк, и это вытирало
+                # кратковременную память ровно в тот момент, когда разговор
+                # становился интересным: замер показывал STM пустой после
+                # 39 сообщений из 40.
+                self._consolidation = self.graph.consolidate_from_stm(
+                    self.stm.consume_all(),
+                    timestamp=ts,
+                    already_captured_by_spike=node_id is not None,
+                )
 
         learned = self.graph.process_language_input(text, timestamp=ts)
 
