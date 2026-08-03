@@ -227,7 +227,15 @@ class Memory:
 
         self._consolidation = None
         if self.settings.consolidate_from_stm:
-            self.stm.add_message("user", text, emotion_score=emotion, timestamp=ts)
+            # Удивление передаётся ОБЯЗАТЕЛЬНО. У консолидации два входа —
+            # эмоция и удивление, — и без второго она глохнет у любого, кто
+            # не передаёт эмоцию, то есть у обычного библиотечного
+            # пользователя: emotion по умолчанию 0.0. Замер до правки:
+            # решение "routine_noise" при любой эмоции, причина
+            # "avg_surprise=0.000 — below both thresholds".
+            self.stm.add_message(
+                "user", text, emotion_score=emotion, perplexity=surprise, timestamp=ts,
+            )
             if response:
                 self.stm.add_message("bot", response, timestamp=ts)
             if self.stm.is_full():
