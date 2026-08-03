@@ -196,8 +196,21 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--session-length", type=int, default=20)
     parser.add_argument("--gap-hours", type=float, default=8.0)
+    parser.add_argument("--interference", action="store_true",
+                        help="модель интерференции: важность = доля силы, "
+                             "вытеснение по накопленной силе, без удаления по возрасту")
     parser.add_argument("--logs", action="store_true")
     args = parser.parse_args()
+
+    if args.interference:
+        # Решающий замер для всего замысла: единственный стенд, который
+        # ставит вопрос при РАВНОМ БЮДЖЕТЕ. Без ограничения хранилища
+        # несмещённый отбор непобедим по построению, и любая
+        # избирательность выглядит помехой — что все прочие стенды и
+        # показывали.
+        config.USE_RELATIVE_STRENGTH = True
+        config.DELETE_ON_DECAY = False
+        print(" Модель интерференции: важность = доля накопленной силы")
 
     install_llm_stub()
     random.seed(args.seed)
