@@ -396,8 +396,11 @@ def test_memory_node_count_ignores_lexical_infrastructure(mg):
     mg.db.insert_node(context="разговор", response="ответ", weight=0.8,
                       timestamp=0.0, node_type="episodic")
     mg.db.upsert_concept_node("кошка", "животное", weight=0.7, timestamp=0.0)
-    from core.persona_memory import PersonaMemory
-    PersonaMemory(memory=mg).ensure_self_and_user_nodes()
+    # Мета-узлы создаются НАПРЯМУЮ через библиотечный upsert_meta_node, а не
+    # через PersonaMemory витрины: проверяется поведение count_memory_nodes,
+    # и тащить ради двух строк зависимость от приложения незачем.
+    mg.db.upsert_meta_node(node_type="self_model", content="я организм", weight=1.0)
+    mg.db.upsert_meta_node(node_type="user_model", content="собеседник", weight=1.0)
     for token in ("мама", "мыла", "раму", "папа", "чинил"):
         mg.db.upsert_lexical_node("word", token, initial_weight=0.12,
                                   reinforce_step=0.04, timestamp=0.0)
