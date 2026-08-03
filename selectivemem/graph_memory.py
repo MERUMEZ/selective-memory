@@ -2312,6 +2312,29 @@ class MemoryGraph:
                 weight=self.settings.stm_structural_weight,
                 timestamp=timestamp,
             )
+            # СВЁРТКА УСТУПАЕТ ПОДРОБНОСТИ. Свёрнутый эпизод — это восемь
+            # обменов в одном узле: он широко совпадает почти с любым
+            # запросом и занимает первое место, вытесняя настоящую улику.
+            # Замер: R@1 падает с 76% до 42% при буфере 16 и до 52% при
+            # буфере 4, а R@5 и R@10 почти не страдают — улика остаётся в
+            # выдаче, её просто оттесняют сверху.
+            #
+            # Понижение силы делает абстракцию тем, чем она является у
+            # людей: схемой, которая всплывает, КОГДА ПОДРОБНОСТЬ УЖЕ
+            # НЕДОСТУПНА. "Мы обсуждали лекарства" вспоминается тогда,
+            # когда "азитромицин" уже нет.
+            #
+            # Сила при этом может отрасти от пользы: схема, к которой
+            # постоянно обращаются, законно становится сильной.
+            if node_id is not None and self.settings.consolidated_strength_factor < 1.0:
+                row = self.db.get_node(node_id)
+                if row is not None:
+                    base = row["strength"] if row["strength"] is not None else row["weight"]
+                    self.db.add_strength(
+                        node_id,
+                        base * (self.settings.consolidated_strength_factor - 1.0),
+                        self.settings.strength_max,
+                    )
             logger.info(
                 "[CONSOLIDATION] Structural node id=%s weight=%.3f (avg_perplexity=%.3f)",
                 node_id, self.settings.stm_structural_weight, avg_perplexity,

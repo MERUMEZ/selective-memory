@@ -384,6 +384,19 @@ class MemorySettings:
     stm_capacity: int = 16
     stm_emotional_threshold: float = 0.6
     stm_structural_threshold: float = 0.55
+    # Во сколько раз слабее рождается СВЁРНУТЫЙ эпизод по сравнению с
+    # обычной записью.
+    #
+    # Замер, ради которого поле появилось: включённая консолидация роняет
+    # R@1 с 76% до 42% (буфер 16) и до 52% (буфер 4), почти не трогая R@5
+    # и R@10. То есть улика остаётся в памяти, но свёртка оттесняет её
+    # сверху: восемь обменов в одном узле совпадают почти с любым
+    # запросом.
+    #
+    # Единица возвращает прежнее поведение — свёртка на равных с
+    # подробностью. Меньшее значение делает её тем, чем схема является у
+    # людей: она всплывает, когда подробность уже недоступна.
+    consolidated_strength_factor: float = 1.0
     stm_structural_weight: float = 0.5
     # How many content words an utterance needs to surprise at full
     # strength. Below that, surprise is scaled down proportionally.
