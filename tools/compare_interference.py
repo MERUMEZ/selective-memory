@@ -27,8 +27,23 @@
 Прогон со случайным шумом показал бы ровно ничего и был бы пятым пустым
 замером за две сессии.
 
+ВТОРОЙ ВОПРОС, И ОН ЧУТЬ НЕ ОСТАЛСЯ БЕЗ ОТВЕТА: что решает выдачу —
+вес узла или накопленная сила. Долгое время стенд отвечал на него
+неверно, потому что писал ВСЕ узлы с одним весом 0.7 и не подкреплял ни
+одного. При равных силах слагаемое одинаково у всех кандидатов и лишь
+сдвигает счёт целиком; переставить оно не может ничего. Включение и
+выключение ранжирования по силе давало побайтово одинаковые числа, и
+разница «плюс 33 пункта» попала в аудит, ничем не будучи измерена.
+
+Теперь `--compare-strength` подкрепляет шесть фактов — так, как их
+отметило бы приложение, — и разница видна:
+
+    важность из веса узла        44.4%  44.4%  61.1%   (50, 200, 800)
+    важность из накопленной силы 88.9%  94.4% 100.0%
+
 Запуск:
     python tools/compare_interference.py
+    python tools/compare_interference.py --compare-strength
     python tools/compare_interference.py --levels 0,100,400,1600
 ================================================================================
 """
@@ -96,26 +111,44 @@ def build_distractors(rng: random.Random, count: int) -> List[str]:
 
 
 def run_once(seed: int, distractors: int, top_k: int,
-             suppression: float = 0.0, rehearsals: int = 0) -> Dict[str, float]:
+             suppression: float = 0.0, rehearsals: int = 0,
+             reinforce: float = 0.0, use_strength: bool = True) -> Dict[str, float]:
     rng = random.Random(seed)
     now = [1_700_000_000.0]
     memory = Memory(
         ":memory:",
         settings=MemorySettings(
             delete_on_decay=False,
-            use_relative_strength=True,
+            use_relative_strength=use_strength,
             retrieval_suppression=suppression,
         ),
         clock=lambda: now[0],
     )
 
     # Факты записываются ПЕРВЫМИ, дальше их заваливает похожим.
+    target_ids = []
     for fact, _ in TARGETS:
-        memory.graph.save_connection(fact, "понятно", weight=0.7, timestamp=now[0])
+        target_ids.append(
+            memory.graph.save_connection(fact, "понятно", weight=0.7, timestamp=now[0])
+        )
         now[0] += 60.0
     for text in build_distractors(rng, distractors):
         memory.graph.save_connection(text, "понятно", weight=0.7, timestamp=now[0])
         now[0] += 60.0
+
+    # ПОДКРЕПЛЕНИЕ. Без него все узлы имеют одну и ту же силу, и
+    # ранжирование по силе не может ничего переставить: слагаемое одинаково
+    # у всех и лишь сдвигает счёт целиком. Прежняя версия стенда этого не
+    # делала — и её сравнение «вес против силы» давало ПОБАЙТОВО одинаковые
+    # числа, которые попали в аудит как «плюс 33 пункта».
+    #
+    # Здесь важное отмечается ровно так, как это сделало бы приложение:
+    # пользователь вернулся к теме, и она заработала себе силу.
+    if reinforce > 0.0:
+        for node_id in target_ids:
+            if node_id is not None:
+                memory.graph.db.add_strength(node_id, reinforce,
+                                             memory.settings.strength_max)
 
     # Подавление КОПИТСЯ: одно извлечение ничего не решает, как и у людей.
     for _ in range(rehearsals):
@@ -147,6 +180,11 @@ def main() -> None:
                         help="подавление проигравших конкурентов при извлечении")
     parser.add_argument("--rehearsals", type=int, default=0,
                         help="сколько раз спросить ДО замера: подавление копится")
+    parser.add_argument("--reinforce", type=float, default=0.0,
+                        help="добавить силы шести фактам: без этого силы у всех "
+                             "узлов равны и ранжировать по ней нечего")
+    parser.add_argument("--compare-strength", action="store_true",
+                        help="таблица «вес против силы» при подкреплённых фактах")
     parser.add_argument("--logs", action="store_true")
     args = parser.parse_args()
 
@@ -165,7 +203,8 @@ def main() -> None:
     first = None
     last = None
     for level in levels:
-        rows = [run_once(seed, level, args.top_k, args.suppression, args.rehearsals)
+        rows = [run_once(seed, level, args.top_k, args.suppression, args.rehearsals,
+                         args.reinforce)
                 for seed in seeds]
         r1 = statistics.mean(r["r1"] for r in rows)
         rk = statistics.mean(r["rk"] for r in rows)
@@ -185,6 +224,29 @@ def main() -> None:
     else:
         print(" Конкуренция при извлечении ЕСТЬ. Избирательность окупается на")
         print(" объёмах, и её надо усиливать, а не изобретать.")
+
+    if args.compare_strength:
+        # ОТДЕЛЬНАЯ ТАБЛИЦА, И ТОЛЬКО С ПОДКРЕПЛЕНИЕМ. Сравнивать вес с
+        # силой на узлах равной силы бессмысленно: обе ветки дают
+        # одинаковый ответ, и это уже однажды приняли за результат.
+        print()
+        print("=" * 70)
+        print(" ЧТО РЕШАЕТ ВЫДАЧУ: ВЕС УЗЛА ИЛИ НАКОПЛЕННАЯ СИЛА")
+        print("=" * 70)
+        print(" Шесть фактов подкреплены, отвлекающие — нет. Проверяется, умеет")
+        print(" ли память поднять важное над однословными двойниками.")
+        print("-" * 70)
+        print(f" {'важность из':<22} " + " ".join(f"{f'R@1 при {l}':>13}" for l in levels))
+        for label, use_strength in (("веса узла", False), ("накопленной силы", True)):
+            cells = []
+            for level in levels:
+                vals = [run_once(seed, level, args.top_k, args.suppression,
+                                 args.rehearsals, reinforce=0.8,
+                                 use_strength=use_strength)["r1"]
+                        for seed in seeds]
+                cells.append(f"{statistics.mean(vals)*100:12.1f}%")
+            print(f" {label:<22} " + " ".join(cells))
+        print("=" * 70)
 
 
 if __name__ == "__main__":

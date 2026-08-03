@@ -415,7 +415,7 @@ understood: the mechanism was not firing, and "no difference" was read as
 "no use".
 
 Its haystacks are also topically DIVERSE, so retrieval interference
-barely occurs — see §4.6, where the same system gains 33 points once the
+barely occurs — see §4.6, where the same system gains 44 to 50 points once the
 store is full of near-duplicates. This benchmark systematically
 understates selectivity because it measures it where it is not needed.
 
@@ -498,19 +498,39 @@ level; the conclusion "storage is free, forgetting cannot be sold" was
 one sentence away from being written into the strategy. What saved it was
 noticing that 100% at ZERO distractors is a ceiling, not a result.
 
-**Ranking by accumulated strength recovers most of it.** Replacing node
-weight — which is dominated by age, because decay is built into it —
-with strength, which no clock touches:
+**Ranking by accumulated strength recovers all of it — but only when
+strength has something to tell apart.** Replacing node weight, which is
+dominated by age, with strength, which no clock touches, on a run where
+the six facts have been reinforced (`--compare-strength`):
 
-| Importance from | R@1 at 200 | R@1 at 800 |
-|---|---:|---:|
-| node weight | 50.0% | 50.0% |
-| **accumulated strength** | **83.3%** | **83.3%** |
+| Importance from | R@1 at 50 | R@1 at 200 | R@1 at 800 |
+|---|---:|---:|---:|
+| node weight | 44.4% | 44.4% | 61.1% |
+| **accumulated strength** | **88.9%** | **94.4%** | **100.0%** |
 
-+33 points. On LongMemEval the same change moves nothing at all (76.0%
-both ways), because there are no near-duplicates there to tell apart.
-That contrast is the product's niche stated as a measurement: one user,
-one subject returned to for months — not a store of unrelated topics.
+With navec, the Russian model, the separation is cleaner still: 50.0%
+against 100.0% at all three levels. The mechanism does not depend on
+which encoder is installed.
+
+THIS ENTRY USED TO READ "+33 points, 83.3% against 50.0%", and that
+number has been withdrawn as unmeasured. The bench wrote EVERY node at
+the same weight of 0.7 and never reinforced any of them. With equal
+strengths the term is identical for all candidates and merely shifts
+every score together — it cannot reorder anything. The check showed
+exactly that: strength ranking switched on and off produced BYTE-
+IDENTICAL numbers. This is the fifth instance of the defect class
+described in 2.13, and the same habit caught it — look at whether the
+mechanism fired before believing "no difference".
+
+The bench is fixed: the six facts now earn strength the way an
+application would mark them, and the difference became both reproducible
+and twice as large.
+
+On LongMemEval the same change moves nothing at all (76.0% both ways),
+because there are no near-duplicates there to tell apart and nothing is
+reinforced during ingestion. That contrast is the product's niche stated
+as a measurement: one user, one subject returned to for months — not a
+store of unrelated topics.
 
 ### 4.4 Reproducibility of the measurements
 
