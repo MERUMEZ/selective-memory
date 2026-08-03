@@ -129,6 +129,43 @@ def _load_model():
             logger.info("[EMBEDDINGS] Disabled by settings — search stays lexical")
             return None
 
+        # NO FILE CONFIGURED — try the model the [semantic] extra installs.
+        #
+        # Until now this branch simply gave up, so `pip install
+        # selective-memory[semantic]` bought the user nothing: they still
+        # had to find a model file, download it and write its path into
+        # settings, which nobody does. The default path, meanwhile, pointed
+        # at the author's own machine — semantics was off for everyone else
+        # and said nothing about it.
+        #
+        # model2vec fetches potion-base-8M on first use (30 MB) and needs
+        # no path. OFFLINE DEPLOYMENTS — games, embedded — must either
+        # pre-fetch it or pass their own encoder to Memory(encoder=...);
+        # the library will not reach for the network behind their back on
+        # a machine that has none, it will just stay lexical and say so.
+        if not _settings.embedding_model_path:
+            try:
+                from model2vec import StaticModel
+            except ImportError:
+                _load_failed = True
+                logger.warning(
+                    "[EMBEDDINGS] No model configured and model2vec is absent — "
+                    "search matches by shared words only. "
+                    "pip install selective-memory[semantic]"
+                )
+                return None
+            try:
+                _model = StaticModel.from_pretrained("minishlab/potion-base-8M")
+            except Exception as exc:  # noqa: BLE001
+                _load_failed = True
+                logger.warning(
+                    "[EMBEDDINGS] Could not load potion-base-8M (%s) — "
+                    "search stays lexical", exc,
+                )
+                return None
+            logger.info("[EMBEDDINGS] Model loaded: potion-base-8M")
+            return _model
+
         try:
             from navec import Navec
         except ImportError:
@@ -190,6 +227,16 @@ def encode(text: str):
         return None
 
     import numpy as np
+
+    # ДВА РАЗНЫХ ИНТЕРФЕЙСА. navec ведёт себя как словарь "слово ->
+    # вектор", и фраза собирается усреднением слов — оттого и отсев
+    # служебных слов ниже. model2vec кодирует строку целиком и делает
+    # усреднение сам.
+    if hasattr(model, "encode"):
+        words = _content_words(text)
+        if not words:
+            return None
+        return model.encode([" ".join(words)])[0]
 
     vectors = [model[w] for w in _content_words(text) if w in model]
     if not vectors:
