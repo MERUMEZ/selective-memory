@@ -112,7 +112,20 @@ class PlasticityGate:
         load: float = 0.0,
     ) -> PlasticityDecision:
         """Density against the threshold. Logs both outcomes, not just spikes."""
-        density = (emotion * 0.5) + (surprise * 0.5)
+        if self.settings.gate_emotion_gain > 0.0:
+            # МОДУЛЯЦИЯ, А НЕ СРЕДНЕЕ. Норадреналин не складывается с
+            # новизной — он УМНОЖАЕТ пластичность, которую новизна уже
+            # открыла. Событие страшное, но привычное, и событие
+            # безразличное, но небывалое, получали одинаковую оценку;
+            # в мозге это разные вещи.
+            #
+            # Новизна остаётся основанием, эмоция только усиливает. Иначе
+            # произведение обнулило бы гейт у любого, кто не передаёт
+            # эмоцию, — а по умолчанию она 0.0, то есть у обычного
+            # библиотечного пользователя.
+            density = surprise * (1.0 + emotion * self.settings.gate_emotion_gain)
+        else:
+            density = (emotion * 0.5) + (surprise * 0.5)
         threshold = self.effective_threshold(load)
         is_spike = density >= threshold
 
