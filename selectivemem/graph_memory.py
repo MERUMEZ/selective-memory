@@ -1651,6 +1651,28 @@ class MemoryGraph:
             # recalled, even though it was not found directly by score.
             self.touch_node(neighbor_row["id"], timestamp=timestamp)
 
+            # AND THE ROAD TAKEN IS KEPT CLEAR. Spreading activation used to
+            # read an edge's weight and never write to it, so an edge had no
+            # way of registering that it had been USEFUL. Only co-occurrence
+            # at write time could strengthen one.
+            #
+            # That is what made aggressive pruning impossible: cutting edges
+            # hard would have severed the working paths along with the dead
+            # ones, because nothing told them apart.
+            #
+            # Biology puts the limit here rather than on storage. Long-term
+            # memory does not fill up; what the brain prunes, expensively and
+            # continuously, is CONNECTIONS. A memory is lost by becoming
+            # unreachable, not by being erased — the classmate's name you
+            # cannot recall but recognise on sight.
+            if self.settings.edge_use_boost > 0.0:
+                self.connect_nodes(
+                    node_id, neighbor_row["id"],
+                    weight_boost=self.settings.edge_use_boost,
+                    timestamp=timestamp,
+                    edge_type="association",
+                )
+
         return results
 
     # ----------------------------------------------------------------------
