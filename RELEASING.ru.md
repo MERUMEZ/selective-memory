@@ -28,12 +28,23 @@
 ## Проверка перед каждым релизом
 
 ```bash
-./venv/bin/python -m pytest tests/ -q
-./venv/bin/python tools/check_liveness.py       # ненулевой код на мёртвом механизме
-./venv/bin/python tools/compare_interference.py            # все тесты
+./venv/bin/python -m pytest tests/ -q                       # все тесты
+./venv/bin/python tools/check_liveness.py                   # мёртвые механизмы
+./venv/bin/python tools/compare_interference.py             # ниша: двойники
 ./venv/bin/python tools/compare_retention.py --balanced
 ./venv/bin/python tools/probe_semantic.py
 ```
+
+`check_liveness.py` возвращает ненулевой код, когда механизм перестал
+срабатывать ИЛИ продолжает срабатывать вхолостую. Случалось и то, и
+другое, и ни разу это не поймал набор тестов; красный прогон — повод
+задержать релиз.
+
+**Проверяйте, что получает ЧУЖОЙ, а не своя машина.** Путь к
+семантической модели по умолчанию указывал на диск автора: семантика
+была выключена у всех пользователей, а 23 теста проходили на одном
+компьютере. Поставьте колесо в чистое окружение и убедитесь, что
+`stats().semantic` возвращает True с экстрой `[semantic]` и False без неё.
 
 Если менялись числа — обновить их в README, AUDIT, COMMERCIAL и
 докстрингах. `tests/test_readme_examples.py` проверяет примеры README

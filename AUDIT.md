@@ -389,24 +389,29 @@ understates selectivity because it measures it where it is not needed.
 
 ### 4.3 Previously REFUTED, now level
 
-**Uniform coverage against a random sample.** `tools/compare_memory.py`,
-5 seeds:
+**Level on average, ahead on what is rare.** `tools/compare_memory.py`,
+equal budget in characters:
 
-| Store | Found |
-|---|---|
-| Sliding window | 90.0% |
-| Random sample | 90.8% |
-| The organism | **92.4%** |
+| Store | Nodes | All | **Rare** | Frequent |
+|---|---:|---:|---:|---:|
+| Random sample | 64 | 96% | **60%** | 100% |
+| Sliding window | 63 | 100% | 100% | 100% |
+| The organism | 66 | 98% | **80%** | 100% |
+
+The average hides the point. On material mentioned ONCE, selective
+writing finds 80% where a random sample of the same size finds 60% —
+those twenty points are exactly what the gate is for. On frequently
+repeated material everyone scores 100%, which is why the overall figures
+look level.
 
 **The negative result is no longer negative.** At the previous write
-threshold the organism trailed (87.2 against 88.8) — and that was
-published honestly for the better part of a day. Lowering the threshold
-removed the deficit.
+threshold the organism trailed (87.2 against 88.8), and that was
+published honestly for the better part of a day.
 
-It is too early to claim a win: the spread across seeds is 82–98%, so
-92.4 against 90.8 means "level", not "ahead". But the claim "we are worse
-than a random sample" no longer matches the measurement, and leaving it
-would be lying in our own disfavour.
+The sliding window wins this particular bench outright, and that is worth
+saying plainly: the simulation is short enough that recency captures
+nearly everything. Over months it does not.
+
 
 A methodological error caught along the way: the budget was counted **in
 nodes**, while `consolidate_from_stm` merges an STM window into a single

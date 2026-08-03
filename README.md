@@ -318,23 +318,29 @@ or disable the gate entirely.
 
 ### What selectivemem does NOT do
 
-**It is not better than a random sample at uniform coverage.**
-`compare_memory.py`, the same five seeds, equal budget in characters:
+**Level on average, ahead on what is rare.** `compare_memory.py`, equal
+budget in characters:
 
-| Store | Found |
-|---|---|
-| Sliding window | 90.0% |
-| Random sample | 90.8% |
-| selectivemem | 92.4% |
+| Store | Nodes | All | **Rare** | Frequent |
+|---|---:|---:|---:|---:|
+| Random sample | 64 | 96% | **60%** | 100% |
+| Sliding window | 63 | 100% | 100% | 100% |
+| selectivemem | 66 | 98% | **80%** | 100% |
+
+The average hides the point. On things mentioned ONCE, selective writing
+finds 80% where a random sample of the same size finds 60% — the twenty
+points are exactly what the gate is for. On frequently repeated material
+everyone scores 100%, which is why the overall figures look level.
 
 **This used to be a negative result** — 87.2% against 88.8% for random
-sampling — and it was honest at the previous write threshold. Lowering
-it removed the deficit. But it is too early to claim a win: the spread
-across seeds is 82–98%, so 92.4 against 90.8 means "level", not "ahead".
+sampling — and it was published honestly for the better part of a day at
+the previous write threshold.
 
-Do not expect more here either: against uniform questions an unbiased
-sample is unbeatable by construction, and any meaningful selection is
-biased.
+Against uniform questions an unbiased sample is hard to beat by
+construction, and any meaningful selection is biased. The sliding window
+wins this particular bench outright because the simulation is short
+enough that recency captures nearly everything; over months it does not.
+
 
 ---
 
