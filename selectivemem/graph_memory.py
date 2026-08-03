@@ -1688,6 +1688,14 @@ class MemoryGraph:
                                  how often the memory PROVED USEFUL;
             spike_strength     — how hard the event hit when it happened.
         """
+        if self.settings.use_relative_strength:
+            # В модели интерференции заслуга УЖЕ НАКОПЛЕНА в strength:
+            # туда сложились и одобрение, и польза от каждого извлечения, и
+            # сила рождения. Складывать те же слагаемые второй раз незачем,
+            # а главное — сюда не просачивается возраст, потому что часы
+            # силу не трогают.
+            return float(row["strength"] if row["strength"] is not None else row["weight"])
+
         expectation = max(0.0, row["reward_expectation"] or 0.0)
         stability = (row["stability"] or self.settings.stability_initial)
         stability_norm = min(1.0, stability / max(1e-9, self.settings.stability_max))

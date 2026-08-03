@@ -173,6 +173,9 @@ def main() -> None:
                              "окружения: стенд строит Memory на MemorySettings, "
                              "а переменные идут в config — я дважды намерил "
                              "этим пустоту, прежде чем заметить")
+    parser.add_argument("--interference", action="store_true",
+                        help="модель интерференции: важность = доля накопленной "
+                             "силы, часы на неё не влияют")
     parser.add_argument("--consolidate", action="store_true",
                         help="включить консолидацию эпизодов в фасаде")
     parser.add_argument("--associate", type=int, default=None,
@@ -241,6 +244,8 @@ def main() -> None:
         settings_kwargs["base_plasticity_threshold"] = args.plasticity
     if args.content_tokens is not None:
         settings_kwargs["surprise_full_content_tokens"] = args.content_tokens
+    if args.interference:
+        settings_kwargs["use_relative_strength"] = True
     if args.consolidate:
         settings_kwargs["consolidate_from_stm"] = True
     if args.associate is not None:

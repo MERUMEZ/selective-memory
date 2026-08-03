@@ -270,6 +270,8 @@ def main() -> None:
                              "переносится из удаления в ранжирование")
     parser.add_argument("--haystack", type=int, default=200,
                         help="сколько посторонних фраз подмешать. Без стога\n                             стенд меряет пустоту: на двадцати узлах каждый\n                             вопрос находит ответ первым за неимением соперников")
+    parser.add_argument("--interference", action="store_true",
+                        help="модель интерференции: важность = доля силы")
     parser.add_argument("--logs", action="store_true")
     args = parser.parse_args()
 

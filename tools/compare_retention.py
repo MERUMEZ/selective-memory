@@ -253,6 +253,8 @@ def main() -> None:
                              "стенд строит память через BrainSession, а тот берёт "
                              "настройки из config — мимо этого моста замер молча "
                              "покажет умолчание")
+    parser.add_argument("--interference", action="store_true",
+                        help="модель интерференции: важность = доля силы")
     parser.add_argument("--logs", action="store_true")
     args = parser.parse_args()
 
@@ -262,6 +264,10 @@ def main() -> None:
     if args.floor_base is not None:
         config.MEMORY_FLOOR_BASE = args.floor_base
         print(f" Базовый пол угасания: {args.floor_base}")
+
+    if args.interference:
+        config.USE_RELATIVE_STRENGTH = True
+        print(" Модель интерференции: важность = доля накопленной силы")
 
     seeds = [int(s) for s in args.seeds.split(",")]
     totals: Dict[str, Dict[str, List[float]]] = {}
