@@ -173,6 +173,8 @@ def main() -> None:
                              "окружения: стенд строит Memory на MemorySettings, "
                              "а переменные идут в config — я дважды намерил "
                              "этим пустоту, прежде чем заметить")
+    parser.add_argument("--stm", type=int, default=None,
+                        help="ёмкость кратковременного буфера; у человека ~4 чанка")
     parser.add_argument("--gate-gain", type=float, default=None,
                         help="эмоция УМНОЖАЕТ новизну вместо среднего")
     parser.add_argument("--interference", action="store_true",
@@ -246,6 +248,8 @@ def main() -> None:
         settings_kwargs["base_plasticity_threshold"] = args.plasticity
     if args.content_tokens is not None:
         settings_kwargs["surprise_full_content_tokens"] = args.content_tokens
+    if args.stm is not None:
+        settings_kwargs["stm_capacity"] = args.stm
     if args.gate_gain is not None:
         settings_kwargs["gate_emotion_gain"] = args.gate_gain
     if args.interference:

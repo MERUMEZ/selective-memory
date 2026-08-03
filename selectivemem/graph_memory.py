@@ -2270,7 +2270,18 @@ class MemoryGraph:
             )
 
         max_emotion = max(e.emotion_score for e in entries)
-        avg_perplexity = sum(e.perplexity for e in entries) / len(entries)
+
+        # Среднее удивление берётся ТОЛЬКО по репликам собеседника.
+        # Ответы бота попадают в буфер с нулевым удивлением — оно и
+        # считается лишь для входящего текста, — поэтому усреднение по
+        # всему буферу делило результат пополам: 0.523 превращалось в
+        # 0.26, и порог 0.55 не брался НИКОГДА.
+        #
+        # Замер на настоящем разговоре: медиана среднего удивления эпизода
+        # 0.523, порог 0.55 сворачивает треть эпизодов. При усреднении по
+        # всему буферу сворачивалось ноль.
+        speaker_entries = [e for e in entries if e.role != "bot"] or entries
+        avg_perplexity = sum(e.perplexity for e in speaker_entries) / len(speaker_entries)
 
         packed_context, packed_response = self._pack_episode(entries)
 
