@@ -28,7 +28,9 @@
 ## Проверка перед каждым релизом
 
 ```bash
-./venv/bin/python -m pytest tests/ -q            # все тесты
+./venv/bin/python -m pytest tests/ -q
+./venv/bin/python tools/check_liveness.py       # ненулевой код на мёртвом механизме
+./venv/bin/python tools/compare_interference.py            # все тесты
 ./venv/bin/python tools/compare_retention.py --balanced
 ./venv/bin/python tools/probe_semantic.py
 ```
