@@ -29,9 +29,26 @@ meaning in that search at all.
 THE CHOICE OF MODEL was dictated by hardware, not taste.
 sentence-transformers pulls in torch: ~2.5 GB on disk and 0.5-1 GB of RAM
 per process. This machine has 3.7 GB in total with ~1.8 GB free and three
-other services running — such a neighbour would take them down. So navec
-is used (from the natasha project): static Russian vectors, a 51 MB
-quantised model, ~370 MB of RAM, no torch.
+other services running — such a neighbour would take them down. Both
+supported models are static: no torch, tens of megabytes, no GPU.
+
+TWO MODELS, AND THE LANGUAGE DECIDES WHICH. `[semantic]` installs
+model2vec/potion-base-8M — 30 MB, fetched on first use, no path to
+configure, ENGLISH. `[semantic-ru]` installs navec (natasha project) —
+51 MB quantised, ~370 MB of RAM, Russian, and it wants
+embedding_model_path pointed at the downloaded file.
+
+Getting this wrong is not a matter of degree. Measured over four related
+and four unrelated word pairs:
+
+    English text, potion-base-8M:  related 0.651  unrelated 0.013
+    Russian text, potion-base-8M:  related 0.685  unrelated 0.661
+
+On English it separates cleanly (cat/kitten 0.686 against cat/concrete
+0.009). On Russian it puts кот/бетон at 0.803 — ABOVE кот/кошка at 0.643.
+That is noise, and noise is worse than the lexical fallback, which at
+least never invents a match. The docstring below still describes navec
+because the phrase-averaging and function-word notes are specific to it.
 
 FUNCTION WORDS ARE DROPPED, and that is not a detail. A phrase vector is
 the mean over its words, so "у меня есть" ("I have") drowns out the one
@@ -64,13 +81,21 @@ embeddings are disabled by settings, encode() returns None and
 MemoryGraph.search keeps working on the previous string similarity. A bot
 must not fall over because an optional 51 MB file is absent.
 
+NUMPY IS OPTIONAL TOO, and that took a clean-environment run to notice.
+to_blob/from_blob/cosine used to import numpy unconditionally, so the
+very path the README invites people onto — bring your own encoder, keep
+the zero-dependency install — died with ModuleNotFoundError. They now
+fall back to array("f") and plain arithmetic: slower, present.
+
 LOADS LAZILY: the model comes up on first use rather than at import, so a
 process that does not need semantics (tests, benchmarks, the memory
 inspector) does not pay for it in RAM.
 ================================================================================
 """
 
+import math
 import threading
+from array import array
 from typing import List, Optional, Sequence
 
 from selectivemem.settings import MemorySettings
@@ -107,6 +132,12 @@ def configure(settings: MemorySettings) -> None:
 _model = None
 _load_failed = False
 _lock = threading.Lock()
+
+# Кэш ответа на вопрос «есть ли numpy». _UNSET отличает «ещё не проверяли»
+# от «проверили, нету»: без этого отсутствие numpy стоило бы неудачного
+# импорта на каждом сравнении векторов.
+_UNSET = object()
+_NUMPY = _UNSET
 
 
 def _load_model():
@@ -151,7 +182,9 @@ def _load_model():
                 logger.warning(
                     "[EMBEDDINGS] No model configured and model2vec is absent — "
                     "search matches by shared words only. "
-                    "pip install selective-memory[semantic]"
+                    "pip install selective-memory[semantic] — for Russian text "
+                    "take [semantic-ru] instead, the default model is English "
+                    "and scores unrelated Russian words as high as related ones"
                 )
                 return None
             try:
@@ -172,7 +205,7 @@ def _load_model():
             _load_failed = True
             logger.warning(
                 "[EMBEDDINGS] navec is not installed — search stays lexical. "
-                "pip install navec numpy"
+                "pip install selective-memory[semantic-ru]"
             )
             return None
 
@@ -245,33 +278,72 @@ def encode(text: str):
     return np.mean(vectors, axis=0)
 
 
+def _numpy():
+    """
+    numpy if it is installed, otherwise None.
+
+    Kept lazy on purpose: importing numpy costs about a tenth of a second,
+    and a package that promises zero dependencies has no business paying
+    that at import time for users who never touch semantics.
+    """
+    global _NUMPY
+    if _NUMPY is _UNSET:
+        try:
+            import numpy as np
+            _NUMPY = np
+        except ImportError:
+            _NUMPY = None
+    return _NUMPY
+
+
 def cosine(a, b) -> float:
     """Cosine similarity of two vectors; 0.0 for degenerate inputs."""
     if a is None or b is None:
         return 0.0
 
-    import numpy as np
+    np = _numpy()
+    if np is not None:
+        norm = float(np.linalg.norm(a) * np.linalg.norm(b))
+        if norm <= 0.0:
+            return 0.0
+        return float(np.dot(a, b) / norm)
 
-    norm = float(np.linalg.norm(a) * np.linalg.norm(b))
+    # Pure-Python path. Slower, but the alternative is a crash on the very
+    # thing the README invites people to do — plug in their own encoder.
+    dot = sum(float(x) * float(y) for x, y in zip(a, b))
+    norm = math.sqrt(sum(float(x) * float(x) for x in a)) * \
+        math.sqrt(sum(float(y) * float(y) for y in b))
     if norm <= 0.0:
         return 0.0
-    return float(np.dot(a, b) / norm)
+    return dot / norm
 
 
 def to_blob(vector) -> Optional[bytes]:
     """Vector -> BLOB for storage in SQLite."""
     if vector is None:
         return None
-    import numpy as np
-    return np.asarray(vector, dtype=np.float32).tobytes()
+    np = _numpy()
+    if np is not None:
+        return np.asarray(vector, dtype=np.float32).tobytes()
+    return array("f", (float(x) for x in vector)).tobytes()
 
 
 def from_blob(blob: Optional[bytes]):
-    """BLOB from SQLite -> vector. None when the field is absent or empty."""
+    """
+    BLOB from SQLite -> vector. None when the field is absent or empty.
+
+    Without numpy the result is an array("f"), which indexes, iterates and
+    reports its length like a sequence of floats — everything the ranking
+    code asks of a vector.
+    """
     if not blob:
         return None
-    import numpy as np
-    return np.frombuffer(blob, dtype=np.float32)
+    np = _numpy()
+    if np is not None:
+        return np.frombuffer(blob, dtype=np.float32)
+    vector = array("f")
+    vector.frombytes(blob)
+    return vector
 
 
 def similarity(text: str, blob: Optional[bytes]) -> float:

@@ -22,6 +22,17 @@
 import pytest
 
 from selectivemem import Memory, MemorySettings
+from selectivemem import embeddings
+
+# Проверка опирается на СЕМАНТИКУ: запрос сформулирован другими словами,
+# чем сохранённый текст. Без модели поиск честно отвечает пустотой и сам
+# об этом предупреждает в логе — это заявленная деградация, а не поломка.
+# Без этой отметки чистая установка без extras давала девять красных
+# тестов и создавала впечатление сломанного пакета.
+requires_model = pytest.mark.skipif(
+    not embeddings.is_available(),
+    reason="запрос сформулирован иначе, чем запись: нужна семантическая модель",
+)
 
 YEAR = 365 * 86400
 
@@ -46,6 +57,7 @@ def _run(praises: int, floor: float = 0.25, years: float = 1.0):
     return row
 
 
+@requires_model
 def test_unpraised_memory_yields_to_praised():
     """
     Пол не делает память бессмертной — но и уходит она теперь не сама.
@@ -77,6 +89,7 @@ def test_praised_memory_survives_a_year():
     assert row["weight"] > 0.0
 
 
+@requires_model
 def test_floor_is_earned_not_granted():
     """
     Высота пола растёт с одобрением. Это и отличает наш пол от заданного
@@ -107,6 +120,7 @@ def test_floor_never_raises_weight():
     memory.close()
 
 
+@requires_model
 def test_floor_can_be_switched_off():  # noqa: D401
     """
     Нулевой пол возвращает прежнее поведение: подкреплённое живёт дольше

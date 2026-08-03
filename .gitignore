@@ -65,3 +65,38 @@ storage/bench/
 
 # Инструкции для агента — к продукту отношения не имеют
 CLAUDE.md
+
+# --- Витрина: уехала в свой репозиторий ---
+# github.com/MERUMEZ/mindnumbness — телеграм-бот, характер, речевые стадии,
+# мини-приложение. Она ПОТРЕБИТЕЛЬ этого пакета, а не его часть: ставит
+# selective-memory через pip и живёт своей жизнью.
+#
+# Файлы перечислены здесь, а не удалены с диска, по одной причине: на этой
+# машине витрина работает прямо отсюда, и снос каталогов уронил бы живого
+# бота. Для репозитория библиотеки их нет; на сервере они лежат, пока
+# развёртывание не переведут на новый репозиторий.
+core/
+services/
+deploy/
+storage/utils/
+bot.py
+config.py
+DEMO.md
+requirements.txt
+tools/miniapp.py
+tools/render_memory.py
+tools/simulate_learning.py
+tests/test_arousal.py
+tests/test_attachment.py
+tests/test_babbling.py
+tests/test_brain_clock.py
+tests/test_correction_session.py
+tests/test_dashboard.py
+tests/test_demo_commands.py
+tests/test_exploration.py
+tests/test_mood_appraisal.py
+tests/test_one_word_stage.py
+tests/test_reward_prediction.py
+tests/test_session_concurrency.py
+tests/test_settings.py
+tests/test_miniapp_auth.py

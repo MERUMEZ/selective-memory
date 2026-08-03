@@ -33,6 +33,17 @@
 import pytest
 
 from selectivemem import Memory, MemorySettings
+from selectivemem import embeddings
+
+# Проверка опирается на СЕМАНТИКУ: запрос сформулирован другими словами,
+# чем сохранённый текст. Без модели поиск честно отвечает пустотой и сам
+# об этом предупреждает в логе — это заявленная деградация, а не поломка.
+# Без этой отметки чистая установка без extras давала девять красных
+# тестов и создавала впечатление сломанного пакета.
+requires_model = pytest.mark.skipif(
+    not embeddings.is_available(),
+    reason="запрос сформулирован иначе, чем запись: нужна семантическая модель",
+)
 
 NOISE = [
     "вчера был сильный дождь",
@@ -63,6 +74,7 @@ def _superseded_contexts(memory, old: str, new: str):
     ("я работаю программистом", "я теперь работаю дизайнером"),
     ("мой рейс в четверг", "рейс перенесли на субботу"),
 ])
+@requires_model
 def test_update_in_the_users_own_words_is_caught(old, new):
     """Человек сообщает об изменении как ему удобно, а не по шаблону."""
     memory = _memory()

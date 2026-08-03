@@ -42,17 +42,33 @@ works.
 
 ```
 pip install selective-memory              # core, zero dependencies
-pip install selective-memory[semantic]    # + meaning-based search
+pip install selective-memory[semantic]    # + meaning-based search (English)
+pip install selective-memory[semantic-ru] # + meaning-based search (Russian)
 ```
 
 86 KB wheel, standard library and sqlite3. The name on PyPI is free; no
 release has been published yet.
 
-**If you work in English, read this before anything else.** The bundled
-semantic model is Russian, so for English text there is effectively no
-meaning-based search at all — matching falls back to shared words. The
-example above works because "allergic" appears in both the query and the
-note; ask for "allergy" instead and you get nothing.
+**Pick the extra that matches your language — the difference is not
+subtle.** `[semantic]` brings potion-base-8M, which fetches itself on
+first use (30 MB) and is an *English* model. Measured on four related and
+four unrelated word pairs:
+
+| | related pairs | unrelated pairs | separation |
+|---|---|---|---|
+| English | 0.651 | 0.013 | **+0.638** |
+| Russian | 0.685 | 0.661 | **+0.024** |
+
+In English the model tells `cat`/`kitten` (0.686) from `cat`/`concrete`
+(0.009) cleanly. In Russian it rates `кот`/`бетон` at 0.803 — *higher*
+than `кот`/`кошка` at 0.643. That is not weak performance, it is noise:
+for Russian text this model is worse than no model, because the
+lexical fallback at least never claims a false match. Use
+`[semantic-ru]`, which brings navec, or attach your own encoder.
+
+Without any extra, search matches by shared words and says so in the log.
+The example above works because "allergic" appears in both the query and
+the note; ask for "allergy" instead and you get nothing.
 
 This is not fine print. Plan on attaching your own encoder from day one
 (see [below](#the-encoder-sets-the-language-and-the-domain)); everything

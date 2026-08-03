@@ -271,6 +271,37 @@ Nothing is deleted by age any more. The limit sits where biology puts it:
 on the way in (the gate takes a quarter) and on the connections, which
 grow over when unused.
 
+### 2.15 The package broke where it promised to work without dependencies
+
+Found by installing into a CLEAN environment — a check that did not exist
+before. The suite was green on a machine where everything is installed.
+
+**numpy was secretly required.** `to_blob`, `from_blob` and `cosine`
+imported it unconditionally. The README meanwhile invites you to attach
+YOUR OWN encoder and promises a zero-dependency install — and precisely
+that path died with `ModuleNotFoundError` on the first write. The promise
+was false for the one case it was made for. There is now a fallback on
+`array("f")` and plain arithmetic: slower, present. Ranking in the same
+situation silently zeroed semantics with a working encoder and live
+vectors; it now computes pairwise.
+
+**`[semantic]` installed the wrong model.** The extra named navec, left
+over from when the library was Russian-only, while the code had long
+defaulted to model2vec. Anyone following the hint printed by our own
+warning got a package that is never used, and no way to tell.
+
+**The English model on Russian is noise.** Measured over four related and
+four unrelated pairs: separation +0.638 in English, +0.024 in Russian.
+`кот`/`бетон` scores 0.803, `кот`/`кошка` 0.643. That is worse than no
+model, because the lexical path at least never invents a match. Split
+into `[semantic]` (English) and `[semantic-ru]` (navec), with the numbers
+written into both READMEs. The `embeddings.py` header described navec as
+the bundled model and was wrong — rewritten.
+
+Nine tests failed rather than skipped on a clean install: they rely on
+semantics but carried no marker. A new user would have seen nine red
+tests and concluded the package was broken.
+
 ## 3. What remains
 
 ### 3.1 Defects

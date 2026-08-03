@@ -30,9 +30,19 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-# Semantic search. Without it memory matches by string similarity and
-# keeps working — the degradation is graceful, not a failure.
-semantic = ["navec>=0.10", "numpy>=1.24"]
+# Semantic search. Without it memory matches by shared words and keeps
+# working — the degradation is graceful, and it says so in the log.
+#
+# THE NAME HERE HAS TO MATCH WHAT THE CODE ACTUALLY LOADS. This line used
+# to say navec, left over from when the library was Russian-only, while
+# embeddings.py had already moved to model2vec as the default. Anyone
+# following the instruction printed in our own warning would have
+# installed navec, got no semantics, and had nothing to go on.
+semantic = ["model2vec>=0.3", "numpy>=1.24"]
+# navec is the Russian alternative: 51 MB, word-level, and it needs
+# embedding_model_path pointed at the downloaded file. model2vec fetches
+# potion-base-8M itself and covers English.
+semantic-ru = ["navec>=0.10", "numpy>=1.24"]
 dev = ["pytest>=8.0"]
 
 [project.urls]

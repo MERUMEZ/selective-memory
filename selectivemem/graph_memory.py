@@ -1157,9 +1157,19 @@ class MemoryGraph:
 
         semantic_scores = [0.0] * len(rows)
         if query_vector is not None and rows:
-            try:
-                import numpy as np
-
+            np = embeddings._numpy()
+            if np is None:
+                # Без numpy семантика раньше молча обнулялась, и поиск
+                # деградировал до строкового БЕЗ ЕДИНОГО СЛОВА в логе — при
+                # том что энкодер работал и вектора были. Считаем поштучно:
+                # медленнее, но отвечает на вопрос, который задали.
+                for index, row in enumerate(rows):
+                    vector = self._node_vector(row)
+                    if vector is not None:
+                        semantic_scores[index] = max(
+                            0.0, embeddings.cosine(query_vector, vector)
+                        )
+            else:
                 vectors = [self._node_vector(row) for row in rows]
                 known = [i for i, v in enumerate(vectors) if v is not None]
                 if known:
@@ -1170,8 +1180,6 @@ class MemoryGraph:
                         sims = np.where(norms > 0.0, matrix @ q / norms, 0.0)
                     for position, index in enumerate(known):
                         semantic_scores[index] = max(0.0, float(sims[position]))
-            except ImportError:
-                pass
 
         if len(rows) <= candidate_limit:
             return list(zip(rows, keyword_scores, semantic_scores))
@@ -1244,7 +1252,7 @@ class MemoryGraph:
                 "[SEARCH] No semantics available — matching by shared words only. "
                 "A query worded differently from the stored text will find nothing. "
                 "Attach an encoder: MemoryGraph(encoder=...) or "
-                "pip install selective-memory[semantic]"
+                "pip install selective-memory[semantic] ([semantic-ru] for Russian)"
             )
 
         # ------------------------------------------------------------------
