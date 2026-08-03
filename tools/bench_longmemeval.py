@@ -78,7 +78,8 @@ def build_encoder(kind: str):
     raise SystemExit(f"неизвестный кодировщик: {kind}")
 
 
-def run_instance(instance: Dict, encoder, mode: str, settings_kwargs: Dict) -> Optional[Dict]:
+def run_instance(instance: Dict, encoder, mode: str, settings_kwargs: Dict,
+                 associations: bool = False) -> Optional[Dict]:
     """
     Прогоняет один вопрос: скармливает стог, спрашивает, считает попадания.
 
@@ -136,7 +137,12 @@ def run_instance(instance: Dict, encoder, mode: str, settings_kwargs: Dict) -> O
         memory.forget(now=asked_at)
 
     found = memory.recall(
-        instance["question"], top_k=max(KS), timestamp=asked_at, with_associations=False,
+        instance["question"], top_k=max(KS), timestamp=asked_at,
+        # Растекание активации ВЫКЛЮЧЕНО по умолчанию — так стенд жил с
+        # самого начала, и это оказалось слепой зоной: ни один из пяти
+        # стендов проекта его не включал, то есть механизм с 1348
+        # срабатываниями за разговор ни разу не был измерен.
+        with_associations=associations,
     )
     ranked_sessions = [node_session.get(m.id) for m in found]
 
@@ -167,6 +173,8 @@ def main() -> None:
                              "окружения: стенд строит Memory на MemorySettings, "
                              "а переменные идут в config — я дважды намерил "
                              "этим пустоту, прежде чем заметить")
+    parser.add_argument("--associations", action="store_true",
+                        help="включить растекание активации при поиске")
     parser.add_argument("--capacity", type=int, default=None,
                         help="сколько воспоминаний держать; 0 = без предела")
     parser.add_argument("--keep-all", action="store_true",
@@ -266,7 +274,8 @@ def main() -> None:
     stored = turns = counted = 0
 
     for index, instance in enumerate(data, start=1):
-        outcome = run_instance(instance, encoder, args.mode, settings_kwargs)
+        outcome = run_instance(instance, encoder, args.mode, settings_kwargs,
+                               associations=args.associations)
         if outcome is None:
             continue
         counted += 1
