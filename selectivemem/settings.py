@@ -173,7 +173,16 @@ class MemorySettings:
     edge_initial_weight: float = 0.2
     edge_max_hop_nodes: int = 3
     embeddings_enabled: bool = True
-    embedding_model_path: str = '/var/www/mindnumbness/storage/models/navec_hudlit_v1_12B_500K_300d_100q.tar'
+    # Путь к файлу модели navec. ПУСТО ПО УМОЛЧАНИЮ, и это исправление
+    # неловкого дефекта: здесь стоял абсолютный путь на машину
+    # разработчика (/var/www/mindnumbness/...), то есть семантика не
+    # работала НИ У КОГО, кроме автора. Проверено на чистом окружении
+    # после pip install: stats().semantic возвращал False всегда.
+    #
+    # Модель в пакет не входит и не должна: 51 МБ в колесе ради одного
+    # языка. Приложение либо указывает путь, либо — что правильнее —
+    # передаёт свой кодировщик через Memory(encoder=...).
+    embedding_model_path: str = ''
     forget_threshold: float = 0.05
     lexical_acquisition_enabled: bool = True
     lexical_age_t0: float = 2592000.0
