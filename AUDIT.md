@@ -210,6 +210,67 @@ so this does not make memory immortal.
 
 ---
 
+### 2.13 Seven mechanisms that were described, tested, and never ran
+
+Found over two days, all of them covered by green tests and named in the
+README. This is the single most useful finding in the file, because it is
+a PATTERN rather than seven accidents.
+
+**No edges were created between memories at all.** 201 nodes, 0 edges.
+The library never linked episodes; the edges visible in the demo are
+created by the showcase, which orchestrates recall and write together. So
+spreading activation — advertised as multi-hop retrieval and occupying a
+fair share of the search code — had nothing to travel along.
+
+**A fresh edge was born inactive.** Weight 0.150 against an activation
+threshold of 0.3: zero edges of twenty-seven above the bar. To take part
+in retrieval a link had to be reinforced; to be reinforced it had to fire.
+
+**Surviving that, an edge went quiet after five days** while remaining in
+the database — below the activation threshold, above the deletion one.
+The same disease, deferred.
+
+**Deletion by age erased the evidence** for every knowledge-update
+question, 12 nodes of 12, while removing only a tenth of memory.
+
+**Consolidation and sleep were unreachable from the library.** Both are
+written IN the package and were called only by the showcase.
+
+**Supersession only caught near-verbatim restatements.** It fired on the
+examples in its own docstring (0.923, 0.952) and missed how people
+actually report a change: "I moved to Piter" against "I live in Moscow"
+scores 0.369.
+
+**What they have in common** is that none is a coding error. Each is an
+interaction between a threshold and a decay rate that nobody had measured
+end to end. Ordinary tests cannot catch this class: a test checks that a
+mechanism behaves correctly when called with suitable data, not that such
+data ever arises in live use.
+
+`tools/check_liveness.py` exists for exactly that, and it counts OUTCOMES
+rather than calls — because a mechanism can be invoked faithfully and
+decide "do nothing" every single time, which consolidation did in 100% of
+cases while the first version of the bench called it alive.
+
+### 2.14 Forgetting was a clock; it should have been competition
+
+`weight` was doing three jobs: recency (it decayed), importance (praise
+raised it) and retrieval strength (it was a term in the score). Nearly
+every defect above grew out of that conflation. Re-ranking BY IMPORTANCE
+turned out to be re-ranking BY AGE, and widening its band dropped R@1
+from 32% to 18%.
+
+Split into three: `strength` accumulates from approval and from proving
+useful and NO CLOCK TOUCHES IT; `weight` means recency; the share of
+strength among candidates decides retrieval. Forgetting becomes losing a
+competition rather than running out of time — which is also the better
+supported account of human forgetting: we lose memories mostly because
+new learning competes with them.
+
+Nothing is deleted by age any more. The limit sits where biology puts it:
+on the way in (the gate takes a quarter) and on the connections, which
+grow over when unused.
+
 ## 3. What remains
 
 ### 3.1 Defects
@@ -239,22 +300,34 @@ so this does not make memory immortal.
 
 ### 4.1 Confirmed
 
-**Forgetting is selective by the importance the user assigns.**
-`tools/compare_retention.py`, 5 seeds, 14 days of silence, with message
+**Complete recall on two thirds of the storage.**
+`tools/compare_retention.py`, 3 seeds, 14 days of silence, with message
 volume held equal (`--balanced`):
 
-| Store | Praised | Ordinary | Gap |
-|---|---|---|---|
-| Sliding window | 77% | 70% | +7% |
-| Random sample | 43% | 50% | −7% |
-| **The organism** | **100%** | **60%** | **+40%** |
+| Store | Nodes | Important | Ordinary |
+|---|---:|---:|---:|
+| Random sample | 52 | 56% | 67% |
+| Sliding window | 49 | 100% | 94% |
+| **The organism** | **34** | **100%** | **100%** |
 
-The volume confound was tested and rejected — that is what "held equal"
-means here: both groups produce the same number of messages, so
-reinforcement is doing the work rather than the important topic simply
-occupying more STM windows. Without that control the gap is +30 pp
-(100% against 70%). For the naive stores it is near zero either way:
-they know nothing about praise.
+The advantage comes from the WRITE GATE, not from deleting: a quarter of
+the turns are taken in, and that quarter turns out to contain the
+answers. A random sample holding half again as much finds six in ten.
+
+**A CLAIM WITHDRAWN, AND THIS IS THE MOST IMPORTANT ENTRY IN THIS FILE.**
+This table used to read 100% praised against 60% ordinary — a gap of
++40 pp — and that gap was the project's headline argument for a year.
+
+It was measured honestly and it meant something other than advertised.
+Investigation showed the memory was NOT ranking praised material higher.
+It was deleting the rest. The moment deletion by age was prevented — by
+any means, floor or capacity — the gap collapsed to zero while retrieval
+IMPROVED by 18.6 points on 500 external questions.
+
+So the number was real and the interpretation was wrong: it measured the
+cost of erasure, not the value of selection. Anyone who reruns
+`compare_retention.py` today sees +0, and the honest claim is the table
+above: fewer nodes, complete recall.
 
 **Also confirmed:**
 - surprise falls with experience: 0.750 → 0.278
@@ -265,24 +338,54 @@ they know nothing about praise.
 
 ### 4.2 External benchmark: LongMemEval
 
-The first number not from our own corpus. 60 questions, a haystack of
-~48 sessions each, recall@k — comparable with what the neighbours
-publish.
+The first number not from our own corpus. **All 500 questions**, a
+haystack of ~48 sessions each, recall@k — comparable with what the
+neighbours publish. Stock settings, no flags.
 
-| Mode | Stored | R@1 | R@5 | R@10 |
-|---|---|---|---|---|
-| working, threshold 0.35 (before) | 5.5% | 13.3% | **18.3%** | 18.3% |
-| working, threshold 0.25 (now) | 24.6% | 60.0% | **68.0%** | 72.0% |
-| archive | 49.6% | 76.7% | **91.7%** | 96.7% |
+| Mode | Stored | R@1 | R@5 |
+|---|---|---|---|
+| threshold 0.35, deletion on (a year ago) | 5.5% | 13.3% | **18.3%** |
+| threshold 0.25, deletion on | 24.8% | 50.8% | **64.8%** |
+| **stock today** | 24.7% | 66.6% | **84.0%** |
+| archive (no gate, no forgetting) | 49.6% | 76.7% | **93.2%** |
 
-The first run showed 18.3% and looked like a verdict. The ablation
-explained it: retrieval is competitive (91.7%), and what ruined the
-number was the write policy — the gate stored one exchange in nine.
+Two calibrations moved this number, and both were forced by measurement
+rather than chosen.
 
-**The write threshold was calibrated a third time, and for the first time
-against external data.** 0.35 → 0.25 triples recall while retention does
-not move (thresholds 0.20/0.25/0.30/0.35 gave +47/+50/+53/+50 — noise).
-As a side effect the deficit on uniform coverage disappeared (see §4.3).
+**The write threshold, 0.35 → 0.25.** Tripled recall while retention did
+not move (0.20/0.25/0.30/0.35 gave +47/+50/+53/+50 — noise).
+
+**Deletion by age, removed entirely: +18.6 points.** The diagnosis is in
+§2.13. Note what this means about the earlier framing: for a year the
+project described the 28-point gap to `archive` as "the price of our
+forgetting policy". Two thirds of that price was not selectivity at all,
+it was age-based erasure, and removing it cost nothing.
+
+By question type, since the average hides the interesting part:
+
+| Type | n | R@5 | archive |
+|---|---:|---:|---:|
+| single-session-assistant | 56 | 96.4% | 98.2% |
+| multi-session | 133 | 93.3% | 94.2% |
+| knowledge-update | 78 | 88.4% | 98.9% |
+| temporal-reasoning | 133 | 82.6% | 91.0% |
+| single-session-user | 70 | 68.6% | 92.9% |
+| single-session-preference | 30 | 49.6% | 76.8% |
+
+**What this benchmark CANNOT show, and it took four empty measurements to
+learn.** LongMemEval loads a haystack with `observe()` and calls `recall`
+exactly once, at the end. Nothing is ever reinforced and nothing is
+recalled during ingestion. So associations never form, spreading
+activation has nothing to travel along, accumulated strength never grows
+above its birth value, and consolidation is never exercised. Four
+ablations in a row returned byte-identical numbers before the cause was
+understood: the mechanism was not firing, and "no difference" was read as
+"no use".
+
+Its haystacks are also topically DIVERSE, so retrieval interference
+barely occurs — see §4.6, where the same system gains 33 points once the
+store is full of near-duplicates. This benchmark systematically
+understates selectivity because it measures it where it is not needed.
 
 ### 4.3 Previously REFUTED, now level
 
@@ -313,6 +416,46 @@ naive stores were being given three times less memory.
 **Conclusion:** this is not a system for exhaustive search. Against
 uniform questions an unbiased sample is unbeatable by construction. The
 domain of application is "hold on to what matters", not "lose nothing".
+
+### 4.6 Where selectivity actually pays: near-duplicates
+
+`tools/compare_interference.py`. The same six facts, buried under a
+growing pile of NEAR-DUPLICATES — same words, different subject: "my dog
+is called Rex" against "the neighbour's dog is called Rex".
+
+| Distractors | Nodes | R@1 | R@5 |
+|---:|---:|---:|---:|
+| 0 | 6 | 100.0% | 100.0% |
+| 50 | 56 | 50.0% | 100.0% |
+| 200 | 206 | 50.0% | 91.7% |
+| 800 | 806 | 50.0% | 83.3% |
+
+**Storage is not free.** R@1 halves at fifty look-alikes: the answer is
+still in the store — R@10 barely moves — but it is pushed off the top by
+neighbours sharing its vocabulary. In memory research this is cue
+overload, and it is why forgetting exists in people at all: not to free
+space, which long-term memory does not lack, but to keep retrieval
+possible.
+
+The FIRST version of this bench nearly said the opposite. Its distractors
+shared one or two words with the facts and produced a flat 100% at every
+level; the conclusion "storage is free, forgetting cannot be sold" was
+one sentence away from being written into the strategy. What saved it was
+noticing that 100% at ZERO distractors is a ceiling, not a result.
+
+**Ranking by accumulated strength recovers most of it.** Replacing node
+weight — which is dominated by age, because decay is built into it —
+with strength, which no clock touches:
+
+| Importance from | R@1 at 200 | R@1 at 800 |
+|---|---:|---:|
+| node weight | 50.0% | 50.0% |
+| **accumulated strength** | **83.3%** | **83.3%** |
+
++33 points. On LongMemEval the same change moves nothing at all (76.0%
+both ways), because there are no near-duplicates there to tell apart.
+That contrast is the product's niche stated as a measurement: one user,
+one subject returned to for months — not a store of unrelated topics.
 
 ### 4.4 Reproducibility of the measurements
 
