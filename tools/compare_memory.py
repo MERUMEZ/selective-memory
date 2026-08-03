@@ -76,21 +76,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 if "--logs" not in sys.argv:
     os.environ["LOG_LEVEL"] = "ERROR"
 
-# СТЕНД ВСЕГДА МЕРИТ ИССЛЕДОВАТЕЛЬСКУЮ КОНФИГУРАЦИЮ.
-#
-# SPEECH_DEMO_PACE ускоряет речевые стадии для показа, но при этом
-# ИСКАЖАЕТ измерение: организм раньше выходит на генерацию, чаще
-# обращается к памяти, всё подряд получает стабильность — и
-# избирательность удержания исчезает. Замер показал 100% против 100%
-# (разрыв +0) вместо честных 97% против 43% — разрыва в полсотни
-# пунктов.
-#
-# Ускорять демонстрацию можно, мерить ускоренную — нельзя: это другая
-# система. Поэтому темп прибит здесь, до импорта config.
-os.environ.setdefault("SPEECH_DEMO_PACE", "false")
 
 
-import config  # noqa: E402
 from tools.simulate_learning import (  # noqa: E402
     CORPUS,
     build_message_stream,
@@ -285,6 +272,9 @@ def build_realistic_stream(n_messages: int, rng: random.Random) -> List[str]:
     return stream[:n_messages]
 
 
+OVERRIDES: Dict[str, object] = {}
+
+
 class _LibraryRun:
     """
     Тонкая обёртка, чтобы стенд говорил с библиотекой теми же словами,
@@ -343,8 +333,8 @@ def main() -> None:
         # несмещённый отбор непобедим по построению, и любая
         # избирательность выглядит помехой — что все прочие стенды и
         # показывали.
-        config.USE_RELATIVE_STRENGTH = True
-        config.DELETE_ON_DECAY = False
+        OVERRIDES["use_relative_strength"] = True
+        OVERRIDES["delete_on_decay"] = False
         print(" Модель интерференции: важность = доля накопленной силы")
 
     install_llm_stub()
@@ -354,7 +344,7 @@ def main() -> None:
     # ЧЕРЕЗ БИБЛИОТЕКУ, А НЕ ЧЕРЕЗ ВИТРИНУ. Витрина считает эмоцию сама
     # и зовёт save_connection напрямую, минуя Memory.observe(), поэтому
     # прежние числа описывали конфигурацию, которой у покупателя нет.
-    from selectivemem import Memory
+    from selectivemem import Memory, MemorySettings
 
     stream = build_realistic_stream(args.messages, rng)
 
@@ -378,7 +368,9 @@ def main() -> None:
     # Часы стенда НЕ идут сами: паузы задаются явно, иначе два прогона
     # одного кода расходятся на длительности самого прогона.
     _now = [1_700_000_000.0]
-    session = _LibraryRun(Memory(":memory:", clock=lambda: _now[0]), _now)
+    session = _LibraryRun(
+        Memory(":memory:", settings=MemorySettings(**OVERRIDES),
+               clock=lambda: _now[0]), _now)
     exchanges: List[Tuple[str, str]] = []
     for i, text in enumerate(stream, start=1):
         response = session.process_message(text)

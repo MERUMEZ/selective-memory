@@ -62,11 +62,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 if "--logs" not in sys.argv:
     os.environ["LOG_LEVEL"] = "ERROR"
 
-# Та же причина, что в compare_retention: ускоренный показ — другая
-# система, и мерить её нельзя. Ставится до импорта config.
-os.environ.setdefault("SPEECH_DEMO_PACE", "false")
 
-import config  # noqa: E402
 # is_hit намеренно НЕ используется: его мягкость (половина значимых слов)
 # засчитывала один узел сразу трём темам. См. _is_topic ниже.
 from tools.compare_retention import (  # noqa: E402
@@ -108,6 +104,10 @@ GENERAL_QUERIES = [
 ]
 
 TOP_K = 10
+
+# Переопределения из командной строки идут в MemorySettings, а не в
+# config: после перевода на библиотеку правка config ни на что не влияет.
+OVERRIDES: Dict[str, object] = {}
 
 # СТОГ. Без него стенд бессмыслен: на двадцати узлах каждый вопрос находит
 # свой ответ первым просто потому, что соперников нет, и MRR выходит
@@ -204,10 +204,11 @@ def run_once(seed: int, rounds: int, silence_days: float, balanced: bool,
     # прежние числа описывали конфигурацию, которой у покупателя нет.
     # Оценку важности здесь даёт feedback(+1.0) — ровно так, как это
     # делало бы приложение.
-    from selectivemem import Memory
+    from selectivemem import Memory, MemorySettings
 
     now = [1_700_000_000.0]
-    memory = Memory(":memory:", clock=lambda: now[0])
+    memory = Memory(":memory:", settings=MemorySettings(**OVERRIDES),
+                    clock=lambda: now[0])
 
     # Темы перемешаны со стогом: иначе конкурировать не с чем.
     stream = [(text, praise) for text, praise in build_stream(rng, rounds)]
@@ -280,12 +281,12 @@ def main() -> None:
     parser.add_argument("--logs", action="store_true")
     args = parser.parse_args()
 
-    config.MEMORY_FLOOR_BASE = args.floor_base
+    OVERRIDES["memory_floor_base"] = args.floor_base
     if args.rerank_band is not None:
-        config.RERANK_BAND = args.rerank_band
+        OVERRIDES["rerank_band"] = args.rerank_band
         print(f" Полоса переупорядочивания: {args.rerank_band}")
     if args.weight_influence is not None:
-        config.MEMORY_WEIGHT_INFLUENCE = args.weight_influence
+        OVERRIDES["memory_weight_influence"] = args.weight_influence
         print(f" Вклад веса в оценку поиска: {args.weight_influence}")
 
     print("=" * 78)
