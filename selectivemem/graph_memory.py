@@ -1430,12 +1430,33 @@ class MemoryGraph:
             degrees = self.db.get_degrees(ids)
 
         rows: Dict[int, Any] = {}
-        if settings.importance_use > 0.0:
+        if settings.importance_use > 0.0 or settings.use_relative_strength:
             rows = {row["id"]: row for row in self.db.get_nodes_by_ids(ids)}
+
+        # ДОЛЯ вместо веса. Считается по кандидатам, а не по всей базе:
+        # нормировать при записи значило бы трогать каждый узел на каждое
+        # сообщение, а сравнивать надо ровно тех, кто конкурирует за одну
+        # выдачу.
+        shares: Dict[int, float] = {}
+        if settings.use_relative_strength:
+            raw = {
+                match.id: max(0.0, (rows[match.id]["strength"] if match.id in rows else None)
+                              or match.weight)
+                for match in matches
+            }
+            total = sum(raw.values())
+            if total > 0:
+                shares = {node_id: value / total for node_id, value in raw.items()}
 
         scores: Dict[int, float] = {}
         for match in matches:
-            score = match.weight * settings.importance_weight_signal
+            # Вес узла определяется ВОЗРАСТОМ (затухание встроено в него), и
+            # замер показал цену: переупорядочивание по нему на внешнем
+            # наборе роняло R@1 с 32% до 18%, потому что сортировка "по
+            # важности" оказывалась сортировкой по свежести. Доля от
+            # накопленной силы возрасту не подчиняется.
+            base = shares.get(match.id, match.weight) if shares else match.weight
+            score = base * settings.importance_weight_signal
 
             if settings.importance_connectivity > 0.0:
                 degree = degrees.get(match.id, 0)
@@ -2286,6 +2307,17 @@ class MemoryGraph:
         new_expectation = max(-1.0, min(1.0, expected + self.settings.reward_expectation_learning_rate * rpe))
 
         self.db.update_reward_expectation(node_id, new_expectation)
+        # Одобрение поднимает НАКОПЛЕННУЮ СИЛУ, а не только ожидание
+        # награды. Вес для этого не годится: он затухает от времени, и
+        # через две недели от похвалы не остаётся следа — замерено,
+        # похвалённый узел терял 0.95 -> 0.17 за месяц. Сила часам не
+        # подчиняется, поэтому одобрение сохраняется столько, сколько
+        # его не разбавили новые записи.
+        self.db.add_strength(
+            node_id,
+            valence * self.settings.strength_reward_step,
+            self.settings.strength_max,
+        )
 
         logger.info(
             "[DOPAMINE] node=%s valence=%+.2f expected=%+.2f -> rpe=%+.2f "

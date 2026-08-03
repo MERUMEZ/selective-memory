@@ -178,6 +178,35 @@ ALTER_ADD_EDGE_TYPE = """
 ALTER TABLE edges ADD COLUMN edge_type TEXT DEFAULT NULL;
 """
 # --------------------------------------------------------------------------
+# Migration: nodes.strength — importance that a CLOCK CANNOT TOUCH.
+#
+# `weight` has been doing three jobs at once: recency (it decays),
+# importance (reinforcement raises it) and retrieval strength (it is a term
+# in the search score). Nearly every defect measured over these two days
+# grew out of that conflation:
+#
+#   - re-ranking BY IMPORTANCE turned out to be re-ranking BY AGE, because
+#     with no feedback weight is nothing but elapsed time. Widening the
+#     band dropped R@1 from 32% to 18%;
+#   - age-based deletion erased the evidence for every knowledge-update
+#     question — 12 nodes of 12 — while removing only a tenth of memory;
+#   - sleep marks archived sources by LOWERING weight, and capacity
+#     eviction cannot hear it, because a score built on age would bring
+#     the same disease back.
+#
+# strength accumulates from reinforcement and from being useful, and never
+# falls because time passed. What a node is WORTH at retrieval time is its
+# SHARE of the total, computed lazily over the candidates — so forgetting
+# becomes competition (interference) rather than a clock (decay).
+#
+# That is also the better-supported theory of human forgetting: we lose
+# memories mostly because new learning competes with them, not because a
+# timer runs down.
+# --------------------------------------------------------------------------
+ALTER_ADD_STRENGTH = """
+ALTER TABLE nodes ADD COLUMN strength REAL DEFAULT NULL;
+"""
+# --------------------------------------------------------------------------
 # Migration: embedding — a node's meaning vector for semantic search.
 #
 # Stored as a BLOB (float32) and filled lazily: nodes created before the
@@ -307,7 +336,7 @@ class Database:
         migrated = False
         for statement in (ALTER_ADD_STABILITY, ALTER_ADD_REWARD_EXPECTATION,
                           ALTER_ADD_EMBEDDING, ALTER_ADD_SPIKE_STRENGTH,
-                          ALTER_ADD_EDGE_TYPE):
+                          ALTER_ADD_EDGE_TYPE, ALTER_ADD_STRENGTH):
             try:
                 cursor.execute(statement)
                 migrated = True
@@ -324,6 +353,10 @@ class Database:
         cursor.execute(
             "UPDATE nodes SET reward_expectation = 0.0 WHERE reward_expectation IS NULL"
         )
+        # Узлы, созданные до перехода на интерференцию, получают свою
+        # СЕГОДНЯШНЮЮ силу из веса: это лучшее, что о них известно, и
+        # переносить их в новую модель с нуля было бы несправедливо.
+        cursor.execute("UPDATE nodes SET strength = weight WHERE strength IS NULL")
         self._conn.commit()
 
         if migrated:
@@ -358,13 +391,17 @@ class Database:
         cursor.execute(
             """
             INSERT INTO nodes (context, response, weight, created_at, last_accessed,
-                               last_decayed_at, node_type, spike_strength)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                               last_decayed_at, node_type, spike_strength, strength)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             # spike_strength is the birth weight, kept as it was. Weight goes
             # on decaying; this stays, because forgetting has to be able to
             # ask later how hard the event hit at the time.
-            (context, response, weight, ts, ts, ts, node_type, weight),
+            #
+            # strength starts from the same number but lives by different
+            # rules: it grows with reinforcement and use and NEVER falls
+            # because time passed. See ALTER_ADD_STRENGTH.
+            (context, response, weight, ts, ts, ts, node_type, weight, weight),
         )
         self._conn.commit()
         node_id = cursor.lastrowid
@@ -442,7 +479,12 @@ class Database:
             UPDATE nodes
             SET last_accessed = ?,
                 last_decayed_at = ?,
-                stability = MIN(?, COALESCE(stability, ?) * ?)
+                stability = MIN(?, COALESCE(stability, ?) * ?),
+                -- Сила растёт от ПОЛЬЗЫ: успешное извлечение и есть
+                -- доказательство, что память пригодилась. В отличие от
+                -- веса, часы её не трогают, поэтому важное не тонет
+                -- просто от того, что о нём давно не спрашивали.
+                strength = MIN(?, COALESCE(strength, weight) + ?)
             WHERE id = ?
             """,
             (
@@ -450,8 +492,27 @@ class Database:
                 self.settings.stability_max,
                 self.settings.stability_initial,
                 self.settings.stability_growth_factor,
+                self.settings.strength_max,
+                self.settings.strength_use_step,
                 node_id,
             ),
+        )
+        self._conn.commit()
+
+    def add_strength(self, node_id: int, delta: float, cap: float) -> None:
+        """
+        Меняет накопленную силу узла. Отдельно от веса намеренно: вес
+        затухает от времени, сила — нет. Отрицательная дельта допустима,
+        ниже нуля не опускаемся.
+        """
+        cursor = self._conn.cursor()
+        cursor.execute(
+            """
+            UPDATE nodes
+            SET strength = MAX(0.0, MIN(?, COALESCE(strength, weight) + ?))
+            WHERE id = ?
+            """,
+            (cap, delta, node_id),
         )
         self._conn.commit()
 
