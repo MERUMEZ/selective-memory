@@ -36,8 +36,8 @@ semantic = ["navec>=0.10", "numpy>=1.24"]
 dev = ["pytest>=8.0"]
 
 [project.urls]
-Source = "https://github.com/MERUMEZ/mindnumbness"
-Commercial = "https://github.com/MERUMEZ/mindnumbness/blob/master/COMMERCIAL.md"
+Source = "https://github.com/MERUMEZ/selective-memory"
+Commercial = "https://github.com/MERUMEZ/selective-memory/blob/master/COMMERCIAL.md"
 
 [tool.setuptools.dynamic]
 # setuptools достаёт литерал разбором синтаксиса, не импортируя пакет,

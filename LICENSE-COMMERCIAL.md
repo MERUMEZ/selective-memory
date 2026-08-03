@@ -17,7 +17,7 @@
 **Licensee:** ______________________
 
 **Subject:** the software library `selectivemem` (the Program), whose
-source is published at https://github.com/MERUMEZ/mindnumbness
+source is published at https://github.com/MERUMEZ/selective-memory
 
 The Program is publicly distributed under AGPL-3.0. This licence is
 granted **in addition to** and **instead of** AGPL: having received it,

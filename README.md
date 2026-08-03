@@ -382,7 +382,7 @@ out babbling `ma-ma-ma` and answers in sentences by the tenth message,
 plus a mini-app that breaks down every turn.
 
 The showcase is not the product and is not part of the package. Details
-in [DEMO.md](https://github.com/MERUMEZ/mindnumbness/blob/master/DEMO.md) (in Russian).
+in [DEMO.md](https://github.com/MERUMEZ/selective-memory/blob/master/DEMO.md) (in Russian).
 
 ```
 selectivemem/  the memory package — the only thing pip installs
@@ -393,7 +393,7 @@ AUDIT.md       what was measured, what was refuted, what is left undone
 RELEASING.md   how to cut a release
 ```
 
-Documentation in Russian: [README.ru.md](https://github.com/MERUMEZ/mindnumbness/blob/master/README.ru.md).
+Documentation in Russian: [README.ru.md](https://github.com/MERUMEZ/selective-memory/blob/master/README.ru.md).
 
 ---
 
@@ -401,13 +401,13 @@ Documentation in Russian: [README.ru.md](https://github.com/MERUMEZ/mindnumbness
 
 Copyright © 2026 MERUMEZ
 
-The core is **AGPL-3.0** ([LICENSE](https://github.com/MERUMEZ/mindnumbness/blob/master/LICENSE)). Free for personal
+The core is **AGPL-3.0** ([LICENSE](https://github.com/MERUMEZ/selective-memory/blob/master/LICENSE)). Free for personal
 projects, research and open products.
 
 Closed games, closed SaaS and products shipped to customers need a
 commercial licence: terms and price ranges in
-[COMMERCIAL.md](https://github.com/MERUMEZ/mindnumbness/blob/master/COMMERCIAL.md), the agreement in
-[LICENSE-COMMERCIAL.md](https://github.com/MERUMEZ/mindnumbness/blob/master/LICENSE-COMMERCIAL.md).
+[COMMERCIAL.md](https://github.com/MERUMEZ/selective-memory/blob/master/COMMERCIAL.md), the agreement in
+[LICENSE-COMMERCIAL.md](https://github.com/MERUMEZ/selective-memory/blob/master/LICENSE-COMMERCIAL.md).
 
-Sending a patch? Read [CONTRIBUTING.md](https://github.com/MERUMEZ/mindnumbness/blob/master/CONTRIBUTING.md) first: one
+Sending a patch? Read [CONTRIBUTING.md](https://github.com/MERUMEZ/selective-memory/blob/master/CONTRIBUTING.md) first: one
 signed line is what keeps dual licensing possible.
