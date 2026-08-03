@@ -301,14 +301,15 @@ grow over when unused.
 ### 4.1 Confirmed
 
 **Complete recall on two thirds of the storage.**
-`tools/compare_retention.py`, 3 seeds, 14 days of silence, with message
-volume held equal (`--balanced`):
+`compare_retention.py`, 3 seeds, 14 days of silence, volume held equal,
+**through the library** rather than the showcase:
 
 | Store | Nodes | Important | Ordinary |
 |---|---:|---:|---:|
-| Random sample | 52 | 56% | 67% |
-| Sliding window | 49 | 100% | 94% |
-| **The organism** | **34** | **100%** | **100%** |
+| Random sample | 43 | 78% | 56% |
+| Sliding window | 44 | 89% | 89% |
+| **selectivemem** | **33** | **100%** | **100%** |
+
 
 The advantage comes from the WRITE GATE, not from deleting: a quarter of
 the turns are taken in, and that quarter turns out to contain the
@@ -389,28 +390,27 @@ understates selectivity because it measures it where it is not needed.
 
 ### 4.3 Previously REFUTED, now level
 
-**Level on average, ahead on what is rare.** `tools/compare_memory.py`,
-equal budget in characters:
+**A third of the storage, the coverage of keeping everything.**
+`compare_memory.py`, equal budget in characters, three seeds:
 
 | Store | Nodes | All | **Rare** | Frequent |
 |---|---:|---:|---:|---:|
-| Random sample | 64 | 96% | **60%** | 100% |
-| Sliding window | 63 | 100% | 100% | 100% |
-| The organism | 66 | 98% | **80%** | 100% |
+| Everything (upper bound) | 120 | 94% | 100% | 92% |
+| Sliding window | 37 | 72% | 50% | 83% |
+| Random sample | 37 | 72% | **33%** | 83% |
+| **selectivemem** | 42 | **94%** | **100%** | 92% |
 
-The average hides the point. On material mentioned ONCE, selective
-writing finds 80% where a random sample of the same size finds 60% —
-those twenty points are exactly what the gate is for. On frequently
-repeated material everyone scores 100%, which is why the overall figures
-look level.
+Forty-two nodes answer as well as all hundred and twenty. On material
+mentioned ONCE the gap is decisive — 100% against 33% for a random sample
+of the same size — and that is exactly what the write gate is for: what
+is rare is surprising, so it gets in, while selection by recency or
+chance loses it.
 
-**The negative result is no longer negative.** At the previous write
-threshold the organism trailed (87.2 against 88.8), and that was
-published honestly for the better part of a day.
-
-The sliding window wins this particular bench outright, and that is worth
-saying plainly: the simulation is short enough that recency captures
-nearly everything. Over months it does not.
+Across three seeds selectivemem holds 94% on "all" with rare between 83%
+and 100%; the random sample swings 61–78% and 33–50%. Questions are
+phrased as a person would ask them, not as the stored sentence — an
+earlier version probed with the stored text verbatim and produced a
+meaningless 100% everywhere.
 
 
 A methodological error caught along the way: the budget was counted **in

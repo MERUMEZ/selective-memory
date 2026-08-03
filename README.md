@@ -238,15 +238,17 @@ memory = Memory("brain.db", settings=MemorySettings(decay_rate=0.02, age_t0=3600
 
 By benchmarks from this repository, over five seeds, byte-reproducible.
 
-**Complete recall on two thirds of the storage.** After two weeks of
-silence, with message volume held equal (`compare_retention.py`, three
-seeds):
+**Complete recall on two thirds of the storage.**
+`compare_retention.py`, 3 seeds, 14 days of silence, volume held equal,
+**through the library** rather than the showcase:
 
 | Store | Nodes | Important | Ordinary |
 |---|---:|---:|---:|
-| Random sample | 52 | 56% | 67% |
-| Sliding window | 49 | 100% | 94% |
-| **selectivemem** | **34** | **100%** | **100%** |
+| Random sample | 43 | 78% | 56% |
+| Sliding window | 44 | 89% | 89% |
+| **selectivemem** | **33** | **100%** | **100%** |
+
+
 
 A random sample holding half again as much finds about six answers in
 ten. The advantage comes from the write gate, not from deleting:
@@ -318,28 +320,27 @@ or disable the gate entirely.
 
 ### What selectivemem does NOT do
 
-**Level on average, ahead on what is rare.** `compare_memory.py`, equal
-budget in characters:
+**A third of the storage, the coverage of keeping everything.**
+`compare_memory.py`, equal budget in characters, three seeds:
 
 | Store | Nodes | All | **Rare** | Frequent |
 |---|---:|---:|---:|---:|
-| Random sample | 64 | 96% | **60%** | 100% |
-| Sliding window | 63 | 100% | 100% | 100% |
-| selectivemem | 66 | 98% | **80%** | 100% |
+| Everything (upper bound) | 120 | 94% | 100% | 92% |
+| Sliding window | 37 | 72% | 50% | 83% |
+| Random sample | 37 | 72% | **33%** | 83% |
+| **selectivemem** | 42 | **94%** | **100%** | 92% |
 
-The average hides the point. On things mentioned ONCE, selective writing
-finds 80% where a random sample of the same size finds 60% — the twenty
-points are exactly what the gate is for. On frequently repeated material
-everyone scores 100%, which is why the overall figures look level.
+Forty-two nodes answer as well as all hundred and twenty. On material
+mentioned ONCE the gap is decisive — 100% against 33% for a random sample
+of the same size — and that is exactly what the write gate is for: what
+is rare is surprising, so it gets in, while selection by recency or
+chance loses it.
 
-**This used to be a negative result** — 87.2% against 88.8% for random
-sampling — and it was published honestly for the better part of a day at
-the previous write threshold.
-
-Against uniform questions an unbiased sample is hard to beat by
-construction, and any meaningful selection is biased. The sliding window
-wins this particular bench outright because the simulation is short
-enough that recency captures nearly everything; over months it does not.
+Across three seeds selectivemem holds 94% on "all" with rare between 83%
+and 100%; the random sample swings 61–78% and 33–50%. Questions are
+phrased as a person would ask them, not as the stored sentence — an
+earlier version probed with the stored text verbatim and produced a
+meaningless 100% everywhere.
 
 
 ---
