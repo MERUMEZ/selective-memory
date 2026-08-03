@@ -94,6 +94,24 @@ FILLER = [
 ]
 
 
+# ИСХОДЫ, А НЕ ВЫЗОВЫ. Стенд считал срабатывания и объявлял механизм
+# живым, если тот хоть раз отработал. Но механизм может честно
+# отрабатывать и КАЖДЫЙ РАЗ решать "ничего не делать" — консолидация так
+# и вела себя, принимая решение "рутинный шум" в 100% случаев, и стенд
+# был доволен. Разбирательство заняло часы.
+#
+# Поэтому метки поделены: одни означают "механизм позвали", другие —
+# "механизм что-то СДЕЛАЛ". Ноль во второй колонке при ненулевой первой
+# и есть тот случай, который раньше был невидим.
+OUTCOME_MARKERS = {
+    "консолидация": "[CONSOLIDATION] Structural node",
+    "синаптическая подрезка": "edges, ",
+    "вытеснение по ёмкости": "[CAPACITY]",
+    "вытеснение устаревшего": "[SUPERSEDED]",
+    "абстрактные узлы": "[SLEEP CONSOLIDATION] Abstract",
+}
+
+
 class MarkerCounter(logging.Handler):
     """Считает, сколько раз в логах мелькнула каждая метка."""
 
@@ -109,6 +127,9 @@ class MarkerCounter(logging.Handler):
         for name, marker in MARKERS.items():
             if marker in text:
                 self.counts[name] += 1
+        for name, marker in OUTCOME_MARKERS.items():
+            if marker in text:
+                self.counts["исход:" + name] += 1
 
 
 def run(messages: int, seed: int) -> Dict[str, int]:
@@ -172,21 +193,34 @@ def main() -> None:
     print(f" Разговор из {args.messages} сообщений, затем 3 суток молчания.")
     print("-" * 70)
 
-    dead = []
+    dead, idle = [], []
     for name in MARKERS:
         hits = counts.get(name, 0)
         mark = "мёртв" if hits == 0 else f"{hits}"
         if hits == 0:
             dead.append(name)
-        print(f" {name:28} {mark:>10}")
+        outcome = counts.get("исход:" + name)
+        suffix = "" if name not in OUTCOME_MARKERS else (
+            f"   из них сделали: {outcome or 0}"
+        )
+        if name in OUTCOME_MARKERS and hits and not outcome:
+            suffix += "  <- ВЫЗЫВАЕТСЯ, НО НИЧЕГО НЕ ДЕЛАЕТ"
+            idle.append(name)
+        print(f" {name:28} {mark:>10}{suffix}")
 
     print("=" * 70)
     if dead:
         print(f" МЁРТВЫХ МЕХАНИЗМОВ: {len(dead)}")
         for name in dead:
             print(f"   - {name}")
+    if idle:
+        print(f" ВХОЛОСТУЮ РАБОТАЮТ: {len(idle)}")
+        for name in idle:
+            print(f"   - {name}")
+        print(" Такой механизм неотличим от живого, если считать только вызовы.")
+    if dead or idle:
         sys.exit(1)
-    print(" Все механизмы срабатывают хотя бы раз.")
+    print(" Все механизмы срабатывают и делают работу.")
 
 
 if __name__ == "__main__":

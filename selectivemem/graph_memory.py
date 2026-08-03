@@ -2238,11 +2238,20 @@ class MemoryGraph:
         effective_weight = weight if weight is not None else self.settings.sleep_abstract_node_weight
         ts = timestamp if timestamp is not None else time.time()
 
+        # ТОТ ЖЕ ТИП, ЧТО У СВЁРТОК ЭПИЗОДА, и по той же измеренной
+        # причине: абстракция, пущенная в общий поиск, содержит слишком
+        # много слов и совпадает почти с любым запросом. У консолидации
+        # это роняло R@1 с 76% до 42%, а понижение силы спасало лишь
+        # частично (56% и 60%), потому что выигрывала она НА
+        # РЕЛЕВАНТНОСТИ, а не на важности.
+        #
+        # Схема достаётся отдельным ходом — Memory.summaries().
         abstract_node_id = self.db.insert_node(
             context=summary_context,
             response=summary_response,
             weight=effective_weight,
             timestamp=ts,
+            node_type="episode_summary",
         )
 
         for source_id in source_node_ids:
@@ -2252,6 +2261,21 @@ class MemoryGraph:
 
             archived_weight = source_row["weight"] * self.settings.sleep_archive_weight_multiplier
             self.db.update_weight(source_id, archived_weight)
+
+            # АБСТРАКЦИЯ ЗАБИРАЕТ ДОЛЮ, а не прибавляется сверху. Прежде
+            # сон добавлял узел и не убирал ни одного, то есть память
+            # росла монотонно с каждым циклом. В модели интерференции
+            # ценность — доля от суммы, поэтому источники обязаны отдать
+            # ровно столько, сколько получила свёртка.
+            if self.settings.use_relative_strength:
+                base = source_row["strength"]
+                if base is None:
+                    base = source_row["weight"]
+                self.db.add_strength(
+                    source_id,
+                    base * (self.settings.sleep_archive_weight_multiplier - 1.0),
+                    self.settings.strength_max,
+                )
 
             self.connect_nodes(abstract_node_id, source_id, weight_boost=self.settings.edge_initial_weight, timestamp=ts)
 
