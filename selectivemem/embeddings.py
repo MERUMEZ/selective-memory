@@ -56,6 +56,30 @@ word that carries meaning: without filtering, "skin" stayed at 0.863 and
 still nearly matched "cat". After dropping function words it was 0.222
 against 0.671 — the order finally became correct.
 
+THOSE NUMBERS ARE NAVEC'S, AND WITH THE DEFAULT ENCODER THE PATHOLOGY IS
+BACK. Re-measured on the same phrases:
+
+    navec (Russian)          cat 0.671   skin 0.222   correct
+    potion-base-8M (default) cat 0.643   skin 0.714   INVERTED
+
+Filtering still helps — it is the model that cannot tell the words apart
+on Russian text at all (see §2.15 of the audit: separation +0.638 in
+English against +0.024 in Russian). Read this section as "why filtering
+exists", not as "the example works today": with `[semantic]` on Russian
+it does not, and that is an argument for `[semantic-ru]`, not against
+filtering.
+
+PERSON MARKERS ARE DROPPED TOO, AND THAT WAS CHECKED SEPARATELY. "мой",
+"меня", "я" are in the list, so "my holiday" and "holiday" encode
+identically while "у попутчика отпуск" keeps its owner — the discriminator
+survives on one side and not the other. In personal memory "whose" is the
+main thing that distinguishes near-duplicates, so this looked like the
+cause of the one question the near-duplicate bench never solves.
+
+MEASURED: RETURNING THEM CHANGES NOTHING — 83.3% R@1 either way. The
+hypothesis was reasonable and wrong; the failing case is not fixed by
+representing the owner.
+
 TRAINED ON LITERARY FICTION (hudlit), and that matters more than its
 size. Professional vocabulary is unrelated in such a model — measured
 cosines:
