@@ -381,6 +381,21 @@ neighbours publish. Stock settings, no flags.
 | **stock today** | 24.7% | 66.0% | **83.4%** |
 | archive (no gate, no forgetting) | 49.6% | 76.7% | **93.2%** |
 
+To reproduce:
+
+```
+python tools/bench_longmemeval.py --data storage/bench/longmemeval_s.json \
+    --encoder potion --threshold 0.0
+```
+
+**The flags are mandatory, and that is not a detail.** "Stock" refers to
+the LIBRARY settings, which are indeed untouched. The bench's own
+defaults differ: `--encoder none` and the `longmemeval_oracle.json`
+dataset. Running it bare yields 6.0% (search with no semantics) or 90.7%
+(the oracle set, whose haystack is almost entirely evidence sessions, so
+recall does not vary with k) — and neither number is comparable with the
+table above. Both mistakes were made while re-checking this very table.
+
 Two calibrations moved this number, and both were forced by measurement
 rather than chosen.
 
@@ -513,14 +528,35 @@ against 100.0% at all three levels. The mechanism does not depend on
 which encoder is installed.
 
 THIS ENTRY USED TO READ "+33 points, 83.3% against 50.0%", and that
-number has been withdrawn as unmeasured. The bench wrote EVERY node at
-the same weight of 0.7 and never reinforced any of them. With equal
-strengths the term is identical for all candidates and merely shifts
-every score together — it cannot reorder anything. The check showed
-exactly that: strength ranking switched on and off produced BYTE-
-IDENTICAL numbers. This is the fifth instance of the defect class
-described in 2.13, and the same habit caught it — look at whether the
-mechanism fired before believing "no difference".
+number has been withdrawn as unmeasured: strength ranking switched on and
+off produced BYTE-IDENTICAL numbers.
+
+The reason turned out to be subtler than first written, and is worth
+stating precisely. It is not that the nodes hold equal strengths — they
+do not: near-duplicates push each other down through the supersession
+penalty, and by the end of a run the six facts sit at 0.000 while the
+distractors average 0.029. It is that STRENGTH AND WEIGHT HOLD THE SAME
+VALUE. The penalty hits both equally, and nothing else in this bench ever
+moved them apart. Choosing between two equal numbers cannot change
+anything.
+
+Weight and strength diverge from three things, and the bench did none of
+them before measuring:
+
+| mode | share of nodes where weight == strength | mean gap |
+|---|---:|---:|
+| writes only | 100% | 0.000 |
+| writes + decay | 9% | 0.090 |
+| writes + retrieval | 48% | 0.234 |
+| writes + approval | 25% | 0.300 |
+| all together | **0%** | **0.567** |
+
+That table also answers whether the two variables should be merged into
+one: no. In ordinary operation they diverge for EVERY node, and coincide
+only in the degenerate mode the bench happened to sit in.
+
+The fifth instance of the false "no difference" from 2.13, caught by the
+same habit — check whether the mechanism fired before believing a result.
 
 The bench is fixed: the six facts now earn strength the way an
 application would mark them, and the difference became both reproducible
