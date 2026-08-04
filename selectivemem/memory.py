@@ -458,6 +458,9 @@ class Memory:
         # 3. Подрезка: под нож идёт не выдержавшее сжатия.
         # 4. Свёртка кластера в абстракцию — на структуре, которую
         #    подготовил реплей.
+        # 5. Пересмотр выведенного корой: что оказалось не темой, а
+        #    оборотом речи. ПОСЛЕДНЕЙ, потому что судит по накопленному
+        #    языку, а он к этому моменту полнее всего.
         replayed = self.graph.replay(timestamp=ts)
         scaled = self.graph.downscale_edges()
         report = self.graph.run_synaptic_pruning()
@@ -479,6 +482,10 @@ class Memory:
                 timestamp=ts,
             )
             abstracts += 1
+
+        reviewed = self.graph.review_cortex_facts()
+        if reviewed:
+            logger.info("[SLEEP] Снято тем, оказавшихся оборотами: %d", reviewed)
 
         return SleepReport(
             edges_pruned=report.edges_pruned,

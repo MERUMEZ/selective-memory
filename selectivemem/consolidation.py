@@ -202,6 +202,67 @@ class ConsolidationMixin:
         )
         return len(updates)
 
+    def review_cortex_facts(self) -> int:
+        """
+        Кора пересматривает выведенное: что оказалось оборотом речи, а не
+        темой.
+
+        ЗАЧЕМ ОТДЕЛЬНЫЙ ПЕРЕСМОТР. Тема отсеивается по привычности слова —
+        знакомое назубок не может быть тем, чем случай отличается от
+        прочих. Но проверка идёт В МОМЕНТ ВЫВОДА, а тогда организм знает
+        мало: в первые дни ему незнакомо ВСЁ, включая канцелярит. Оборот,
+        подвернувшийся рано, оседает темой навсегда.
+
+        Замер поймал это на тестах: те же данные давали разные факты в
+        зависимости от того, когда сработало обобщение. «Оставил записку
+        прошлой неделе» стало темой, потому что в тот момент эти слова
+        организм видел впервые.
+
+        Живое решает это так же — не проверкой на входе, а пересмотром
+        потом. Уже закреплённое воспоминание при повторной активации снова
+        становится лабильным и может быть изменено или ослаблено; ночью
+        системная консолидация продолжает перебирать сохранённое. Здесь то
+        же самое, только предмет разбора один: остались ли слова темы
+        редкими теперь, когда организм повидал больше.
+
+        Возвращает число снятых фактов.
+        """
+        ceiling = self.settings.cortex_theme_max_familiarity
+        if ceiling >= 1.0:
+            return 0
+
+        facts = self.gate.semantic.facts(limit=self.settings.cortex_review_limit)
+        if not facts:
+            return 0
+
+        words = sorted({
+            word
+            for fact in facts
+            for word in (fact["text"] or "").split()
+        })
+        if not words:
+            return 0
+        rows = self.gate.semantic.lexical_by_texts("word", words)
+        familiarity = {row["context"]: row["weight"] for row in rows}
+
+        dropped = 0
+        for fact in facts:
+            theme_words = (fact["text"] or "").split()
+            if not theme_words:
+                continue
+            # Снимаем, только если ВСЕ слова темы стали привычными. Одного
+            # редкого слова довольно, чтобы тема осталась темой: «трудовой
+            # договор» держится на «договоре», даже когда «трудовой»
+            # примелькалось.
+            if all(familiarity.get(w, 0.0) > ceiling for w in theme_words):
+                self.gate.node.delete(fact["id"])
+                dropped += 1
+                logger.info(
+                    "[CORTEX REVIEW] Тема оказалась оборотом речи: %r",
+                    fact["text"],
+                )
+        return dropped
+
     def run_synaptic_pruning(self) -> PruningReport:
         """
         The full synaptic pruning cycle: weak edges are cut first, orphan
