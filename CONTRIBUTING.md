@@ -96,16 +96,55 @@ not work.
 
 ## Practicalities
 
-- Tests must pass: `python -m pytest tests/ -q` (currently 286).
+- Tests must pass: `python -m pytest tests/ -q` (currently 309). Green
+  BEFORE the commit, not in the same command as it — a commit with two red
+  tests has already reached the branch that way.
 - Changes inside `selectivemem/` must not add dependencies: the package
   lives on the standard library, and
   `test_memory_package_is_self_contained` guards that.
 - If you change a number recorded in README or AUDIT, re-measure it and
   update both. `tests/test_readme_examples.py` runs the README examples
   verbatim.
-- Changes to `core/`, `bot.py` and `tools/` belong to the showcase (see
-  [DEMO.md](DEMO.md)) and are not shipped in the package.
+- Changes to `core/`, `bot.py` and `tools/` belong to the showcase and are
+  not shipped in the package: it lives in a separate repository.
 - The package is in English, including comments. The showcase is in
   Russian — it is a Russian-language demo.
+
+## Three rules for a measurement
+
+The project has twice withdrawn a published number and five times rejected
+a useful mechanism on the strength of a bad measurement. Every one of those
+measurements was honest and every conclusion was wrong. Hence three checks,
+without which a number means nothing.
+
+**1. The mechanism must FIRE.** Count firings; do not infer them from the
+result. `tools/check_liveness.py` exists for this: it once declared four
+ablation measurements useless when in fact the mechanism had never run. The
+tell-tale sign is byte-identical numbers across different configurations.
+
+**2. Its action must have SOMEWHERE TO GO.** A mechanism can fire perfectly
+and still change nothing if the channel is saturated. Candidate scoring was
+`min(1.0, relevance + importance·share)`, and the hard ceiling collapsed
+candidates into one score as soon as importance grew heavier: a share of
+0.15 gave R@1 73.3%, a share of 0.80 gave 13.3%. Three useful mechanisms
+were rejected in a row under those conditions.
+
+**3. The setting must ARRIVE.** Patching classes and settings from outside
+silently fails to apply — when the import happens inside a function, when
+the parameter is passed explicitly, when the name is rebound. That happened
+four times in a single session. The one reliable method is to change the
+default in `settings.py` and run the bench normally. If you do patch, print
+a column showing what was ACTUALLY applied: twice, only that column
+prevented a false conclusion.
+
+**And in general.** When comparing two scoring forms, check that the
+retrieval threshold is comparable for both. Multiplication and addition
+produce different scales, and at a single threshold the first run showed a
+15-point regression — the verdict "the form is bad" was one step from the
+audit. What saved it was the drop in R@10: recall at ten is not about
+ordering but about whether the answer reaches the result set at all.
+
+Timing measurements belong on an idle machine and must be compared WITHIN a
+single run: the baseline on identical code wanders by a factor of two.
 
 Русская версия: [CONTRIBUTING.ru.md](CONTRIBUTING.ru.md).
