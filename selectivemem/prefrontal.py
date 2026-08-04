@@ -12,7 +12,7 @@
 # COMMERCIAL.md.
 """
 ================================================================================
- WORKING_MEMORY.PY — Short-term memory (STM)
+ PREFRONTAL.PY — Рабочая память: что удерживается прямо сейчас
 ================================================================================
 WorkingMemory is a buffer of the last N turns (role, text, emotion_score,
 perplexity, timestamp) — working memory in the psychological sense: it

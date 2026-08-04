@@ -53,7 +53,7 @@ from typing import Any, Dict, List, Optional, Set
 from selectivemem import embeddings
 # Выделение ключевых слов опирается на устройство языка, а не памяти:
 # и шаблон слова, и список стоп-слов принадлежат словарю.
-from selectivemem.lexicon import WORD_PATTERN
+from selectivemem.neocortex import WORD_PATTERN
 from selectivemem.stopwords import STOP_WORDS
 from selectivemem.records import ActivationTrace, AssociatedNode, MemoryMatch
 

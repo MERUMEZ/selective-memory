@@ -76,7 +76,7 @@ from selectivemem.graph_memory import MemoryGraph, MemoryMatch
 from selectivemem.plasticity import PlasticityDecision, PlasticityGate
 from selectivemem.reinforcement import ReinforcementLoop, ReinforcementOutcome
 from selectivemem.settings import MemorySettings
-from selectivemem.working_memory import WorkingMemory
+from selectivemem.prefrontal import WorkingMemory
 
 
 @dataclass

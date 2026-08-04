@@ -12,43 +12,47 @@
 # COMMERCIAL.md.
 """
 ================================================================================
- LEXICON.PY — Словарь и собственное удивление
+ NEOCORTEX.PY — Медленное знание: слова, понятия, схемы
 ================================================================================
-Здесь живёт то, что в мозге принадлежит КОРЕ, а не гиппокампу: знание слов
-и слогов, накопленное из всего виденного, и построенная на нём оценка
-новизны.
+Кора — не «второе хранилище воспоминаний», а вещество другого рода. Она
+копит СТАТИСТИКУ: что с чем обычно встречается, что на что похоже, что
+случается часто. Медленно, с перекрытием, без привязки к отдельному
+случаю. Гиппокамп помнит «в четверг Лиза сказала про арахис», кора знает
+«арахис — про аллергию».
 
-ПОЧЕМУ ЭТО ВЫДЕЛЕНО ПЕРВЫМ. Лексика лежала в одном файле с эпизодической
-памятью и в одной таблице с ней — узлы word и syllable рядом с
-воспоминаниями. Это не только путаница в названиях: подсчёт узлов включал
-словарь, порог сна пробивался на девятом сообщении, и сон запускался на
-каждое следующее. Кратковременная память очищалась ежесообщение, а в
-проде уходило по два вызова языковой модели на реплику. Починили тогда
-заплаткой в count_memory_nodes, а причина была в том, что корковое знание
-считалось эпизодами.
+ПОЭТОМУ ЗДЕСЬ ТРИ ВЕЩИ, КОТОРЫЕ РАНЬШЕ ЛЕЖАЛИ В ТРЁХ ФАЙЛАХ:
 
-ЧТО ЗДЕСЬ ГЛАВНОЕ — compute_surprise. Организм не берёт новизну из
-языковой модели, он меряет её ПО СВОЕМУ ОПЫТУ: доля незнакомых слов и
-доля незнакомых пар соседей. От этого числа зависит вся запись.
+    словарь и слоги      — статистика языка, накопленная из всего виденного;
+    собственное удивление — оценка новизны ПО ЭТОЙ статистике;
+    понятия и схемы      — обобщения, в том числе свёртки плотных кластеров.
 
-ИЗВЕСТНЫЙ ПРЕДЕЛ, записанный здесь честно: удивление считается по словам
-и парам слов, то есть слепо к смыслу. Перефразировка знакомой мысли
-удивляет сильнее, чем должна. Лечится это семантическим удивлением —
-сравнением входа с ближайшими соседями по вектору, — и это отдельная
-работа.
+Разносить их было ошибкой разделения по функциям вместо разделения по
+веществу: словарь оказывался «лексикой», схема — «сном», понятие —
+«графом», хотя это одно и то же медленно накапливаемое знание.
 
-Класс — миксин: состояние (db, settings) принадлежит MemoryGraph, который
-его подмешивает. Разделение пока файловое, а не по владению данными;
-переход на composition — следующий шаг, и он ломает вызовы, поэтому
-делается отдельно и с замером.
+СХЕМА ПРИНАДЛЕЖИТ КОРЕ, А НЕ СНУ. Сон её запускает — реактивация строит
+структуру, из которой схема вырастает, — но живёт и работает она здесь.
+create_abstract_node зовётся из consolidation.py именно поэтому: там
+только повод, здесь владелец.
+
+УДИВЛЕНИЕ СЧИТАЕТСЯ ЗДЕСЬ, И ЭТО БИОЛОГИЧЕСКИ СПОРНО. В мозге
+рассогласование ожидаемого с пришедшим замечает гиппокамп (поле CA1), а
+кора поставляет ему ожидания. У нас новизна целиком выводится из корковой
+статистики слов, и это ровно та причина, по которой перефразировка
+знакомой мысли удивляет сильнее, чем должна: сравниваются буквы, а не
+положения дел. Известный предел, записанный честно.
+
+Класс — миксин: состояние принадлежит MemoryGraph.
 ================================================================================
 """
 
 import logging
 import re
-from typing import List, Optional, Set
+import time
+from typing import Any, Dict, List, Optional, Set
 
 from selectivemem.records import (
+    HubCluster,
     KnownSyllable,
     KnownWord,
     LexicalProcessingResult,
@@ -67,8 +71,9 @@ WORD_PATTERN = re.compile(r"[^\s\d\W]+", flags=re.UNICODE)
 VOWELS: Set[str] = set("аеёиоуыэюяAEIOUYaeiouy")
 
 
-class LexiconMixin:
-    """Словарь, слоги и собственное удивление организма."""
+class NeocortexMixin:
+    """Словарь, слоги, удивление, понятия и схемы — одно вещество."""
+
 
     def process_language_input(
         self,
@@ -455,3 +460,258 @@ class LexiconMixin:
             KnownSyllable(id=row["id"], text=row["context"], weight=row["weight"])
             for row in rows
         ]
+
+    def create_concept_node(
+        self,
+        name: str,
+        definition: str,
+        source_node_id: Optional[int] = None,
+        timestamp: Optional[float] = None,
+    ) -> int:
+        """
+        Creates a concept node — or updates it if the concept is already
+        known — and wires it into the knowledge graph:
+
+            1. The node is stored through upsert_concept_node
+               (node_type='concept').
+            2. An edge concept <-> user node is created or strengthened:
+               the user is the source of this knowledge.
+            3. If semantically similar nodes already exist, initial
+               associative edges concept <-> similar_node are laid down,
+               up to concept_max_similar_links of them.
+            4. If source_node_id is given — say the episode the concept was
+               extracted from — the concept is linked to it as well.
+
+        Returns the id of the concept node.
+        """
+        ts = timestamp if timestamp is not None else time.time()
+        normalized_name = name.strip()
+
+        concept_node_id, was_created = self.db.upsert_concept_node(
+            name=normalized_name,
+            definition=definition.strip(),
+            weight=self.settings.concept_node_weight,
+            timestamp=ts,
+        )
+
+        # --- Link to the user model: the source of this knowledge ---
+        user_row = self.db.get_meta_node("user_model")
+        if user_row is not None:
+            self.connect_nodes(
+                concept_node_id,
+                user_row["id"],
+                weight_boost=self.settings.concept_user_edge_weight,
+                timestamp=ts,
+            )
+
+        # --- Link to the originating node, when one was given ---
+        if source_node_id is not None:
+            self.connect_nodes(
+                concept_node_id,
+                source_node_id,
+                weight_boost=self.settings.edge_initial_weight,
+                timestamp=ts,
+            )
+
+        # --- Semantic linking to similar existing nodes ---
+        if was_created:
+            self._link_concept_to_similar_nodes(concept_node_id, normalized_name, definition, ts)
+
+        logger.info(
+            "[CONCEPT EXTRACTED] Node '%s' (type=concept) stored and linked to the user model",
+            normalized_name,
+        )
+
+        return concept_node_id
+
+    def _link_concept_to_similar_nodes(
+        self,
+        concept_node_id: int,
+        name: str,
+        definition: str,
+        timestamp: float,
+    ) -> None:
+        """
+        Looks for nodes that echo the new concept — matching on its name
+        and definition — and lays down initial associative edges, up to
+        concept_max_similar_links of them, excluding the concept itself.
+        """
+        query_text = f"{name} {definition}"
+        matches = self.search(
+            query_text,
+            threshold=self.settings.concept_similarity_link_threshold,
+            top_k=self.settings.concept_max_similar_links + 1,  # +1 in case it matches itself
+            timestamp=timestamp,
+            with_associations=False,
+        )
+
+        linked_count = 0
+        for match in matches:
+            if match.id == concept_node_id:
+                continue
+            if linked_count >= self.settings.concept_max_similar_links:
+                break
+
+            self.connect_nodes(
+                concept_node_id,
+                match.id,
+                weight_boost=self.settings.concept_similarity_edge_weight,
+                timestamp=timestamp,
+            )
+            linked_count += 1
+
+        if linked_count:
+            logger.info(
+                "[CONCEPT LINKED] concept_id=%s linked to %d similar nodes",
+                concept_node_id, linked_count,
+            )
+
+    def find_hub_clusters(
+        self,
+        min_edge_weight: Optional[float] = None,
+        min_spokes: Optional[float] = None,
+        max_spokes: Optional[float] = None,
+        limit: int = 1,
+        timestamp: Optional[float] = None,
+    ) -> List[HubCluster]:
+        """
+        Looks for hub-and-spoke clusters: a dominant node with the
+        largest sum of strong edge weights (its hub score) and its top-N
+        strongest neighbours, as candidates for semantic consolidation
+        during the sleep phase.
+
+        Returns up to `limit` clusters sorted by hub score. A cluster is
+        included only when the hub has at least min_spokes strong
+        neighbours — otherwise it is not a cluster but merely a pair.
+        """
+        effective_edge_weight = (
+            min_edge_weight if min_edge_weight is not None else self.settings.sleep_hub_min_edge_weight
+        )
+        effective_min_spokes = (
+            min_spokes if min_spokes is not None else self.settings.sleep_min_cluster_spokes
+        )
+        effective_max_spokes = (
+            max_spokes if max_spokes is not None else self.settings.sleep_max_cluster_spokes
+        )
+
+        hub_rows = self.db.get_hub_candidates(min_edge_weight=effective_edge_weight)
+
+        clusters: List[HubCluster] = []
+        used_node_ids: set = set()
+
+        for hub_row in hub_rows:
+            if len(clusters) >= limit:
+                break
+
+            hub_id = hub_row["id"]
+            if hub_id in used_node_ids:
+                continue
+
+            associated = self.get_associated_nodes(
+                hub_id,
+                min_weight=effective_edge_weight,
+                limit=effective_max_spokes,
+                timestamp=timestamp,
+            )
+
+            # Drop spokes already claimed by another cluster in this same
+            # pass, so no node is consolidated twice
+            available_spokes = [a for a in associated if a.id not in used_node_ids]
+
+            if len(available_spokes) < effective_min_spokes:
+                continue
+
+            cluster = HubCluster(
+                hub_id=hub_id,
+                hub_context=hub_row["context"],
+                hub_response=hub_row["response"],
+                hub_weight=hub_row["weight"],
+                spoke_ids=[a.id for a in available_spokes],
+                spoke_contexts=[a.context for a in available_spokes],
+                spoke_responses=[a.response for a in available_spokes],
+                spoke_weights=[a.weight for a in available_spokes],
+                edge_weights=[a.edge_weight for a in available_spokes],
+            )
+
+            clusters.append(cluster)
+            used_node_ids.add(hub_id)
+            used_node_ids.update(cluster.spoke_ids)
+
+            logger.info(
+                "[SLEEP CLUSTER] Cluster found: hub=%s (weight=%.2f) + spokes=%s",
+                hub_id, hub_row["weight"], cluster.spoke_ids,
+            )
+
+        return clusters
+
+    def create_abstract_node(
+        self,
+        summary_context: str,
+        summary_response: str,
+        source_node_ids: List[int],
+        weight: Optional[float] = None,
+        timestamp: Optional[float] = None,
+    ) -> int:
+        """
+        Stores a new abstract long-term node — the result of semantically
+        consolidating a cluster — and ARCHIVES the cluster's source nodes
+        by multiplying their weight by sleep_archive_weight_multiplier.
+        They are not deleted immediately: they become candidates for
+        deletion at the next ordinary decay or pruning pass if they remain
+        unused.
+
+        The new abstract node is also linked by edges to every source node
+        of the cluster, preserving a trace of where it came from.
+
+        Returns the id of the new abstract node.
+        """
+        effective_weight = weight if weight is not None else self.settings.sleep_abstract_node_weight
+        ts = timestamp if timestamp is not None else time.time()
+
+        # ТОТ ЖЕ ТИП, ЧТО У СВЁРТОК ЭПИЗОДА, и по той же измеренной
+        # причине: абстракция, пущенная в общий поиск, содержит слишком
+        # много слов и совпадает почти с любым запросом. У консолидации
+        # это роняло R@1 с 76% до 42%, а понижение силы спасало лишь
+        # частично (56% и 60%), потому что выигрывала она НА
+        # РЕЛЕВАНТНОСТИ, а не на важности.
+        #
+        # Схема достаётся отдельным ходом — Memory.summaries().
+        abstract_node_id = self.db.insert_node(
+            context=summary_context,
+            response=summary_response,
+            weight=effective_weight,
+            timestamp=ts,
+            node_type="episode_summary",
+        )
+
+        for source_id in source_node_ids:
+            source_row = self.db.get_node(source_id)
+            if source_row is None:
+                continue
+
+            archived_weight = source_row["weight"] * self.settings.sleep_archive_weight_multiplier
+            self.db.update_weight(source_id, archived_weight)
+
+            # АБСТРАКЦИЯ ЗАБИРАЕТ ДОЛЮ, а не прибавляется сверху. Прежде
+            # сон добавлял узел и не убирал ни одного, то есть память
+            # росла монотонно с каждым циклом. В модели интерференции
+            # ценность — доля от суммы, поэтому источники обязаны отдать
+            # ровно столько, сколько получила свёртка.
+            if self.settings.use_relative_strength:
+                base = source_row["strength"]
+                if base is None:
+                    base = source_row["weight"]
+                self.db.add_strength(
+                    source_id,
+                    base * (self.settings.sleep_archive_weight_multiplier - 1.0),
+                    self.settings.strength_max,
+                )
+
+            self.connect_nodes(abstract_node_id, source_id, weight_boost=self.settings.edge_initial_weight, timestamp=ts)
+
+        logger.info(
+            "[SLEEP CONSOLIDATION] Abstract node id=%s (weight=%.2f) created from cluster %s",
+            abstract_node_id, effective_weight, source_node_ids,
+        )
+
+        return abstract_node_id
