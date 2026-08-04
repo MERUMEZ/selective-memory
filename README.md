@@ -206,9 +206,13 @@ actually test semantics.
 
 Read the bundled model's number together with one fact: **eight pairs are
 solvable by plain word overlap, and they are the same eight.** navec adds
-nothing to retrieval. Weighting words by rarity was written and reverted
-— it did not change a single hit. Tuning weights is pointless when there
-is nothing to tell apart.
+nothing to retrieval.
+
+This section used to say that weighting words by rarity "did not change a
+single hit". That is true FOR THIS BENCH and only for it: on sixteen facts
+nearly every word occurs once, and rarity distinguishes nobody from
+nobody. On LongMemEval haystacks of hundreds of turns the same change
+lifted preference questions from 20% to 60% R@1 — see §2.20 of the audit.
 
 The cause is the domain, not the size: navec was trained on literary
 fiction. "Love ~ prefer" scores 0.580, but "language ~ programming"
@@ -298,18 +302,24 @@ prompt on its own, `compare_ordering.py` measures which memories get in:
 
 | | selectivemem | random order |
 |---|---:|---:|
-| share of praised material in the top 5 | **88.9%** | 50% |
-| MRR, praised topics | 0.889 | |
-| MRR, ordinary topics | 0.833 | |
+| share of praised material in the top 5 | **100.0%** | 50% |
+| MRR gap | +0.046 | |
 
 Eighteen topical memories reached the answers across three seeds, so the
 share is a measurement rather than a coin toss — an earlier version of
 this bench reported 40% on a denominator of 0.6 and was rightly ignored.
 
-The MRR gap is small (+0.056) and consistent across seeds. Ranking by
-earned strength is a nudge on targeted questions and decisive on open
-ones: nine of ten memories the assistant volunteers are the ones the user
-called important.
+**WHAT "IMPORTANT COMES FIRST" MEANS HERE, AND IT IS A REAL
+QUALIFICATION.** Importance MULTIPLIES fitness to the question rather than
+adding to it. So what the user marked overtakes what fits EQUALLY WELL —
+and does not overtake what fits better. Praise settles disputes; it does
+not override relevance.
+
+It used to be the other way round: importance was added to fitness and
+could outweigh it. The MRR gap was slightly larger for that (+0.052
+against +0.046), but a heavy node floated to the top of every query,
+including the ones it answered wrongly — and that cost fifteen points of
+recall on the external set.
 
 **External benchmark: LongMemEval.** All 500 questions, each with a
 haystack of ~48 chat sessions with the evidence buried inside. Measured

@@ -495,6 +495,162 @@ was no place where its absence showed. A split by function would not have
 helped — there supersession legitimately lives next to search, and nothing
 hints that biology has a separate mandatory step before storage.
 
+### 2.19 Three mechanisms rejected by measurements that could not measure them
+
+The costliest methodological error of the project, and it overturns three
+recorded conclusions at once.
+
+**What they had in common.** Candidate scoring was computed as
+
+    combined = min(1.0, relevance + importance × share)
+
+The hard clamp at one means importance HAS NOWHERE TO GROW: the heavier it
+weighs, the more often the sum crosses one and candidates collapse into a
+single score. Measured directly:
+
+| importance share | R@1 |
+|---:|---:|
+| 0.15 | 73.3% |
+| 0.40 | 30.0% |
+| 0.80 | 13.3% |
+
+**Three conclusions drawn under those conditions:**
+
+1. "A larger reinforcement step from retrieval does not pay off" (2.16) —
+   it won on three benches and lost on the fourth.
+2. "The soft shoulder on the strength ceiling must stay off" (2.16) — it
+   restored discrimination but dropped the near-duplicate bench from 83.3%
+   to 61.1%.
+3. "Credit by consequence is useless" — the negative branch moved one
+   question out of thirty with no dose-response at all.
+
+Every measurement was honest. Every conclusion was wrong: the mechanism was
+tested where it could not act, by construction of the formula.
+
+**WHAT WAS FIXED IS THE FORM, NOT THE NUMBERS.** Importance now MULTIPLIES
+relevance:
+
+    combined = relevance × (1 + importance × share)
+
+No ceiling, no collapse. The ordering by relevance survives and is merely
+stretched: a strong node overtakes one that matches equally well, but not
+one that matches better. This is the third time in the project that
+modulation beats addition — after the write gate and the strength ceiling.
+
+**The retrieval threshold changed together with the form** (0.3 → 0.20),
+and they cannot be changed apart. The first run at the old threshold showed
+the external benchmark regressing from 75.0% to 60.0% on R@5, and the
+verdict "the form is bad" was one step from being recorded here as a fourth
+error. What saved it was that R@10 fell just as far: recall at ten is not
+about ordering but about whether the answer reaches the result set at all —
+so entries were being filtered out, not out-competed.
+
+**The strength ceiling was lifted** (`strength_headroom` 0.0 → 1.0):
+strength now counts linearly across its whole declared range up to 3.0.
+Paired with multiplication, the very knob that dropped the near-duplicate
+bench yesterday behaves monotonically and at no cost:
+
+| shoulder | share of important in top 5 | MRR gap | near-duplicates R@1 |
+|---:|---:|---:|---:|
+| 0.00 | 86.3% | +0.010 | 83.3% |
+| 0.60 | 96.1% | +0.036 | 83.3% |
+| 1.00 | **100.0%** | +0.046 | 83.3% |
+
+**Result of the three changes, counted as one:**
+
+| bench | before | after |
+|---|---:|---:|
+| LongMemEval R@3 | 71.7% | **75.0%** |
+| LongMemEval R@5 | 75.0% | **83.3%** |
+| LongMemEval R@10 | 75.0% | **85.0%** |
+| near-duplicates R@1 | 44.4% | **83.3%** |
+| share of important in top 5 | 83.3% | **100.0%** |
+| MRR gap | +0.052 | +0.046 |
+| retention | 25 nodes, 100%/100% | unchanged |
+
+By question type: multi-session 83% → 96%, preference 60% → 80%, temporal
+83% → 92%, corrections unchanged.
+
+**THE PRICE IS STATED.** The MRR gap is slightly below the old one, and
+that is a consequence rather than an oversight: importance NO LONGER
+OVERTAKES relevance. Praise settles disputes between equally fitting
+entries; it does not override fitness to the question. "Important comes
+first" now means "important comes first among equally fitting", and the
+documents say so.
+
+**THE LESSON IS WORTH MORE THAN THE CHANGE.** The project rule was: before
+believing in a difference or its absence, check that the mechanism fired.
+It turns out a second layer is needed — a mechanism can fire perfectly and
+still have no way to act, if the channel is saturated or the scales are not
+comparable.
+
+Check not only that the mechanism fired, but that its action has somewhere
+to go.
+
+### 2.20 A common turn of phrase beat the one word that mattered
+
+The fifth mechanism rejected by a measurement that could not measure it —
+and this time the rejection was written into the README itself: "rarity
+weighting was written and reverted, it did not change a single hit".
+
+It was measured on `probe_semantic` — SIXTEEN FACTS. There, word frequency
+is meaningless by construction: nearly every word occurs once, and rarity
+distinguishes nobody from nobody. The conclusion was true for that bench
+and inapplicable to haystacks of hundreds of turns.
+
+**WHAT THE MEASUREMENT ON REAL DATA SHOWED.** Two failing LongMemEval
+questions, taken apart:
+
+    question  "I'm planning a trip to DENVER..."
+    first     "I'm planning a trip with friends"        0.425
+    second    "I'm planning a trip to California"       0.402
+    evidence  "During my previous visit to Denver..."   0.363
+
+    question  "I've been SNEEZING... my LIVING SPACE?"
+    the whole top five starts with "I've been...", evidence not in ten
+
+Keyword overlap counted "planning" and "Denver" alike. The shared opening
+won.
+
+**FIXED:** a matched word's weight falls with the number of entries that
+contain it. The frequency comes from the FULL-TEXT INDEX — one COUNT per
+word rather than a scan.
+
+| | without weighting | with weighting |
+|---|---:|---:|
+| **preference R@1** | **20%** | **60%** |
+| multi-session R@1 | 70% | 74% |
+| overall R@1 | 60.0% | **65.0%** |
+| R@3, R@5 | 75.0%, 83.3% | unchanged |
+| R@10 | 85.0% | 83.3% |
+
+Preferences — the worst question type in the project's history — got three
+times better. The other benches did not move: near-duplicates 83.3%, share
+of important in top 5 100.0%, retention 25 nodes at 100%/100%, liveness
+green.
+
+**A DEFECT ALONG THE WAY, CAUGHT BY A TEST.** The first version computed
+frequency over the PRE-FILTER CANDIDATES, which made scoring non-local: a
+node's score depended on who else got into the pre-filter, so the
+pre-filter stopped agreeing with exhaustive search.
+`test_prefilter_agrees_on_top_three` caught it — the same test that once
+caught normalising strength by the maximum among candidates. The same
+temptation: to compute something "among those who made it".
+
+Computing frequency over the whole store fixed correctness but cost the
+pre-filter's benefit (1805 → 2206 ms on 3 000 nodes). Taking it from the
+full-text index costs about 4% instead.
+
+**THE PRICE:** R@10 down 1.7 points, the "user" type from 62% to 50% at
+ten. A rare word may be a typo or an accident, and then the weight goes to
+the wrong place.
+
+**BIOLOGICALLY** this is the second half of pattern separation — at the
+level of REPRESENTATION rather than the decision to supersede. The dentate
+gyrus makes similar inputs dissimilar by emphasising what differs and
+damping what is shared. "What everyone has stops deciding" is exactly that
+in our terms. The first half went in as 2.18.
+
 ## 3. What remains
 
 ### 3.1 Defects
