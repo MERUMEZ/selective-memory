@@ -77,6 +77,7 @@ from selectivemem.plasticity import PlasticityDecision, PlasticityGate
 from selectivemem.reinforcement import ReinforcementLoop, ReinforcementOutcome
 from selectivemem.settings import MemorySettings
 from selectivemem.prefrontal import WorkingMemory
+from selectivemem.interoception import Interoception, InternalState
 
 
 @dataclass
@@ -176,6 +177,10 @@ class Memory:
         # получал вовсе — то же расхождение витрины с пакетом, что было с
         # ассоциациями. Найдено tools/check_liveness.py.
         self.stm = WorkingMemory(settings=self.settings)
+        # ВНУТРЕННЯЯ СРЕДА. Не хранится в базе намеренно: это состояние,
+        # а не знание. Проснувшись, организм не вспоминает вчерашнюю
+        # тесноту — он заново её чувствует, если она никуда не делась.
+        self.interoception = Interoception(settings=self.settings)
         # Последняя выдача: (запрос, id узлов, время). Нужна, чтобы
         # СЛЕДУЮЩИЙ вопрос мог её оценить — см. _judge_previous_recall.
         self._last_recall: Optional[tuple] = None
@@ -191,8 +196,8 @@ class Memory:
         self,
         text: str,
         response: str = "",
-        emotion: float = 0.0,
-        load: float = 0.0,
+        emotion: Optional[float] = None,
+        load: Optional[float] = None,
         timestamp: Optional[float] = None,
         action_type: str = "observation",
     ) -> Observation:
@@ -201,10 +206,18 @@ class Memory:
 
         text     — what the user said (or what happened);
         response — what the system replied, if it did;
-        emotion  — how charged the event is, [0, 1]. Where that number
-                   comes from is the application's call: the core does not
-                   infer it;
+        emotion  — how charged the event is, [0, 1]. Pass it when the
+                   application knows more about the event than the core
+                   can: a model read the text, a human rated it. LEFT OUT
+                   (or None), the organism answers for itself out of its
+                   own internal state — see interoception.py. Explicitly
+                   passed 0.0 still means 0.0: "not charged" and "did not
+                   say" are different things, and the signature tells them
+                   apart;
         load     — current overload, [0, 1]: raises the write threshold.
+                   LEFT OUT, the organism reports its own strain — how
+                   crowded its store is and how little of the world it
+                   currently understands;
 
         THE ORDER MATTERS and mirrors the living one: the organism is
         surprised by the input first and learns it only afterwards. The
@@ -214,6 +227,28 @@ class Memory:
         ts = timestamp if timestamp is not None else self.clock()
 
         surprise = self.graph.compute_surprise(text).total
+
+        # ЗНАЧИМОСТЬ СОБЫТИЯ. Явно переданная всегда главнее: приложение
+        # знает про событие то, чего ядро знать не может.
+        #
+        # Состояние берётся ТО, В КОТОРОМ ОРГАНИЗМ ВСТРЕТИЛ СОБЫТИЕ, — до
+        # того, как оно переварено. Иначе он реагировал бы на последствия
+        # того, что ещё не случилось.
+        # Два канала расходятся по двум входам гейта: срочность запись
+        # облегчает, напряжение — затрудняет. Свести их в один было бы
+        # неверно: организм, которому тесно, должен писать МЕНЬШЕ, а
+        # организм, чья модель мира разъехалась, — БОЛЬШЕ.
+        inner = self.interoception.state
+        if self.settings.intrinsic_emotion:
+            if emotion is None:
+                emotion = inner.urgency
+            if load is None:
+                load = inner.strain
+        if emotion is None:
+            emotion = 0.0
+        if load is None:
+            load = 0.0
+
         decision = self.gate.evaluate(emotion=emotion, surprise=surprise, load=load)
 
         # A contradiction is a reason to store in its own right. A
@@ -273,6 +308,16 @@ class Memory:
                     already_captured_by_spike=node_id is not None,
                 )
 
+        # ПЕРЕВАРИВАНИЕ СОБЫТИЯ ВНУТРЕННЕЙ СРЕДОЙ. После решения о записи:
+        # теснота изменилась именно этой записью, а противоречие стало
+        # известно именно сейчас.
+        self.interoception.sense(
+            surprise=surprise,
+            contradiction=bool(superseded),
+            stored=self.graph.gate.episodic.count(),
+            capacity=self.settings.memory_capacity,
+        )
+
         learned = self.graph.process_language_input(text, timestamp=ts)
 
         self.loop.record_action(
@@ -287,6 +332,21 @@ class Memory:
             superseded_ids=[n.id for n in superseded],
             learned_words=learned.new_words,
         )
+
+    def feel(self) -> InternalState:
+        """
+        Самочувствие организма прямо сейчас.
+
+        Возвращает отклонения по трём нуждам плюс две оси аффекта:
+        возбуждение (насколько нехорошо) и валентность (становится лучше
+        или хуже). Приложение может показывать это в /status, писать в
+        логи или подавать в подкрепление как собственную оценку организма:
+
+            state = memory.feel()
+            if abs(state.valence) > 0.3:
+                memory.feedback(state.valence)
+        """
+        return self.interoception.state
 
     # ----------------------------------------------------------------------
     # 2. Feedback

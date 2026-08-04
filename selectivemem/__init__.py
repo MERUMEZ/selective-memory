@@ -27,7 +27,9 @@ without locking anything away.
 """
 
 from selectivemem.memory import Memory, MemoryStats, Observation
+from selectivemem.interoception import InternalState
 from selectivemem.settings import MemorySettings
 
-__all__ = ["Memory", "MemoryStats", "Observation", "MemorySettings"]
+__all__ = ["Memory", "MemoryStats", "Observation", "MemorySettings",
+           "InternalState"]
 __version__ = "0.1.0"
