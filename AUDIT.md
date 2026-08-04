@@ -302,6 +302,72 @@ Nine tests failed rather than skipped on a clean install: they rely on
 semantics but carried no marker. A new user would have seen nine red
 tests and concluded the package was broken.
 
+### 2.16 Two defects covering for each other
+
+The work started from a simple question: why does reinforcement without
+an explicit `feedback()` call achieve nothing. The answer took a day and
+came in a pair.
+
+**First: the threshold is out of reach.** Strength grows by 0.05 per
+successful retrieval, but the effect switches on at a THRESHOLD of about
++0.6 accumulated strength rather than gradually — below it nothing moves:
+
+| revisits to a topic | gain | R@1 at 200 near-duplicates |
+|---:|---:|---:|
+| 3 | 0.15 | 38.9% |
+| 6 | 0.30 | 44.4% |
+| 12 | 0.60 | **83.3%** |
+
+Twelve revisits to one topic is not something conversation produces. The
+mechanism existed, fired, showed up in the counters — and could not
+affect anything.
+
+**Second: two thirds of the scale did not exist.** Candidate scoring took
+`min(1.0, own)` while `strength_max` was declared 3.0. A node at strength
+1.0 and a node at 3.0 ranked identically.
+
+**They covered for each other, and that is the point here.** While
+reinforcement was too weak, only praised nodes reached the ceiling and
+ordinary ones fell short — so the discrimination of important memories
+rested ON THE MECHANISM NOT WORKING. Measured by group (24 competing
+nodes):
+
+| step | praised at ceiling | ordinary at ceiling | MRR gap |
+|---:|---:|---:|---:|
+| 0.05 | 100% | 25% | +0.050 |
+| 0.15 | 100% | **67%** | +0.028 |
+
+Raise the step and both groups hit the ceiling, leaving nothing to tell
+apart. The drop looked like the price of the change; it was a symptom of
+the second defect.
+
+**How it ended: both defaults were put back.** A soft shoulder instead of
+a hard ceiling (`strength_headroom`) fixes the second defect and lifts
+the share of important items in the top 5 from 83.3% to 100.0% — but on
+the near-duplicate bench it drops R@1 from 83.3% to 61.1%, because it
+amplifies wrongly retrieved nodes as well. The near-duplicate bench is
+the product's stated niche; trading it for top-5 share is not on.
+
+The larger step won on three benches out of four, but only while the hard
+ceiling held — its benefit rested on a defect.
+
+So behaviour is unchanged and the knowledge grew:
+
+- the threshold is measured and reproducible via `--sweep-use-step`;
+- the ceiling now has a name (`strength_headroom`, default 0.0 = as
+  before) — it used to be an unnamed `min(1.0, own)` deep in the formula;
+- a negative result on competitor suppression: the pairing of a large
+  step with inhibition of losers, predicted from the biological analogy,
+  does not work (+0.028 -> +0.028 -> +0.025).
+
+**And the real cause is named.** Reinforcement without `feedback()` is
+blocked not by the size of the step but by the fact that the WHOLE result
+set is strengthened, not the answer that turned out to be right. While
+that holds, any speed-up of reinforcement also speeds up the entrenchment
+of errors. The cure is credit by consequence — the conversation moved on,
+no correction followed — which lives in `reinforcement.py`, not in a
+number in the settings.
+
 ## 3. What remains
 
 ### 3.1 Defects

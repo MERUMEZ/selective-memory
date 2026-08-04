@@ -29,21 +29,34 @@
 
 ВТОРОЙ ВОПРОС, И ОН ЧУТЬ НЕ ОСТАЛСЯ БЕЗ ОТВЕТА: что решает выдачу —
 вес узла или накопленная сила. Долгое время стенд отвечал на него
-неверно, потому что писал ВСЕ узлы с одним весом 0.7 и не подкреплял ни
-одного. При равных силах слагаемое одинаково у всех кандидатов и лишь
-сдвигает счёт целиком; переставить оно не может ничего. Включение и
-выключение ранжирования по силе давало побайтово одинаковые числа, и
-разница «плюс 33 пункта» попала в аудит, ничем не будучи измерена.
+неверно, и разница «плюс 33 пункта» попала в аудит, ничем не будучи
+измерена: включение и выключение ранжирования по силе давало ПОБАЙТОВО
+одинаковые числа.
 
-Теперь `--compare-strength` подкрепляет шесть фактов — так, как их
-отметило бы приложение, — и разница видна:
+Причина не в том, что силы у узлов равны между собой — они как раз
+разные, двойники давят друг друга штрафом за устаревание, и шесть фактов
+приходят к 0.000 против 0.029 у отвлекающих. Причина в том, что СИЛА И
+ВЕС ДЕРЖАТ ОДНО И ТО ЖЕ ЗНАЧЕНИЕ: штраф бьёт по обеим одинаково, а
+больше их здесь ничто не двигало. Выбор между двумя равными числами не
+меняет ничего.
 
-    важность из веса узла        44.4%  44.4%  61.1%   (50, 200, 800)
-    важность из накопленной силы 88.9%  94.4% 100.0%
+Расходятся они только от подкрепления, извлечения и затухания. Теперь
+это делают два флага:
+
+    --compare-strength   шесть фактов подкреплены, как их отметило бы
+                         приложение:
+                             из веса узла        44.4%  44.4%  61.1%
+                             из накопленной силы 88.9%  94.4% 100.0%
+
+    --sweep-use-step     похвалы нет вовсе, сила растёт только оттого,
+                         что к теме возвращаются. Отвечает на вопрос,
+                         сколько таких возвращений нужно, и показывает,
+                         что эффект включается ПОРОГОМ около +0.6.
 
 Запуск:
     python tools/compare_interference.py
     python tools/compare_interference.py --compare-strength
+    python tools/compare_interference.py --sweep-use-step
     python tools/compare_interference.py --levels 0,100,400,1600
 ================================================================================
 """
@@ -54,7 +67,7 @@ import random
 import statistics
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -112,7 +125,8 @@ def build_distractors(rng: random.Random, count: int) -> List[str]:
 
 def run_once(seed: int, distractors: int, top_k: int,
              suppression: float = 0.0, rehearsals: int = 0,
-             reinforce: float = 0.0, use_strength: bool = True) -> Dict[str, float]:
+             reinforce: float = 0.0, use_strength: bool = True,
+             use_step: Optional[float] = None) -> Dict[str, float]:
     rng = random.Random(seed)
     now = [1_700_000_000.0]
     memory = Memory(
@@ -121,6 +135,7 @@ def run_once(seed: int, distractors: int, top_k: int,
             delete_on_decay=False,
             use_relative_strength=use_strength,
             retrieval_suppression=suppression,
+            **({} if use_step is None else {"strength_use_step": use_step}),
         ),
         clock=lambda: now[0],
     )
@@ -185,6 +200,9 @@ def main() -> None:
                              "узлов равны и ранжировать по ней нечего")
     parser.add_argument("--compare-strength", action="store_true",
                         help="таблица «вес против силы» при подкреплённых фактах")
+    parser.add_argument("--sweep-use-step", action="store_true",
+                        help="сколько возвращений к теме нужно, чтобы она "
+                             "поднялась: развёртка по strength_use_step")
     parser.add_argument("--logs", action="store_true")
     args = parser.parse_args()
 
@@ -247,6 +265,34 @@ def main() -> None:
                 cells.append(f"{statistics.mean(vals)*100:12.1f}%")
             print(f" {label:<22} " + " ".join(cells))
         print("=" * 70)
+
+    if args.sweep_use_step:
+        # ПОДКРЕПЛЕНИЕ БЕЗ ЕДИНОГО ВЫЗОВА feedback. Здесь никто не хвалит:
+        # сила растёт только оттого, что к теме возвращаются. Это главный
+        # для продукта случай — приложения почти никогда не сообщают
+        # важность сами, а пользователь возвращается к своему всегда.
+        print()
+        print("=" * 70)
+        print(" СКОЛЬКО ВОЗВРАЩЕНИЙ К ТЕМЕ НУЖНО, ЧТОБЫ ОНА ПОДНЯЛАСЬ")
+        print("=" * 70)
+        print(" Похвалы нет. Растёт только то, что извлекали.")
+        print("-" * 70)
+        print(f" {'шаг':>6} {'повторов':>9} {'прирост':>9} "
+              + " ".join(f"{f'R@1 при {l}':>13}" for l in levels))
+        for step in (0.05, 0.15, 0.30):
+            for reh in (3, 6, 12):
+                cells = []
+                for level in levels:
+                    vals = [run_once(seed, level, args.top_k, args.suppression,
+                                     rehearsals=reh, reinforce=0.0,
+                                     use_strength=True, use_step=step)["r1"]
+                            for seed in seeds]
+                    cells.append(f"{statistics.mean(vals)*100:12.1f}%")
+                print(f" {step:>6.2f} {reh:>9} {step*reh:>9.2f} " + " ".join(cells))
+        print("=" * 70)
+        print(" Эффект включается ПОРОГОМ около +0.6, а не плавно. Отсюда")
+        print(" и умолчание 0.15: при 0.05 порог берётся за 12 возвращений,")
+        print(" чего в живом разговоре не бывает.")
 
 
 if __name__ == "__main__":
