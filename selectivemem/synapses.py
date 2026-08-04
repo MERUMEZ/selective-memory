@@ -128,7 +128,7 @@ class SynapsesMixin:
             return 0
 
         rows = [
-            row for row in self.db.fetch_all_nodes()
+            row for row in self.gate.node.all()
             if not row["is_meta"]
             and row["node_type"] not in self.LEXICAL_NODE_TYPES
         ]
@@ -138,7 +138,7 @@ class SynapsesMixin:
         rows.sort(key=self._keep_score)
         doomed = rows[: len(rows) - capacity]
         for row in doomed:
-            self.db.delete_node(row["id"])
+            self.gate.node.delete(row["id"])
 
         logger.info(
             "[CAPACITY] %d memories evicted, %d kept (limit %d)",
@@ -162,7 +162,7 @@ class SynapsesMixin:
 
     def _decay_nodes(self, current_time: float) -> int:
         """Exponential weight decay for nodes."""
-        rows = self.db.fetch_all_nodes()
+        rows = self.gate.node.all()
 
         updates = []
         to_forget = []
@@ -252,14 +252,14 @@ class SynapsesMixin:
                 decayed_count += 1
 
         if updates:
-            self.db.bulk_update_weights(updates)
+            self.gate.node.set_weights(updates)
             logger.info(
                 "[DECAY APPLIED] Weights updated: %d nodes (meta skipped: %d)",
                 len(updates), skipped_meta_count,
             )
 
         for node_id in to_forget:
-            self.db.delete_node(node_id)
+            self.gate.node.delete(node_id)
 
         if to_forget:
             logger.info("[MEMORY FORGOTTEN] Nodes deleted (weight < FORGET_THRESHOLD): %d", len(to_forget))
@@ -274,7 +274,7 @@ class SynapsesMixin:
         memories themselves. Edges below edge_forget_threshold are deleted
         outright.
         """
-        edges = self.db.fetch_all_edges()
+        edges = self.gate.edges.all()
 
         updates = []
         to_forget = []
@@ -317,14 +317,14 @@ class SynapsesMixin:
                 decayed_count += 1
 
         if updates:
-            self.db.bulk_update_edge_weights(updates)
+            self.gate.edges.set_weights(updates)
             logger.info(
                 "[EDGE DECAY APPLIED] Weights updated: %d edges (t=%.2f)",
                 len(updates), current_time,
             )
 
         for edge_id in to_forget:
-            self.db.delete_edge(edge_id)
+            self.gate.edges.delete(edge_id)
 
         if to_forget:
             logger.info(

@@ -67,7 +67,7 @@ class ConsolidationMixin:
         Returns the number of edges deleted.
         """
         threshold = min_weight if min_weight is not None else self.settings.edge_forget_threshold
-        deleted = self.db.delete_edges_below_weight(threshold)
+        deleted = self.gate.edges.delete_below(threshold)
         return deleted
 
     def prune_orphan_nodes(
@@ -90,13 +90,13 @@ class ConsolidationMixin:
             max_node_weight if max_node_weight is not None else self.settings.sleep_orphan_weight_threshold
         )
 
-        orphans = self.db.get_orphan_nodes(
+        orphans = self.gate.episodic.orphans(
             min_edge_weight=effective_edge_weight,
             max_node_weight=effective_node_weight,
         )
 
         for orphan in orphans:
-            self.db.delete_node(orphan["id"])
+            self.gate.node.delete(orphan["id"])
 
         if orphans:
             logger.info(
@@ -135,7 +135,7 @@ class ConsolidationMixin:
             return 0
 
         rows = [
-            row for row in self.db.fetch_searchable_nodes()
+            row for row in self.gate.episodic.searchable()
             if row["node_type"] == "episodic"
         ]
         if len(rows) < 2:
@@ -179,7 +179,7 @@ class ConsolidationMixin:
         if scale >= 1.0:
             return 0
 
-        edges = self.db.fetch_all_edges()
+        edges = self.gate.edges.all()
         if not edges:
             logger.info("[SLEEP DOWNSCALE] No edges to scale")
             return 0
@@ -195,7 +195,7 @@ class ConsolidationMixin:
             }
             for row in edges
         ]
-        self.db.bulk_update_edge_weights(updates)
+        self.gate.edges.set_weights(updates)
         logger.info(
             "[SLEEP DOWNSCALE] %d edges scaled by %.2f",
             len(updates), scale,
@@ -352,10 +352,10 @@ class ConsolidationMixin:
             # Сила при этом может отрасти от пользы: схема, к которой
             # постоянно обращаются, законно становится сильной.
             if node_id is not None and self.settings.consolidated_strength_factor < 1.0:
-                row = self.db.get_node(node_id)
+                row = self.gate.node.get(node_id)
                 if row is not None:
                     base = row["strength"] if row["strength"] is not None else row["weight"]
-                    self.db.add_strength(
+                    self.gate.node.add_strength(
                         node_id,
                         base * (self.settings.consolidated_strength_factor - 1.0),
                         self.settings.strength_max,

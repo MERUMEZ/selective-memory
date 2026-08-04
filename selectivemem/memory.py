@@ -232,7 +232,7 @@ class Memory:
                 # its predecessor's place. Otherwise the write would happen
                 # and the stale version would still win the search.
                 inherited = max(
-                    (self.graph.db.get_node(n.id)["weight"] for n in superseded),
+                    (self.graph.gate.node.get(n.id)["weight"] for n in superseded),
                     default=0.0,
                 )
                 weight = max(weight, inherited)
@@ -357,7 +357,7 @@ class Memory:
         "какой антибиотик выписали" человек не перебирает "мы обсуждали
         лекарства" как кандидата.
         """
-        rows = self.graph.db.fetch_summary_nodes()
+        rows = self.graph.gate.semantic.schemas()
         rows.sort(key=lambda r: r["created_at"], reverse=True)
         return [row["context"] for row in rows[:limit]]
 
@@ -570,7 +570,7 @@ class Memory:
             return 0
 
         for node_id in prev_ids:
-            self.graph.db.add_strength(node_id, -penalty, self.settings.strength_max)
+            self.graph.gate.node.add_strength(node_id, -penalty, self.settings.strength_max)
         logger.info(
             "[CONSEQUENCE] Question repeated (%r ~ %r) — %d nodes weakened by %.3f",
             query[:30], prev_query[:30], len(prev_ids), penalty,

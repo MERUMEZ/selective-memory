@@ -193,7 +193,7 @@ class RetrievalMixin:
             return []
 
         query_keywords = self._extract_keywords(query_normalized)
-        rows = self.db.fetch_searchable_nodes()
+        rows = self.gate.episodic.searchable()
 
         scored: List[MemoryMatch] = []
 
@@ -395,7 +395,7 @@ class RetrievalMixin:
             winners = {m.id for m in top_matches}
             losers = [m.id for m in scored if m.id not in winners]
             for node_id in losers[: self.settings.retrieval_suppression_limit]:
-                self.db.add_strength(
+                self.gate.node.add_strength(
                     node_id,
                     -self.settings.retrieval_suppression,
                     self.settings.strength_max,
@@ -504,7 +504,7 @@ class RetrievalMixin:
         if vector is None:
             return None
 
-        self.db.update_embedding(row["id"], embeddings.to_blob(vector))
+        self.gate.node.set_embedding(row["id"], embeddings.to_blob(vector))
         return vector
 
     def _encode(self, text: str):
@@ -573,7 +573,7 @@ class RetrievalMixin:
         # ПО ИНДЕКСУ, А НЕ ПЕРЕБОРОМ. Перебор всех записей ради частоты
         # съедал выигрыш предотбора: 753 мс против 2206 мс на трёх тысячах
         # узлов. Полнотекстовый индекс отвечает одним COUNT на слово.
-        counts = self.db.document_frequency(sorted(query_keywords))
+        counts = self.gate.episodic.document_frequency(sorted(query_keywords))
         total = len(rows)
         return {w: math.log(1.0 + total / max(1, c)) for w, c in counts.items()}
 
@@ -600,11 +600,11 @@ class RetrievalMixin:
 
         degrees: Dict[int, int] = {}
         if settings.importance_connectivity > 0.0:
-            degrees = self.db.get_degrees(ids)
+            degrees = self.gate.node.degrees(ids)
 
         rows: Dict[int, Any] = {}
         if settings.importance_use > 0.0 or settings.use_relative_strength:
-            rows = {row["id"]: row for row in self.db.get_nodes_by_ids(ids)}
+            rows = {row["id"]: row for row in self.gate.node.many(ids)}
 
         # ДОЛЯ вместо веса. Считается по кандидатам, а не по всей базе:
         # нормировать при записи значило бы трогать каждый узел на каждое
@@ -702,7 +702,7 @@ class RetrievalMixin:
         """
         effective_min_weight = min_weight if min_weight is not None else self.settings.edge_activation_threshold
 
-        edge_rows = self.db.get_edges_for_node(node_id)
+        edge_rows = self.gate.edges.for_node(node_id)
         strong_edges = [row for row in edge_rows if row["weight"] >= effective_min_weight]
         strong_edges.sort(key=lambda r: r["weight"], reverse=True)
 
@@ -711,7 +711,7 @@ class RetrievalMixin:
 
         results: List[AssociatedNode] = []
         for edge_row in strong_edges:
-            neighbor_row = self.db.get_node(edge_row["neighbor_id"])
+            neighbor_row = self.gate.node.get(edge_row["neighbor_id"])
             if neighbor_row is None:
                 continue
 

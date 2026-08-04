@@ -201,7 +201,7 @@ class MemoryGraph(
         Stored through the same meta-node mechanism as the sleep marker: a
         separate table for a single number would be excessive.
         """
-        row = self.db.get_meta_node("brain_epoch")
+        row = self.gate.semantic.meta("brain_epoch")
         if row is not None:
             try:
                 return float(row["context"])
@@ -214,7 +214,7 @@ class MemoryGraph(
         # is pinned: the benchmark's replies diverged on the very first
         # message with a bit-identical graph and RNG state.
         epoch = now if now is not None else time.time()
-        self.db.upsert_meta_node(
+        self.gate.semantic.upsert_meta(
             node_type="brain_epoch", content=str(epoch), weight=1.0, timestamp=epoch,
         )
         logger.info("[BRAIN EPOCH] Origin of subjective time: %.0f", epoch)
@@ -223,7 +223,7 @@ class MemoryGraph(
 
     def get_user_model_content(self) -> str:
         """Current text of the user model, falling back to the default."""
-        row = self.db.get_meta_node("user_model")
+        row = self.gate.semantic.meta("user_model")
         return row["context"] if row is not None else self.settings.default_user_model
 
 
@@ -346,7 +346,7 @@ class MemoryGraph(
 
 
     def get_top_nodes(self, limit: int = 5) -> List[MemoryMatch]:
-        rows = self.db.fetch_all_nodes()
+        rows = self.gate.node.all()
         nodes = [
             MemoryMatch(
                 id=row["id"],
@@ -363,10 +363,10 @@ class MemoryGraph(
         return nodes[:limit]
 
     def count_nodes(self) -> int:
-        return len(self.db.fetch_all_nodes())
+        return len(self.gate.node.all())
 
     def close(self) -> None:
-        self.db.close()
+        self.gate.close()
 
     def __enter__(self) -> "MemoryGraph":
         return self

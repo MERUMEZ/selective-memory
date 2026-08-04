@@ -123,7 +123,7 @@ class HippocampusMixin:
         # Отбор по общим словам ничего не теряет: вытеснение всё равно
         # требует пересечения не ниже contradiction_min_overlap, то есть
         # узел без единого общего слова был бы отвергнут дальше.
-        candidates = self.db.fetch_candidates_by_text(
+        candidates = self.gate.episodic.candidates_by_text(
             sorted(new_words), self.settings.supersede_scan_limit,
         )
         for row in candidates:
@@ -307,7 +307,7 @@ class HippocampusMixin:
         touched and its stability will grow back. Deletion would be
         irreversible; here a mistake is cheap and repairs itself.
         """
-        row = self.db.get_node(node_id)
+        row = self.gate.node.get(node_id)
         if row is None:
             return
 
@@ -317,8 +317,8 @@ class HippocampusMixin:
             self.settings.stability_initial, stability * self.settings.contradiction_stability_factor
         )
 
-        self.db.update_weight(node_id, new_weight)
-        self.db.update_stability(node_id, new_stability)
+        self.gate.node.set_weight(node_id, new_weight)
+        self.gate.node.set_stability(node_id, new_stability)
 
         # ШТРАФ ОБЯЗАН ДОХОДИТЬ ДО ТОГО, ЧТО РЕШАЕТ ВЫДАЧУ. После перехода
         # на модель интерференции ранжирование смотрит на накопленную силу,
@@ -328,7 +328,7 @@ class HippocampusMixin:
         # снова шёл устаревший "Рекс" вместо актуального "Бобика", то есть
         # вернулась ровно та болезнь, ради которой механизм и написан.
         if self.settings.use_relative_strength:
-            self.db.add_strength(
+            self.gate.node.add_strength(
                 node_id,
                 -self.settings.contradiction_weight_penalty,
                 self.settings.strength_max,
@@ -358,7 +358,7 @@ class HippocampusMixin:
         """
         initial_weight = weight if weight is not None else self.settings.base_plasticity_threshold
 
-        node_id = self.db.insert_node(
+        node_id = self.gate.episodic.insert(
             context=context,
             response=response,
             weight=initial_weight,
@@ -379,7 +379,7 @@ class HippocampusMixin:
         if node_id is not None:
             vector = self._encode(f"{context} {response}".strip())
             if vector is not None:
-                self.db.update_embedding(node_id, embeddings.to_blob(vector))
+                self.gate.node.set_embedding(node_id, embeddings.to_blob(vector))
 
         # A newer version of a fact supersedes the older one: otherwise
         # memory piles up mutually exclusive nodes and returns an
@@ -401,7 +401,7 @@ class HippocampusMixin:
 
     def touch_node(self, node_id: int, timestamp: Optional[float] = None) -> None:
         ts = timestamp if timestamp is not None else time.time()
-        self.db.update_last_accessed(node_id, timestamp=ts)
+        self.gate.node.touch(node_id, timestamp=ts)
         logger.debug("[MEMORY TOUCHED] id=%s last_accessed updated (t=%.2f)", node_id, ts)
 
     def connect_nodes(
@@ -435,7 +435,7 @@ class HippocampusMixin:
         # say — between the moment its id was recorded and this call. The
         # FOREIGN KEY on edges would otherwise blow up the insert, so the
         # edge is quietly skipped instead.
-        if self.db.get_node(node_from) is None or self.db.get_node(node_to) is None:
+        if self.gate.node.get(node_from) is None or self.gate.node.get(node_to) is None:
             logger.debug(
                 "[ASSOCIATION SKIP] Node %s or %s no longer exists (deleted) -> edge not created",
                 node_from, node_to,
@@ -445,7 +445,7 @@ class HippocampusMixin:
         boost = weight_boost if weight_boost is not None else self.settings.edge_boost_step
         ts = timestamp if timestamp is not None else time.time()
 
-        new_weight = self.db.upsert_edge(
+        new_weight = self.gate.edges.upsert(
             node_from=node_from,
             node_to=node_to,
             weight_boost=boost,
@@ -490,13 +490,13 @@ class HippocampusMixin:
         )
 
     def reinforce_node(self, node_id: int, boost: float = 0.1, timestamp: Optional[float] = None) -> None:
-        row = self.db.get_node(node_id)
+        row = self.gate.node.get(node_id)
         if row is None:
             logger.warning("[MEMORY REINFORCE] Node id=%s not found", node_id)
             return
 
         new_weight = min(1.0, row["weight"] + boost)
-        self.db.update_weight(node_id, new_weight)
+        self.gate.node.set_weight(node_id, new_weight)
         self.touch_node(node_id, timestamp=timestamp)
         logger.info("[MEMORY REINFORCED] id=%s new weight=%.3f", node_id, new_weight)
 
@@ -523,7 +523,7 @@ class HippocampusMixin:
         Returns None if the node has disappeared: it may have been pruned
         between the action and the rating.
         """
-        row = self.db.get_node(node_id)
+        row = self.gate.node.get(node_id)
         if row is None:
             return None
 
@@ -531,14 +531,14 @@ class HippocampusMixin:
         rpe = valence - expected
         new_expectation = max(-1.0, min(1.0, expected + self.settings.reward_expectation_learning_rate * rpe))
 
-        self.db.update_reward_expectation(node_id, new_expectation)
+        self.gate.node.set_reward_expectation(node_id, new_expectation)
         # Одобрение поднимает НАКОПЛЕННУЮ СИЛУ, а не только ожидание
         # награды. Вес для этого не годится: он затухает от времени, и
         # через две недели от похвалы не остаётся следа — замерено,
         # похвалённый узел терял 0.95 -> 0.17 за месяц. Сила часам не
         # подчиняется, поэтому одобрение сохраняется столько, сколько
         # его не разбавили новые записи.
-        self.db.add_strength(
+        self.gate.node.add_strength(
             node_id,
             valence * self.settings.strength_reward_step,
             self.settings.strength_max,
@@ -582,13 +582,13 @@ class HippocampusMixin:
         ageing at the next apply_decay, modelling the lower durability of
         a negatively reinforced link.
         """
-        row = self.db.get_node(node_id)
+        row = self.gate.node.get(node_id)
         if row is None:
             logger.warning("[MEMORY PENALIZE] Node id=%s not found", node_id)
             return
 
         new_weight = max(0.0, row["weight"] - penalty)
-        self.db.update_weight(node_id, new_weight)
+        self.gate.node.set_weight(node_id, new_weight)
         logger.info(
             "[MEMORY PENALIZED] id=%s weight %.3f -> %.3f (penalty=%.3f)",
             node_id, row["weight"], new_weight, penalty,

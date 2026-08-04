@@ -119,7 +119,7 @@ class NeocortexMixin:
         previous_word_id: Optional[int] = None
 
         for token in tokens:
-            word_id, word_was_created = self.db.upsert_lexical_node(
+            word_id, word_was_created = self.gate.semantic.upsert_lexical(
                 node_type="word",
                 text=token,
                 initial_weight=self.settings.word_node_initial_weight,
@@ -130,7 +130,7 @@ class NeocortexMixin:
             new_words += 1 if word_was_created else 0
 
             for syllable in self._split_into_syllables(token):
-                syllable_id, syll_was_created = self.db.upsert_lexical_node(
+                syllable_id, syll_was_created = self.gate.semantic.upsert_lexical(
                     node_type="syllable",
                     text=syllable,
                     initial_weight=self.settings.syllable_node_initial_weight,
@@ -210,7 +210,7 @@ class NeocortexMixin:
             return SurpriseResult(0.0, 0.0, 0.0, 0, 0, 0, 0)
 
         # --- Lexical novelty: are the words themselves familiar? ---
-        rows = self.db.get_lexical_nodes_by_texts("word", list(set(tokens)))
+        rows = self.gate.semantic.lexical_by_texts("word", list(set(tokens)))
         known = {row["context"]: (row["id"], row["weight"]) for row in rows}
 
         mastery = max(1e-9, self.settings.vocabulary_mastery_min_weight)
@@ -223,7 +223,7 @@ class NeocortexMixin:
         # --- Structural novelty: are the pairings familiar? ---
         token_ids = [known[t][0] for t in tokens if t in known]
         edge_weights = {}
-        for edge in self.db.get_edges_between(list(set(token_ids))):
+        for edge in self.gate.edges.between(list(set(token_ids))):
             # Pairs are stored undirected, so both orders go into the
             # lookup and the actual word order of the input can be used.
             a, b, w = edge["node_from"], edge["node_to"], edge["weight"]
@@ -346,7 +346,7 @@ class NeocortexMixin:
         reflects what the bot has genuinely LEARNED rather than everything
         that ever passed through it.
         """
-        return self.db.count_mastered_words(self.settings.vocabulary_mastery_min_weight)
+        return self.gate.semantic.count_mastered(self.settings.vocabulary_mastery_min_weight)
 
     def get_exposed_vocabulary_size(self) -> int:
         """
@@ -407,7 +407,7 @@ class NeocortexMixin:
             return []
 
         threshold = self.settings.vocabulary_mastery_min_weight
-        rows = self.db.get_lexical_nodes_by_texts("word", list(set(tokens)))
+        rows = self.gate.semantic.lexical_by_texts("word", list(set(tokens)))
         known = {
             row["context"]: (row["id"], row["weight"], row["reward_expectation"] or 0.0)
             for row in rows
@@ -455,7 +455,7 @@ class NeocortexMixin:
         `limit` defaults to settings.babbling_syllable_pool_size.
         """
         effective_limit = limit if limit is not None else self.settings.babbling_syllable_pool_size
-        rows = self.db.get_random_nodes_by_type("syllable", limit=effective_limit)
+        rows = self.gate.semantic.sample_syllables(limit=effective_limit)
         return [
             KnownSyllable(id=row["id"], text=row["context"], weight=row["weight"])
             for row in rows
@@ -487,7 +487,7 @@ class NeocortexMixin:
         ts = timestamp if timestamp is not None else time.time()
         normalized_name = name.strip()
 
-        concept_node_id, was_created = self.db.upsert_concept_node(
+        concept_node_id, was_created = self.gate.semantic.upsert_concept(
             name=normalized_name,
             definition=definition.strip(),
             weight=self.settings.concept_node_weight,
@@ -495,7 +495,7 @@ class NeocortexMixin:
         )
 
         # --- Link to the user model: the source of this knowledge ---
-        user_row = self.db.get_meta_node("user_model")
+        user_row = self.gate.semantic.meta("user_model")
         if user_row is not None:
             self.connect_nodes(
                 concept_node_id,
@@ -594,7 +594,7 @@ class NeocortexMixin:
             max_spokes if max_spokes is not None else self.settings.sleep_max_cluster_spokes
         )
 
-        hub_rows = self.db.get_hub_candidates(min_edge_weight=effective_edge_weight)
+        hub_rows = self.gate.semantic.hub_candidates(min_edge_weight=effective_edge_weight)
 
         clusters: List[HubCluster] = []
         used_node_ids: set = set()
@@ -676,7 +676,7 @@ class NeocortexMixin:
         # РЕЛЕВАНТНОСТИ, а не на важности.
         #
         # Схема достаётся отдельным ходом — Memory.summaries().
-        abstract_node_id = self.db.insert_node(
+        abstract_node_id = self.gate.semantic.insert_schema(
             context=summary_context,
             response=summary_response,
             weight=effective_weight,
@@ -685,12 +685,12 @@ class NeocortexMixin:
         )
 
         for source_id in source_node_ids:
-            source_row = self.db.get_node(source_id)
+            source_row = self.gate.node.get(source_id)
             if source_row is None:
                 continue
 
             archived_weight = source_row["weight"] * self.settings.sleep_archive_weight_multiplier
-            self.db.update_weight(source_id, archived_weight)
+            self.gate.node.set_weight(source_id, archived_weight)
 
             # АБСТРАКЦИЯ ЗАБИРАЕТ ДОЛЮ, а не прибавляется сверху. Прежде
             # сон добавлял узел и не убирал ни одного, то есть память
@@ -701,7 +701,7 @@ class NeocortexMixin:
                 base = source_row["strength"]
                 if base is None:
                     base = source_row["weight"]
-                self.db.add_strength(
+                self.gate.node.add_strength(
                     source_id,
                     base * (self.settings.sleep_archive_weight_multiplier - 1.0),
                     self.settings.strength_max,
