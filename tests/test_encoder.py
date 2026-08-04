@@ -162,7 +162,11 @@ def test_missing_semantics_is_announced_once():
     memory = Memory(":memory:", encoder=lambda text: None)
     memory.observe("у меня аллергия на пенициллин", emotion=0.9)
 
-    logger = logging.getLogger("selectivemem.graph_memory")
+    # Логгер ИЗВЛЕЧЕНИЯ: предупреждение об отсутствии семантики печатает
+    # search, а он живёт в retrieval.py с тех пор, как граф разнесли по
+    # участкам. Слушать старое имя модуля значило бы не услышать ничего и
+    # решить, что предупреждение пропало.
+    logger = logging.getLogger("selectivemem.retrieval")
     records = []
     handler = logging.Handler()
     handler.emit = records.append
