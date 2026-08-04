@@ -356,7 +356,7 @@ class NeocortexMixin:
         shows how many words are still on their way to being learned. NOT
         used to gate speech stages.
         """
-        return self.db.count_nodes_by_type("word")
+        return self.gate.semantic.count_words()
 
     def get_mastered_words_in(self, text: str) -> List[KnownWord]:
         """
@@ -442,7 +442,7 @@ class NeocortexMixin:
         Shows the teacher what has actually taken hold in the bot's
         language.
         """
-        rows = self.db.get_top_nodes_by_type("word", limit=limit)
+        rows = self.gate.semantic.top_words(limit)
         return [(row["context"], row["weight"]) for row in rows]
 
     def get_known_syllables(self, limit: Optional[int] = None) -> List[KnownSyllable]:

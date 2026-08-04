@@ -79,6 +79,9 @@ from selectivemem import embeddings
 # когда её не спрашивают, и держать её вперемешку с записью и поиском
 # значило не замечать, что двух первых стадий у сна вовсе нет.
 from selectivemem.consolidation import ConsolidationMixin
+# Ворота: единственный типизированный вход в хранилища. См. entorhinal.py —
+# там же записано, почему прямой доступ к базе однажды стоил живого дефекта.
+from selectivemem.entorhinal import Gateway
 from selectivemem.hippocampus import HippocampusMixin
 # Забывание — в forgetting.py. Там же записано, что теорий в нём сейчас
 # две: ранжирование живёт по интерференции, а само затухание всё ещё
@@ -157,6 +160,8 @@ class MemoryGraph(
         # arguments behaves exactly as before.
         self.settings = settings or MemorySettings()
         self.db = db or Database(settings=self.settings)
+        # Ворота держат ту же базу и раздают типизированные виды на неё.
+        self.gate = Gateway(db)
 
         # THE MEANING ENCODER IS PLUGGABLE. The bundled one is navec,
         # Russian static vectors: light and free of torch, but Russian.

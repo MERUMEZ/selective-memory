@@ -658,7 +658,7 @@ class Memory:
         """A snapshot for a dashboard, a status command or debugging."""
         return MemoryStats(
             nodes=self.graph.count_nodes(),
-            episodes=self.graph.db.count_nodes_by_type("episodic"),
+            episodes=self.graph.gate.episodic.count(),
             vocabulary=self.graph.get_vocabulary_size(),
             threshold=self.gate.base_threshold,
             semantic=self.graph._encode("probe") is not None,
