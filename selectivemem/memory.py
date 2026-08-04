@@ -81,10 +81,20 @@ from selectivemem.working_memory import WorkingMemory
 
 @dataclass
 class SleepReport:
-    """Что сделал сон: подрезал связей, убрал сирот, свернул кластеров."""
+    """
+    Что сделал сон, по стадиям — в том же порядке, в каком они идут.
+
+    replayed_nodes    — сколько сильнейших следов переиграно (реактивация);
+    edges_downscaled  — сколько связей понижено гомеостатически;
+    edges_pruned      — сколько связей срезано;
+    orphan_nodes_pruned — сколько узлов осталось без связей и убрано;
+    clusters_consolidated — сколько кластеров свёрнуто в абстракцию.
+    """
     edges_pruned: int
     orphan_nodes_pruned: int
     clusters_consolidated: int
+    replayed_nodes: int = 0
+    edges_downscaled: int = 0
 
 logger = logging.getLogger(__name__)
 
@@ -358,6 +368,20 @@ class Memory:
         """
         ts = timestamp if timestamp is not None else self.clock()
 
+        # ПОРЯДОК СТАДИЙ ПОВТОРЯЕТ НОЧНОЙ, и он не переставляем.
+        #
+        # 1. Реактивация: сильнейшие следы переигрываются вместе, связи
+        #    между ними крепнут. Раньше этой стадии не было вовсе, а без
+        #    неё сон только чистит — тогда как переносит память в кору
+        #    именно она.
+        # 2. Гомеостатическое понижение: все связи слабеют пропорционально.
+        #    ПОСЛЕ реплея, иначе оно погасило бы то, что он только что
+        #    построил.
+        # 3. Подрезка: под нож идёт не выдержавшее сжатия.
+        # 4. Свёртка кластера в абстракцию — на структуре, которую
+        #    подготовил реплей.
+        replayed = self.graph.replay(timestamp=ts)
+        scaled = self.graph.downscale_edges()
         report = self.graph.run_synaptic_pruning()
         clusters = self.graph.find_hub_clusters(limit=1, timestamp=ts)
 
@@ -382,6 +406,8 @@ class Memory:
             edges_pruned=report.edges_pruned,
             orphan_nodes_pruned=report.orphan_nodes_pruned,
             clusters_consolidated=abstracts,
+            replayed_nodes=replayed,
+            edges_downscaled=scaled,
         )
 
     def _associate_with_recalled(self, node_id: Optional[int], timestamp: float) -> None:

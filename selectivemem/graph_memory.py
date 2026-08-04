@@ -2172,6 +2172,102 @@ class MemoryGraph:
 
         return len(orphans)
 
+    def replay(self, limit: Optional[int] = None,
+               timestamp: Optional[float] = None) -> int:
+        """
+        Реактивация во сне: сильнейшие следы переигрываются вместе, и
+        связи между ними крепнут.
+
+        ЭТО ПЕРВАЯ СТАДИЯ КОНСОЛИДАЦИИ, И ЕЁ У НАС НЕ БЫЛО. Сон делал
+        только последние две — подрезку и свёртку кластера, — тогда как
+        именно реактивация переносит след из гиппокампа в кору. В
+        медленном сне дневные последовательности переигрываются пачками
+        разрядов, причём избирательно: то, что привело к награде, чаще.
+
+        Отбор здесь по накопленной силе, то есть по тому, что уже
+        доказало пользу или получило одобрение. Это и есть избирательность
+        реплея, выраженная тем, что у нас для неё есть.
+
+        УКРЕПЛЯЮТСЯ СВЯЗИ, А НЕ СИЛА УЗЛОВ, и это не мелочь. Поднимать
+        силу вслепую мы уже пробовали: замер показал, что так закрепляется
+        и ошибочно извлечённое (раздел 2.16 аудита). Связь же говорит не
+        "это важно", а "эти двое про одно и то же" — из неё на следующей
+        стадии и вырастает схема, которую сворачивает create_abstract_node.
+
+        Возвращает число переигранных узлов.
+        """
+        count = limit if limit is not None else self.settings.sleep_replay_nodes
+        if count <= 0:
+            return 0
+
+        rows = [
+            row for row in self.db.fetch_searchable_nodes()
+            if row["node_type"] == "episodic"
+        ]
+        if len(rows) < 2:
+            logger.info("[SLEEP REPLAY] Too few nodes to replay: %d", len(rows))
+            return 0
+
+        rows.sort(
+            key=lambda r: (r["strength"] if r["strength"] is not None else r["weight"]),
+            reverse=True,
+        )
+        selected = [row["id"] for row in rows[:count]]
+        self.reinforce_coactivation(
+            selected,
+            weight_boost=self.settings.sleep_replay_edge_boost,
+            timestamp=timestamp,
+        )
+        logger.info(
+            "[SLEEP REPLAY] Replayed %d strongest traces, %d pairs linked",
+            len(selected), len(selected) * (len(selected) - 1) // 2,
+        )
+        return len(selected)
+
+    def downscale_edges(self, factor: Optional[float] = None) -> int:
+        """
+        Гомеостатическое понижение: ВСЕ связи слабеют пропорционально.
+
+        Гипотеза синаптического гомеостаза (Тонони и Чирелли): за день
+        синапсы в среднем усиливаются, и сон нужен, чтобы вернуть их к
+        рабочему уровню, понизив все разом. Относительный порядок при этом
+        сохраняется — теряется только то, что и так держалось на волоске.
+
+        Тот же принцип, на который мы уже перевели ранжирование: значение
+        имеет доля, а не абсолютная величина. После понижения подрезка
+        перестаёт быть отдельной политикой с собственным порогом и
+        становится его следствием: под нож идёт ровно то, что не выдержало
+        общего сжатия.
+
+        Возвращает число изменённых связей.
+        """
+        scale = factor if factor is not None else self.settings.sleep_downscale_factor
+        if scale >= 1.0:
+            return 0
+
+        edges = self.db.fetch_all_edges()
+        if not edges:
+            logger.info("[SLEEP DOWNSCALE] No edges to scale")
+            return 0
+
+        # last_decayed_at переносится КАК ЕСТЬ. Понижение — не затухание:
+        # оно не отсчитывает время заново, иначе сон незаметно продлевал
+        # бы жизнь всем связям разом, сдвигая им точку отсчёта.
+        updates = [
+            {
+                "id": row["id"],
+                "weight": row["weight"] * scale,
+                "last_decayed_at": row["last_decayed_at"],
+            }
+            for row in edges
+        ]
+        self.db.bulk_update_edge_weights(updates)
+        logger.info(
+            "[SLEEP DOWNSCALE] %d edges scaled by %.2f",
+            len(updates), scale,
+        )
+        return len(updates)
+
     def run_synaptic_pruning(self) -> PruningReport:
         """
         The full synaptic pruning cycle: weak edges are cut first, orphan

@@ -86,8 +86,19 @@ def run_once(seed: int, rounds: int, do_sleep: bool) -> Dict[str, float]:
     memory.forget(now=now[0])
 
     before = memory.graph.db.count_nodes_by_type("episodic")
+    # ОТЧЁТ СНА, А НЕ ДОГАДКА ПО ЧИСЛУ УЗЛОВ. Прежде стенд судил о работе
+    # сна по тому, уменьшилось ли количество узлов, и печатал "кластеров
+    # не нашлось", когда оно не менялось. Это было неверно: кластер
+    # находился и сворачивался, просто заархивированные источники никто
+    # не удаляет — delete_on_decay=False ставит сам этот стенд, чтобы
+    # мерить сон, а не удаление по возрасту.
+    #
+    # То есть инструмент отрицал работу механизма, который отработал.
+    # Ровно тот класс ошибки, что этот проект ловит: сначала убедиться,
+    # что мерится то, что думаешь.
+    report = None
     if do_sleep:
-        memory.sleep(timestamp=now[0])
+        report = memory.sleep(timestamp=now[0])
     after = memory.graph.db.count_nodes_by_type("episodic")
 
     found = 0
@@ -97,8 +108,17 @@ def run_once(seed: int, rounds: int, do_sleep: bool) -> Dict[str, float]:
         if topic.lower() in text.lower():
             found += 1
 
+    # Архив считается ДО закрытия базы: после close() соединения нет.
+    archived = sum(
+        1 for r in memory.graph.db.fetch_all_nodes()
+        if r["node_type"] == "episodic" and r["weight"] < 0.4
+    )
     memory.close()
     return {
+        "clusters": report.clusters_consolidated if report else 0,
+        "replayed": report.replayed_nodes if report else 0,
+        "downscaled": report.edges_downscaled if report else 0,
+        "archived": archived,
         "nodes_before": before,
         "nodes_after": after,
         "recall": found / len(TOPICS),
@@ -120,7 +140,8 @@ def main() -> None:
     print(f" Тем: {len(TOPICS)} (плотных, пересекающихся), кругов: {args.rounds},")
     print(f" сидов: {len(seeds)}. Связывание включено — без рёбер нет кластеров.")
     print("-" * 74)
-    print(f" {'':16} {'узлов до':>10} {'узлов после':>13} {'найдено тем':>13}")
+    print(f" {'':16} {'узлов до':>10} {'узлов после':>13} {'найдено тем':>13}"
+          f" {'кластеров':>9} {'в архиве':>10} {'реплей':>10}")
 
     results = {}
     for do_sleep in (False, True):
@@ -128,19 +149,31 @@ def main() -> None:
         before = statistics.mean(r["nodes_before"] for r in rows)
         after = statistics.mean(r["nodes_after"] for r in rows)
         recall = statistics.mean(r["recall"] for r in rows)
-        results[do_sleep] = (after, recall)
+        clusters = statistics.mean(r["clusters"] for r in rows)
+        archived = statistics.mean(r["archived"] for r in rows)
+        replayed = statistics.mean(r["replayed"] for r in rows)
+        results[do_sleep] = (after, recall, clusters, archived, replayed)
         label = "со сном" if do_sleep else "без сна"
-        print(f" {label:16} {before:10.1f} {after:13.1f} {recall*100:12.1f}%")
+        print(f" {label:16} {before:10.1f} {after:13.1f} {recall*100:12.1f}%"
+              f" {clusters:9.1f} {archived:10.1f} {replayed:10.1f}")
 
     print("=" * 74)
-    (nodes_no, recall_no) = results[False]
-    (nodes_yes, recall_yes) = results[True]
+    (nodes_no, recall_no, _c, arch_no, _r) = results[False]
+    (nodes_yes, recall_yes, clusters_yes, arch_yes, replayed_yes) = results[True]
+    print(f" Свёрнуто кластеров: {clusters_yes:.1f}   переиграно следов: {replayed_yes:.1f}")
+    print(f" Заархивировано узлов (вес < 0.4): {arch_no:.1f} без сна -> {arch_yes:.1f} со сном")
     saved = (nodes_no - nodes_yes) / nodes_no * 100 if nodes_no else 0.0
     lost = (recall_no - recall_yes) * 100
     print(f" СЖАТИЕ: {saved:+.1f}% узлов     ПОТЕРЯ НАХОДИМОСТИ: {lost:+.1f} пунктов")
-    if saved < 1.0:
-        print(" Сон ничего не сжал: кластеров не нашлось. Смотреть на плотность")
+    if saved < 1.0 and clusters_yes < 0.5:
+        print(" Сон не нашёл ни одного кластера. Смотреть на плотность")
         print(" разговора и на то, образуются ли рёбра вообще.")
+    elif saved < 1.0:
+        print(f" Сон свернул {clusters_yes:.1f} кластера, но узлов не убыло:")
+        print(" архивирование только понижает вес и силу, а удаления по")
+        print(" возрасту в этом прогоне нет. Сжатия в штуках здесь ждать")
+        print(" неоткуда — смотреть надо на находимость и на то, перестали")
+        print(" ли источники конкурировать в выдаче.")
     elif lost > 5:
         print(" ВРЕДИТЕЛЬ: сжатие оплачено потерей ответов.")
     else:

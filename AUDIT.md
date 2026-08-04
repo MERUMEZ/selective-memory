@@ -368,6 +368,47 @@ of errors. The cure is credit by consequence — the conversation moved on,
 no correction followed — which lives in `reinforcement.py`, not in a
 number in the settings.
 
+### 2.17 Sleep had no first two stages, and the bench lied about it
+
+Sleep pruned weak edges and folded a dense cluster into an abstraction —
+the third and fourth stages of consolidation. The first two, the ones
+sleep exists for in biology, were missing entirely.
+
+**Reactivation.** In slow-wave sleep the hippocampus replays daytime
+sequences in bursts, and does so selectively: what led to reward replays
+more often. That is what moves a trace into cortex.
+
+**Homeostatic downscaling.** Synapses strengthen on average through the
+day, and sleep scales them ALL down proportionally (the synaptic
+homeostasis hypothesis, Tononi and Cirelli). Relative order survives,
+while whatever was hanging by a thread drops out on its own — pruning
+stops being a separate policy with an absolute threshold and becomes a
+consequence of the general shrinkage. The same principle ranking was
+already moved to: the share matters, not the absolute.
+
+Both stages are implemented (`MemoryGraph.replay`,
+`MemoryGraph.downscale_edges`) and LEFT OFF: no benefit could be measured.
+Replay strengthens edges rather than node strength — deliberately, since
+growing strength blindly was already tried (see 2.16) and entrenches
+wrongly retrieved nodes.
+
+**WHILE LOOKING FOR THEM, A DEFECT TURNED UP IN THE BENCH ITSELF.**
+`tools/compare_sleep.py` judged sleep by node count and printed "sleep
+compressed nothing: no clusters found". The check showed the opposite: a
+cluster is found and folded, the abstract node is created, sources are
+archived — from 18.3 to 20.3 archived nodes.
+
+Node counts do not fall for a different, architectural reason. Archiving
+only LOWERS the weight and strength of sources, while deletion by age is
+gone — switched off for the sake of recall, which it raised by 18.6
+points. Two decisions taken at different times contradict each other:
+sleep files things into an archive nobody empties.
+
+The bench now takes its numbers from `SleepReport` instead of guessing
+from node counts, and prints the stages separately. An instrument denying
+the work of a mechanism that did work is exactly the class of error this
+project keeps catching — this time it was in the measuring device.
+
 ## 3. What remains
 
 ### 3.1 Defects
