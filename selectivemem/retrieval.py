@@ -259,7 +259,7 @@ class RetrievalMixin:
         # Частота берётся ПО КАНДИДАТАМ, а не по всей базе: это те, кто уже
         # откликнулся на запрос, и различать надо именно их. Слово, общее
         # для всей выдачи, не говорит ни о чём.
-        idf = self._keyword_idf(prefiltered, query_keywords)
+        idf = self._keyword_idf(rows, query_keywords)
 
         for row, keyword_score, semantic_score in prefiltered:
             if idf is not None:
@@ -543,14 +543,22 @@ class RetrievalMixin:
             return 0.0
         return sum(idf.get(w, 1.0) for w in intersection) / total
 
-    def _keyword_idf(self, prefiltered, query_keywords: Set[str]):
+    def _keyword_idf(self, rows, query_keywords: Set[str]):
         """
-        Различающая сила каждого слова запроса среди КАНДИДАТОВ.
+        Различающая сила каждого слова запроса ПО ВСЕЙ ВЫДАЧЕ.
 
-        idf(слово) = log(1 + N / сколько кандидатов его содержат)
+        idf(слово) = log(1 + N / сколько записей его содержат)
 
         Слово, встречающееся у всех, получает около нуля и перестаёт
         решать; слово у одного-двух — максимум.
+
+        ПОЧЕМУ ПО ВСЕЙ БАЗЕ, А НЕ ПО КАНДИДАТАМ ПРЕДОТБОРА. Первая версия
+        считала частоту по кандидатам, и это делало оценку НЕЛОКАЛЬНОЙ:
+        счёт узла зависел от того, кто ещё попал в предотбор, поэтому
+        предотбор переставал сходиться с полным перебором. Поймал это
+        test_prefilter_agrees_on_top_three — тот же тест, что раньше уже
+        ловил нормировку силы по максимуму среди кандидатов. Один и тот же
+        соблазн: посчитать что-нибудь «среди тех, кто дошёл».
 
         ПРОШЛАЯ ПОПЫТКА БЫЛА ОТВЕРГНУТА И ОТВЕРГНУТА ЗРЯ. Её мерили на
         probe_semantic — шестнадцать фактов, — где частота слова
@@ -558,17 +566,15 @@ class RetrievalMixin:
         раз. Вывод «не изменило ни одного попадания» был верен для того
         стенда и неприменим к стогам в сотни реплик.
         """
-        if not self.settings.keyword_idf or not query_keywords or not prefiltered:
+        if not self.settings.keyword_idf or not query_keywords or not rows:
             return None
         import math
 
-        counts = {w: 0 for w in query_keywords}
-        for row, _kw, _sem in prefiltered:
-            words = self._extract_keywords(row["context"].strip().lower())
-            for w in query_keywords:
-                if w in words:
-                    counts[w] += 1
-        total = len(prefiltered)
+        # ПО ИНДЕКСУ, А НЕ ПЕРЕБОРОМ. Перебор всех записей ради частоты
+        # съедал выигрыш предотбора: 753 мс против 2206 мс на трёх тысячах
+        # узлов. Полнотекстовый индекс отвечает одним COUNT на слово.
+        counts = self.db.document_frequency(sorted(query_keywords))
+        total = len(rows)
         return {w: math.log(1.0 + total / max(1, c)) for w, c in counts.items()}
 
     @staticmethod
