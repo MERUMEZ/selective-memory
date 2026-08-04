@@ -508,7 +508,39 @@ class RetrievalMixin:
         return vector
 
     def _encode(self, text: str):
-        """The meaning vector through the attached encoder, or None."""
+        """
+        Вектор смысла: свой кодировщик, готовая модель или ВЫРАЩЕННОЕ
+        восприятие — в этом порядке.
+
+        Выращенное идёт последним не потому, что хуже, а потому что оно
+        принадлежит именно этому организму: если приложение дало свой
+        кодировщик, значит у него есть общий язык, и подменять его личным
+        опытом нельзя.
+
+        Но когда своего нет, личный опыт ЛУЧШЕ встроенной модели. Замер:
+        на русском встроенная даёт кот/бетон 0.803 против кот/кошка 0.643 —
+        то есть перевёрнутый порядок, — а выращенное после 2360 показов
+        даёт 0.080 против 0.935.
+        """
+        # ОДНО ВОСПРИЯТИЕ НА ОРГАНИЗМ, И ПОДМЕШИВАТЬ НЕЛЬЗЯ.
+        #
+        # Первая версия падала на готовую модель, когда выращенное ещё не
+        # знало слов запроса. Получались векторы ИЗ ДВУХ РАЗНЫХ
+        # ПРОСТРАНСТВ, а косинус между ними не значит ничего: числа есть,
+        # смысла нет. Двадцать тестов покраснели, и правильно.
+        #
+        # Поэтому если восприятие растёт — оно единственное. Не знает слов
+        # запроса? Значит организм этого не видел, и честный ответ «нет
+        # вектора», а поиск переходит на совпадение слов. Новорождённый и
+        # не должен различать смысл.
+        perception = getattr(self, "perception", None)
+        if self.encoder is None and perception is not None:
+            tokens = self._tokenize_for_lexicon(text)
+            grown = perception.encode(tokens) if tokens else None
+            if grown is not None and self._vector_dim is None:
+                self._vector_dim = len(grown)
+            return grown
+
         encode = self.encoder if self.encoder is not None else embeddings.encode
         vector = encode(text)
         if vector is not None and self._vector_dim is None:

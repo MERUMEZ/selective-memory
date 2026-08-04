@@ -851,7 +851,15 @@ class Database:
         """
         cursor = self._conn.cursor()
         cursor.execute(
-            "SELECT * FROM nodes WHERE node_type IN ('episodic', 'concept')"
+            # 'fact' — выведенное корой из повторяющегося. Оно участвует в
+            # поиске наравне с эпизодами, и это принципиально: кора должна
+            # уметь ОТВЕЧАТЬ, когда отдельного события уже не найти.
+            #
+            # Опасность известна и учтена: свёртки эпизодов в общем поиске
+            # роняли R@1 с 76% до 42%, потому что содержали столько слов,
+            # что совпадали почти с любым запросом. Факт устроен иначе — он
+            # индексируется ОДНОЙ темой, а текст случая несёт в ответе.
+            "SELECT * FROM nodes WHERE node_type IN ('episodic', 'concept', 'fact')"
         )
         return cursor.fetchall()
 
@@ -1431,6 +1439,80 @@ class Database:
             (node_type, text),
         )
         return cursor.fetchone()
+
+    def upsert_cortex_fact(
+        self,
+        theme: str,
+        text: str,
+        meaning: str,
+        strength_step: float,
+        cap: float,
+        timestamp: Optional[float] = None,
+    ) -> Optional[int]:
+        """
+        Корковый факт, выведенный из повторяющейся темы.
+
+        Ключ — ТЕМА (набор общих слов), а не текст очередного случая:
+        «люблю кофе по утрам» и «кофе мой любимый» должны дать один факт,
+        а не два узла.
+
+        Сила растёт ЛОГАРИФМИЧЕСКИ от числа встреч. Это не украшение:
+        линейный рост сделал бы часто повторяемое непобедимым в выдаче, а
+        кора учится с насыщением — десятая встреча добавляет заметно
+        меньше второй.
+        """
+        import math
+
+        ts = timestamp if timestamp is not None else time.time()
+        cursor = self._conn.cursor()
+        existing = cursor.execute(
+            "SELECT id, occurrences FROM cortex WHERE kind = 'fact' AND text = ?",
+            (theme,),
+        ).fetchone()
+
+        if existing is None:
+            node_id = self._next_id()
+            cursor.execute(
+                """
+                INSERT INTO cortex (id, kind, text, meaning, weight, strength,
+                                    occurrences, created_at, last_accessed,
+                                    last_decayed_at)
+                VALUES (?, 'fact', ?, ?, ?, ?, 1, ?, ?, ?)
+                """,
+                (node_id, theme, meaning, strength_step, strength_step, ts, ts, ts),
+            )
+            self._conn.commit()
+            logger.info("[CORTEX FACT] Тема %r выведена впервые", theme[:40])
+            return node_id
+
+        node_id = int(existing["id"])
+        seen = int(existing["occurrences"] or 1) + 1
+        strength = min(cap, strength_step * math.log(1.0 + seen))
+        cursor.execute(
+            """
+            UPDATE cortex
+            SET occurrences = ?, strength = ?, weight = ?,
+                meaning = ?, last_accessed = ?, last_decayed_at = ?
+            WHERE id = ?
+            """,
+            (seen, strength, strength, meaning, ts, ts, node_id),
+        )
+        self._conn.commit()
+        logger.info(
+            "[CORTEX FACT] Тема %r встречена %d раз, сила %.3f",
+            theme[:40], seen, strength,
+        )
+        return node_id
+
+    def fetch_cortex_facts(self, limit: int = 10) -> List[sqlite3.Row]:
+        """Выведенное корой, по убыванию числа встреч."""
+        cursor = self._conn.cursor()
+        cursor.execute(
+            "SELECT * FROM cortex WHERE kind = 'fact' "
+            "ORDER BY occurrences DESC LIMIT ?",
+            (limit,),
+        )
+        return cursor.fetchall()
 
     def upsert_lexical_node(
         self,

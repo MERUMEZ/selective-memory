@@ -237,6 +237,29 @@ class SemanticStore:
     def hub_candidates(self, min_edge_weight: float) -> List[Any]:
         return self._db.get_hub_candidates(min_edge_weight)
 
+    def record_fact(self, theme: str, text: str, meaning: str,
+                    strength_step: float, cap: float,
+                    timestamp: Optional[float] = None) -> Optional[int]:
+        """
+        Корковый факт: тема повторилась, знание о ней окрепло.
+
+        Ключом служит ТЕМА — набор слов, общих для всех повторений, — а не
+        текст очередного случая. «Люблю кофе по утрам» и «кофе мой
+        любимый» дают одну тему и один факт, а не два узла.
+
+        Сила растёт логарифмически: десятое повторение добавляет меньше
+        второго. Так учится кора — быстро на первых встречах и всё
+        медленнее дальше.
+        """
+        return self._db.upsert_cortex_fact(
+            theme=theme, text=text, meaning=meaning,
+            strength_step=strength_step, cap=cap, timestamp=timestamp,
+        )
+
+    def facts(self, limit: int = 10) -> List[Any]:
+        """Что кора вывела из повторяющегося, по убыванию числа встреч."""
+        return self._db.fetch_cortex_facts(limit)
+
     def insert_schema(self, **kwargs) -> Optional[int]:
         kwargs.setdefault("node_type", "episode_summary")
         return self._db.insert_node(**kwargs)

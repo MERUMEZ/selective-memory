@@ -108,6 +108,7 @@ class NeocortexMixin:
         # there: the organism must be surprised by exactly the units it
         # learns.
         tokens = self._tokenize_for_lexicon(text)
+        self._feed_perception(tokens)
 
         if not tokens:
             return LexicalProcessingResult(0, 0, 0, 0)
@@ -165,6 +166,50 @@ class NeocortexMixin:
             new_words=new_words,
             new_syllables=new_syllables,
         )
+
+    def expectation(self, text: str) -> Optional[float]:
+        """
+        Насколько память ПРЕДВИДЕЛА этот вход: 0 — совсем не ждала, 1 —
+        такое уже есть.
+
+        Это половина работы поля CA1. К нему приходят два потока —
+        предсказание из CA3 и действительный вход, — и новизной становится
+        их расхождение. Здесь считается первый: лучшее сходство входа с
+        тем, что память уже держит.
+
+        Дёшево, потому что кандидатов достаёт полнотекстовый индекс, а
+        косинус всё равно считается при проверке на устаревание.
+
+        None означает «НЕЧЕМ ПРЕДВИДЕТЬ» — нет кодировщика или нет слов, —
+        и это НЕ ТО ЖЕ САМОЕ, что «не похоже ни на что». Путать их нельзя:
+        без кодировщика рассогласование выходило бы максимальным всегда, и
+        организм считал бы новым каждое сообщение, включая дословный
+        повтор.
+        """
+        from selectivemem import embeddings
+
+        vector = self._encode(text)
+        if vector is None:
+            return None
+        words = sorted(self._extract_keywords(text.strip().lower()))
+        if not words:
+            return None
+        candidates = self.gate.episodic.candidates_by_text(
+            words, self.settings.supersede_scan_limit
+        )
+        best = 0.0
+        for row in candidates:
+            other = self._node_vector(row)
+            if other is None:
+                continue
+            best = max(best, embeddings.cosine(vector, other))
+        return max(0.0, min(1.0, best))
+
+    def _feed_perception(self, tokens) -> None:
+        """Показать восприятию фразу — оно растёт с каждым сообщением."""
+        perception = getattr(self, "perception", None)
+        if perception is not None and tokens:
+            perception.observe(tokens)
 
     def compute_surprise(self, text: str) -> SurpriseResult:
         """
@@ -276,6 +321,28 @@ class NeocortexMixin:
         # cannot surprise much, however novel it may be.
         full = max(1, self.settings.surprise_full_content_tokens)
         total *= min(1.0, len(tokens) / full)
+
+        # СЛИЧЕНИЕ: рассогласование предсказания с действительным.
+        #
+        # Всё, что посчитано выше, — незнакомость ЧАСТЕЙ: слов и их пар.
+        # Это не то, чем удивляется мозг. Поле CA1 сравнивает пришедшее с
+        # тем, что предсказала память, и новизной становится расхождение.
+        #
+        # Отсюда и лечение старейшего расхождения в списке: перефразировка
+        # знакомой мысли состоит из знакомых слов в НЕЗНАКОМОМ порядке, и
+        # по частям выглядит новой. По смыслу — нет.
+        #
+        # Вес нулевой по умолчанию: без кодировщика предвидеть нечем, а
+        # с ним это меняет долю записи, и менять её надо осознанно.
+        semantic_weight = self.settings.surprise_semantic_weight
+        semantic_surprise = 0.0
+        expected = self.expectation(text) if semantic_weight > 0.0 else None
+        if expected is not None:
+            semantic_surprise = 1.0 - expected
+            total = (
+                total * (1.0 - semantic_weight)
+                + semantic_surprise * semantic_weight * min(1.0, len(tokens) / full)
+            )
 
         total = max(0.0, min(1.0, total))
 

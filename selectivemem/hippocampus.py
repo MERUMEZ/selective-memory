@@ -208,7 +208,78 @@ class HippocampusMixin:
             "correction, stored as a separate memory",
             len(found), text[:40],
         )
+        self._generalise(text, found)
         return []
+
+    def _generalise(self, text: str, similar: List["SupersededNode"]) -> None:
+        """
+        КОРА ВЫВОДИТ УСТОЙЧИВОЕ ИЗ ПОВТОРЯЮЩЕГОСЯ.
+
+        Сюда попадают ровно те случаи, когда на новый текст откликнулся
+        десяток похожих записей. До сих пор это значило только «не
+        вытеснять никого» — сигнал повторяемости выбрасывался.
+
+        А ведь это и есть то, на чём учится кора: тема вернулась. Событие
+        помнит гиппокамп, а кора копит знание, что тема вообще есть, и
+        насколько часто к ней возвращаются.
+
+        ТЕМА — ОБЩИЕ СЛОВА, а не текст очередного случая. «Люблю кофе по
+        утрам» и «кофе мой любимый» делят слово «кофе», и факт у них
+        должен быть один. Если общего слишком мало, темы нет: два текста
+        могли совпасть случайно.
+        """
+        threshold = self.settings.cortex_fact_threshold
+        if threshold <= 0 or len(similar) < threshold:
+            return
+
+        # СЛУЖЕБНЫЕ СЛОВА ТЕМОЙ НЕ БЫВАЮТ. Список стоп-слов для поиска
+        # уже, чем нужно здесь: он оставляет предлоги вроде «про», и замер
+        # это поймал — кора вывела «тему» ПРО с двадцатью встречами.
+        #
+        # Берём тот же список, которым кодировщик чистит фразу перед
+        # усреднением: он для того и составлен, чтобы отсеять слова, не
+        # несущие смысла сами по себе.
+        from selectivemem.embeddings import _FUNCTION_WORDS
+
+        shared = {
+            w for w in self._extract_keywords(text.strip().lower())
+            if w not in _FUNCTION_WORDS
+        }
+        for node in similar:
+            shared &= {
+                w for w in self._extract_keywords(node.context.strip().lower())
+                if w not in _FUNCTION_WORDS
+            }
+            if not shared:
+                return
+
+        # ОДНО СЛОВО ТЕМОЙ БЫТЬ МОЖЕТ, если оно редкое. «Кофе» — тема,
+        # «день» — нет, хотя оба прошли отсев стоп-слов.
+        #
+        # Первая версия требовала двух общих слов, и механизм не сработал
+        # ни разу: у настоящих тем общее слово обычно ОДНО, остальное
+        # разное — в том и смысл повторения другими словами.
+        #
+        # Редкость берётся оттуда же, откуда её берёт поиск: сколько
+        # записей содержат это слово. Тема — то, что встречается у
+        # немногих; служебное — то, что у всех.
+        if not shared:
+            return
+        if len(shared) < 2:
+            freq = self.gate.episodic.document_frequency(sorted(shared))
+            total = max(1, self.gate.episodic.count())
+            word = next(iter(shared))
+            if freq.get(word, 0) > total * self.settings.cortex_fact_max_share:
+                return
+
+        theme = " ".join(sorted(shared))
+        self.gate.semantic.record_fact(
+            theme=theme,
+            text=theme,
+            meaning=text,
+            strength_step=self.settings.cortex_fact_strength,
+            cap=self.settings.strength_max,
+        )
 
     def _superseded_via_search(
         self,

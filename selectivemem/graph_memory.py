@@ -82,6 +82,10 @@ from selectivemem.consolidation import ConsolidationMixin
 # Ворота: единственный типизированный вход в хранилища. См. entorhinal.py —
 # там же записано, почему прямой доступ к базе однажды стоил живого дефекта.
 from selectivemem.entorhinal import Gateway
+# Восприятие, которое организм отращивает сам, когда своего кодировщика
+# не дали. См. perception.py — там же, почему без него не работает
+# половина устройства.
+from selectivemem.perception import GrownEncoder
 from selectivemem.hippocampus import HippocampusMixin
 # Забывание — в forgetting.py. Там же записано, что теорий в нём сейчас
 # две: ранжирование живёт по интерференции, а само затухание всё ещё
@@ -162,6 +166,13 @@ class MemoryGraph(
         self.db = db or Database(settings=self.settings)
         # Ворота держат ту же базу и раздают типизированные виды на неё.
         self.gate = Gateway(db)
+        # ВОСПРИЯТИЕ. Растёт от каждого сообщения и восстанавливается из
+        # сохранённых эпизодов при открытии базы: проснувшись, организм
+        # заново выводит смыслы из того, что помнит.
+        self.perception: Optional[GrownEncoder] = None
+        if self.settings.grow_perception and encoder is None:
+            self.perception = GrownEncoder()
+            self._relearn_perception()
 
         # THE MEANING ENCODER IS PLUGGABLE. The bundled one is navec,
         # Russian static vectors: light and free of torch, but Russian.
@@ -187,6 +198,35 @@ class MemoryGraph(
     # SELF-MODEL & USER-MODEL — meta-node initialisation
     # ----------------------------------------------------------------------
 
+
+    def _relearn_perception(self) -> None:
+        """
+        Восстановить восприятие из того, что организм помнит.
+
+        Отпечатки слов детерминированы от самих слов, поэтому один и тот
+        же опыт даёт одни и те же векторы — библиотека обещает побайтовую
+        воспроизводимость реплеям и тестам, и здесь это соблюдается.
+
+        Проходом по эпизодам, а не по словарю: восприятие выводится из
+        ОКРУЖЕНИЯ слова во фразе, а словарь окружения не хранит.
+        """
+        if self.perception is None:
+            return
+        try:
+            rows = self.gate.episodic.searchable()
+        except Exception:  # noqa: BLE001 — база может быть ещё пуста
+            return
+        for row in rows:
+            tokens = self._tokenize_for_lexicon(row["context"])
+            if tokens:
+                self.perception.observe(tokens)
+        if self.perception.exposures:
+            logger.info(
+                "[PERCEPTION] Восстановлено из памяти: %d слов, %d показов, "
+                "зрелость %.2f",
+                self.perception.vocabulary, self.perception.exposures,
+                self.perception.maturity(self.settings.perception_maturity_target),
+            )
 
     def get_or_create_brain_epoch(self, now: Optional[float] = None) -> float:
         """
