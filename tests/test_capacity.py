@@ -27,6 +27,31 @@ from selectivemem import Memory, MemorySettings
 DAY = 86400.0
 
 
+
+# РАЗНООБРАЗНЫЙ ПОТОК, а не двадцать раз одно и то же.
+#
+# Раньше здесь стояло f"событие номер {index} про разное" — и с точки
+# зрения организма это ДВАДЦАТЬ ОДИНАКОВЫХ ТЕКСТОВ: цифры в словарь не
+# попадают, поэтому новизна падает до 0.000 на третьем сообщении.
+#
+# Прежний гейт писал их все, потому что эмоция 0.9 сама перетаскивала
+# через порог: плотность = 0.5·0.9 + 0.5·0 = 0.45. То есть память плодила
+# дубликаты бесконечно, пока приложение передаёт заряд. Нормированное
+# произведение это прекратило (0.9·0 -> 0), и тест справедливо покраснел.
+#
+# Здесь проверяется ЁМКОСТЬ, а не гейт, поэтому поток сделан таким, каким
+# и должен быть: двадцать разных событий.
+_SUBJECTS = ["кот", "сосед", "врач", "поезд", "чайник", "магазин", "парк",
+             "телефон", "зонт", "лестница", "окно", "письмо", "ключи",
+             "лампа", "кресло", "забор", "мост", "ручей", "пирог", "шарф"]
+_ACTIONS = ["пропал", "сломался", "нашёлся", "подорожал", "закрылся",
+            "переехал", "загорелся", "остановился", "промок", "потерялся"]
+
+
+def _varied(index: int) -> str:
+    return f"{_SUBJECTS[index % len(_SUBJECTS)]} {_ACTIONS[index % len(_ACTIONS)]} этим утром"
+
+
 def _make(capacity: int, **extra):
     now = [1_700_000_000.0]
     settings = MemorySettings(memory_capacity=capacity, delete_on_decay=False, **extra)
@@ -41,7 +66,7 @@ def _episodic(memory):
 def test_capacity_is_respected():
     memory, now = _make(capacity=5)
     for index in range(20):
-        memory.observe(f"событие номер {index} про разное", emotion=0.9)
+        memory.observe(_varied(index), emotion=0.9)
         now[0] += 60.0
     memory.forget(now=now[0])
 
@@ -52,7 +77,7 @@ def test_capacity_is_respected():
 def test_zero_capacity_means_unlimited():
     memory, now = _make(capacity=0)
     for index in range(20):
-        memory.observe(f"событие номер {index} про разное", emotion=0.9)
+        memory.observe(_varied(index), emotion=0.9)
         now[0] += 60.0
     memory.forget(now=now[0])
 
@@ -73,7 +98,7 @@ def test_praised_survives_a_flood_of_newer_memories():
 
     for index in range(20):
         now[0] += 60.0
-        memory.observe(f"проходное событие номер {index}", emotion=0.9)
+        memory.observe(_varied(index), emotion=0.9)
 
     now[0] += 3 * DAY
     memory.forget(now=now[0])
@@ -97,7 +122,7 @@ def test_recalled_survives_a_flood_of_newer_memories():
 
     for index in range(20):
         now[0] += 60.0
-        memory.observe(f"проходное событие номер {index}", emotion=0.9)
+        memory.observe(_varied(index), emotion=0.9)
 
     now[0] += 3 * DAY
     memory.forget(now=now[0])
@@ -120,7 +145,7 @@ def test_eviction_is_not_sorting_by_age():
 
     for index in range(15):
         now[0] += 60.0
-        memory.observe(f"проходное событие номер {index}", emotion=0.9)
+        memory.observe(_varied(index), emotion=0.9)
 
     now[0] += DAY
     memory.forget(now=now[0])

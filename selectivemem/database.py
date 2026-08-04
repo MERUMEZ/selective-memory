@@ -481,9 +481,17 @@ class Database:
                 result[word] = 0
                 continue
             try:
+                # ТОЛЬКО КОЛОНКА context, и это не мелочь. Индекс покрывает
+                # и context, и response, а поиск сравнивает запрос ТОЛЬКО с
+                # context. Считать частоту по обоим полям значит взвешивать
+                # слова по тому, чего поиск не видит.
+                #
+                # На стендах разница мала — ответы там «понятно» и «ага». У
+                # настоящего ассистента ответы содержательные, и редкость
+                # слова оказалась бы систематически заниженной.
                 row = cursor.execute(
                     "SELECT COUNT(*) AS n FROM nodes_fts WHERE nodes_fts MATCH ?",
-                    ('"' + term + '"',),
+                    ('context: "' + term + '"',),
                 ).fetchone()
                 result[word] = int(row["n"]) if row else 0
             except sqlite3.OperationalError:
