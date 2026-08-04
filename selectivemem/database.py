@@ -37,6 +37,77 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+# ============================================================================
+#  ДВА ХРАНИЛИЩА: ГИППОКАМП И КОРА
+# ============================================================================
+# Разделение не косметическое, и вот довод, который решает.
+#
+# В таблице nodes колонка `weight` означала РАЗНОЕ для разных строк:
+#   * у эпизода — важность события, и она затухает по часам;
+#   * у слова   — освоенность, и она РАСТЁТ от повторений.
+#
+# Одна колонка, два несовместимых смысла. Разные сроки жизни
+# (age_t0 семь часов против lexical_age_t0 тридцати суток) были заплаткой
+# ровно поверх этого.
+#
+# В мозге это два вещества с разными свойствами, и не по прихоти: сеть с
+# общими весами не может одновременно писать с одного раза и не разрушать
+# старое. Гиппокамп пишет мгновенно и раздельно, кора накапливает медленно
+# и с перекрытием. Отсюда два органа, а не один.
+#
+# НОМЕРА ОБЩИЕ. Рёбра пересекают границу — слово к слову, эпизод к
+# понятию, схема к источнику, — поэтому идентификатор обязан оставаться
+# уникальным по обоим хранилищам. Их раздаёт node_seq.
+# ============================================================================
+
+NODE_SEQ_SCHEMA = """
+CREATE TABLE IF NOT EXISTS node_seq (
+    id INTEGER PRIMARY KEY AUTOINCREMENT
+);
+"""
+
+EPISODES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS episodes (
+    id                 INTEGER PRIMARY KEY,
+    context            TEXT NOT NULL,
+    response           TEXT NOT NULL,
+    weight             REAL DEFAULT 1.0,
+    strength           REAL,
+    created_at         REAL,
+    last_accessed      REAL,
+    last_decayed_at    REAL,
+    stability          REAL DEFAULT 1.0,
+    spike_strength     REAL,
+    reward_expectation REAL DEFAULT 0.0,
+    embedding          BLOB
+);
+"""
+
+CORTEX_SCHEMA = """
+CREATE TABLE IF NOT EXISTS cortex (
+    id                 INTEGER PRIMARY KEY,
+    kind               TEXT NOT NULL,
+    text               TEXT NOT NULL,
+    meaning            TEXT NOT NULL DEFAULT '',
+    weight             REAL DEFAULT 1.0,
+    strength           REAL,
+    occurrences        INTEGER DEFAULT 1,
+    created_at         REAL,
+    last_accessed      REAL,
+    last_decayed_at    REAL,
+    embedding          BLOB
+);
+"""
+
+# `occurrences` — то, чего у эпизода нет и быть не может: событие
+# случилось один раз. Корковая запись именно НАКАПЛИВАЕТ, и до сих пор
+# этот счёт был свален в `weight` вместе с важностью.
+
+INDEX_CORTEX_KIND = """
+CREATE INDEX IF NOT EXISTS idx_cortex_kind ON cortex(kind, text);
+"""
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS nodes (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -290,7 +361,76 @@ class Database:
         self._migrate_meta_columns()
         self._migrate_decay_columns()
         self._migrate_stability_column()
+        self._migrate_two_stores()
         logger.info("[DB INIT] Schema nodes + edges ready (%s)", self.db_path)
+
+
+    def _migrate_two_stores(self) -> None:
+        """
+        Разъезд на два хранилища: эпизоды в `episodes`, накопленное в
+        `cortex`.
+
+        ПЕРЕНОС ОДНОРАЗОВЫЙ И ПРОВЕРЯЕМЫЙ. Строки копируются по типу, счёт
+        сверяется, и если сходится — старая таблица остаётся на месте до
+        следующей версии. Терять чужие базы ради стройности нельзя.
+
+        Номера сохраняются как есть: на них ссылаются рёбра, и
+        переназначение сломало бы связи молча. node_seq подхватывает
+        счётчик с максимума, чтобы новые узлы не столкнулись со старыми.
+        """
+        cursor = self._conn.cursor()
+        cursor.execute(NODE_SEQ_SCHEMA)
+        cursor.execute(EPISODES_SCHEMA)
+        cursor.execute(CORTEX_SCHEMA)
+        cursor.execute(INDEX_CORTEX_KIND)
+        self._conn.commit()
+
+        moved = cursor.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+        moved += cursor.execute("SELECT COUNT(*) FROM cortex").fetchone()[0]
+        if moved:
+            return  # уже разъехались
+
+        total = cursor.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+        if not total:
+            return
+
+        cursor.execute("""
+            INSERT INTO episodes (id, context, response, weight, strength,
+                                  created_at, last_accessed, last_decayed_at,
+                                  stability, spike_strength, reward_expectation,
+                                  embedding)
+            SELECT id, context, response, weight, strength, created_at,
+                   last_accessed, last_decayed_at, stability, spike_strength,
+                   reward_expectation, embedding
+            FROM nodes WHERE node_type = 'episodic'
+        """)
+        cursor.execute("""
+            INSERT INTO cortex (id, kind, text, meaning, weight, strength,
+                                occurrences, created_at, last_accessed,
+                                last_decayed_at, embedding)
+            SELECT id, node_type, context, response, weight, strength, 1,
+                   created_at, last_accessed, last_decayed_at, embedding
+            FROM nodes WHERE node_type IS NULL OR node_type <> 'episodic'
+        """)
+        # Счётчик номеров продолжает с максимума, иначе новый узел получил
+        # бы номер уже занятый — и ребро указало бы не туда.
+        top = cursor.execute("SELECT COALESCE(MAX(id), 0) FROM nodes").fetchone()[0]
+        if top:
+            cursor.execute("INSERT INTO node_seq (id) VALUES (?)", (top,))
+        self._conn.commit()
+
+        ep = cursor.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+        cx = cursor.execute("SELECT COUNT(*) FROM cortex").fetchone()[0]
+        if ep + cx != total:
+            logger.error(
+                "[TWO STORES] Перенос неполон: было %d, стало %d + %d. "
+                "Старая таблица не тронута.", total, ep, cx,
+            )
+            return
+        logger.info(
+            "[TWO STORES] Разъезд: %d эпизодов, %d корковых узлов из %d",
+            ep, cx, total,
+        )
 
     def _migrate_meta_columns(self) -> None:
         """
