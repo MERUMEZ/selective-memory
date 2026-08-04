@@ -88,7 +88,7 @@ def build_encoder(kind: str):
 
 
 def run_instance(instance: Dict, encoder, mode: str, settings_kwargs: Dict,
-                 associations: bool = False) -> Optional[Dict]:
+                 associations: bool = False, live: bool = False) -> Optional[Dict]:
     """
     Прогоняет один вопрос: скармливает стог, спрашивает, считает попадания.
 
@@ -131,6 +131,18 @@ def run_instance(instance: Dict, encoder, mode: str, settings_kwargs: Dict,
                     context=pending_user, response=content, weight=0.6, timestamp=when,
                 )
             else:
+                if live:
+                    # ЖИВОЙ ПОРЯДОК: ассистент СНАЧАЛА достаёт из памяти
+                    # то, чем отвечать, и только потом сохраняет сказанное.
+                    # Все стенды проекта устроены наоборот — залить и
+                    # спросить потом, — а значит меряют режим, в котором
+                    # библиотека работать не будет.
+                    #
+                    # Разница не косметическая: припоминание касается
+                    # узлов (поднимает стабильность, сдвигает свежесть) и
+                    # строит связи между воспоминаниями, которых при
+                    # пакетной заливке не возникает вовсе.
+                    memory.recall(pending_user, top_k=3, timestamp=when)
                 node_id = memory.observe(
                     pending_user, response=content, timestamp=when,
                 ).node_id
@@ -188,6 +200,8 @@ def main() -> None:
                         help="ёмкость кратковременного буфера; у человека ~4 чанка")
     parser.add_argument("--gate-gain", type=float, default=None,
                         help="эмоция УМНОЖАЕТ новизну вместо среднего")
+    parser.add_argument("--live", action="store_true",
+                        help="живой порядок: вспоминать перед каждой записью")
     parser.add_argument("--intrinsic", action="store_true",
                         help="значимость события из внутренней среды организма")
     parser.add_argument("--interference", action="store_true",
@@ -314,7 +328,8 @@ def main() -> None:
 
     for index, instance in enumerate(data, start=1):
         outcome = run_instance(instance, encoder, args.mode, settings_kwargs,
-                               associations=args.associations)
+                               associations=args.associations,
+                               live=args.live)
         if outcome is None:
             continue
         counted += 1

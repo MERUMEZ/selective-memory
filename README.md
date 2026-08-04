@@ -247,13 +247,31 @@ otherwise:
 смысл: potion-base-8M | значимость: своя, из внутренней среды | порог записи: 0.25 | ёмкость: без предела
 ```
 
-**Two honest caveats.** `longmemeval_oracle` is the light variant of the
-benchmark — haystacks of a couple of dozen turns, not the full set; these
-numbers are not comparable with published LongMemEval results. And every
-row above loads the haystack first and asks afterwards, whereas a live
-assistant retrieves before each write — a mode measured only on a small
-stand so far, where it made retrieval WORSE (3/6 → 1/6 at k=1). Until that
-is measured properly, treat these numbers as an upper bound.
+**The live order was measured too, and it is BETTER.** A real assistant
+retrieves before each write rather than loading everything and asking
+afterwards. Add `--live` to any row above:
+
+| order | install | written | R@1 |
+|---|---|---:|---:|
+| load, then ask | `[semantic]` | 26.3% | 96.2% |
+| **retrieve before each write** | `[semantic]` | 26.0% | **97.4%** |
+| load, then ask | bare | 41.1% | 97.4% |
+| retrieve before each write | bare | 41.7% | 96.8% |
+
+Recall raises the stability of what was recalled, so what gets used stops
+being forgotten — the spacing effect. With the model it pays 1.2 points;
+on the bare install it costs 0.6. Both differences are five or six
+questions out of five hundred, so read them as "the live order does not
+cost you anything", not as a ranking.
+
+An earlier note here claimed the live order made retrieval markedly WORSE,
+on the strength of a six-question stand. The full set overturned it — and
+the same six numbers moved again when an unrelated encoder change landed.
+Six questions do not separate signal from noise.
+
+**One honest caveat remains.** `longmemeval_oracle` is the light variant of
+the benchmark — haystacks of a couple of dozen turns, not the full set —
+so these numbers are not comparable with published LongMemEval results.
 
 ### What the encoder buys, on sixteen questions
 

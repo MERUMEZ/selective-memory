@@ -969,6 +969,43 @@ concrete". Three Russian tests now skip themselves honestly.
 between modes reaches tenfold in R@1. The line answers "why did retrieval
 get worse" before anyone asks.
 
+### 2.29 The live order of work: measured at last, and the fear did not hold
+
+All five stands in this project are built the same way: load the haystack,
+then ask. A live application works differently — for every turn it FIRST
+pulls from memory whatever it needs to answer with, and only then stores
+what was said. Every number we had was therefore measured in a mode the
+library will not actually run in.
+
+A small stand (`compare_association`, six chains) suggested the live order
+made retrieval WORSE: 3/6 -> 1/6 at k=1. That conclusion made it into the
+README as a caveat: "read the table as an upper bound".
+
+**The full set overturned it.** LongMemEval, 500 questions, `--live`:
+
+| order | install | written | R@1 |
+|---|---|---:|---:|
+| load, then ask | `[semantic]` | 26.3% | 96.2% |
+| **retrieve before each write** | `[semantic]` | 26.0% | **97.4%** |
+| load, then ask | bare | 41.1% | 97.4% |
+| retrieve before each write | bare | 41.7% | 96.8% |
+
+With the model the live order is **better** by 1.2 points at the same
+selectivity, and the explanation is at hand and biological: recall raises
+the stability of what was recalled, so what gets used stops being
+forgotten — the spacing effect, and it pays.
+
+On the bare install the live order costs 0.6 points. Both differences are
+five or six questions out of five hundred, so the honest reading is not
+"the live order is better" but "the live order costs you nothing".
+
+**A LESSON ABOUT STAND SIZE, AND AN EXPENSIVE ONE.** The gap "3/6 against
+1/6" is two questions. The same six numbers shifted again when an unrelated
+change to how phrases are fed to the encoder landed. A small stand is good
+for showing that a mechanism EXISTS (edges are there or they are not) —
+quality cannot be judged on it, and the conclusion that stood in the README
+was exactly that kind.
+
 ## 3. What remains
 
 ### 3.1 Defects
