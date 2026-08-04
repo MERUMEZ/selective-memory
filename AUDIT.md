@@ -9,6 +9,10 @@ numbers are reproducible: `tools/simulate_learning.py`,
 
 ---
 
+A step-by-step walkthrough of the engine — which function does what
+and what corresponds to it in the brain — lives in
+[ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## 1. What this is
 
 Not a chatbot and not an LLM wrapper. It is a **controller of memory and

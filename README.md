@@ -75,6 +75,9 @@ This is not fine print. Plan on attaching your own encoder from day one
 else in the library is language-agnostic, but retrieval is only as good
 as the vectors you give it.
 
+**How the engine works inside** — a step-by-step walkthrough with the
+biological correspondences: [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ---
 
 ## Who it is for
