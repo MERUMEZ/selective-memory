@@ -655,6 +655,40 @@ gyrus makes similar inputs dissimilar by emphasising what differs and
 damping what is shared. "What everyone has stops deciding" is exactly that
 in our terms. The first half went in as 2.18.
 
+### 2.21 The full set corrected the claim about preferences
+
+Every change of the session was measured on a hard 60-question subset. A
+control run over all 500 confirmed the overall gain and **refuted one
+specific claim**.
+
+**Confirmed:**
+
+| | before | after |
+|---|---:|---:|
+| R@1 | 66.0% | **72.0%** |
+| R@5 | 83.4% | **84.4%** |
+| R@10 | — | 87.8% |
+| turns stored | 24.7% | 24.7% |
+
+By type (R@5): knowledge-update 88.4% → 90%, multi-session 92.6% → 92%,
+assistant 96.4% → 95%, temporal 82.6% → 84%, user 67.1% → 70%, preference
+46.6% → 50%.
+
+**REFUTED: "preferences 20% → 60%".** That number came from FIVE questions
+of the subset. Over the thirty preference questions of the full set, R@1
+is still 20%, and the whole gain shows only at R@5: 46.6% to 50%.
+
+The claim has been removed from the documents. The cause is ordinary and
+familiar: at n = 5 a single question is worth twenty percentage points,
+and three "lucky" questions produce exactly the jump I took for a result.
+The rule "look at the denominator" is already written down in this project
+— it was applied to the ordering bench, where 40% turned out to be a share
+of 0.6 — and here I failed to apply it.
+
+**Preferences remain the worst type and an open problem.** Rarity
+weighting does not fix them: the evidence is found (R@5 50%) but does not
+come first.
+
 ## 3. What remains
 
 ### 3.1 Defects

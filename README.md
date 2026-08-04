@@ -7,8 +7,8 @@ into a vector store means paying to keep noise and drowning in it at
 retrieval. `selectivemem` writes about a quarter of what it is shown, and
 ranks what it kept by what has actually earned its place.
 
-Measured on LongMemEval, 500 questions, at stock settings: **R@5 83.4%**
-while storing 24.7% of the turns. The same system with the write filter
+Measured on LongMemEval, 500 questions, at stock settings: **R@1 72.0%,
+R@5 84.4%** while storing 24.7% of the turns. The same system with the write filter
 removed and forgetting off scores 93.2% — so selective writing costs
 about nine points of recall and saves three quarters of the storage.
 
