@@ -409,6 +409,92 @@ from node counts, and prints the stages separately. An instrument denying
 the work of a mechanism that did work is exactly the class of error this
 project keeps catching — this time it was in the measuring device.
 
+### 2.18 The correction mechanism was a shredder in a crowd of look-alikes
+
+The near-duplicate bench is the product's stated niche, and for a day and
+a half it was fixed from the RETRIEVAL side: importance moved to
+accumulated strength, the ceiling sorted out, the reinforcement step
+tuned. The cause was at the input.
+
+Broken down over 200 near-duplicates:
+
+    relevance only (no strength, no penalties)   5 hits out of 6
+    the full search                              3 hits out of 6
+
+So retrieval found the right thing, and what spoiled it happened AT WRITE
+TIME.
+
+**6078 supersessions over 200 writes.** The mechanism written for
+corrections ("my dog is called Rex" -> "... Buddy") reads a neighbour as a
+correction: a near-duplicate satisfies both its conditions — high semantic
+similarity and incomplete word overlap. Every new write "corrected" thirty
+other nodes.
+
+**And it hits the true facts hardest.** The original resembles all of its
+duplicates at once, so it collects the most penalties:
+
+    strength of the six facts       0.0000
+    strength of their duplicates    0.0292
+
+The original ended up weaker than its own copies.
+
+**THE RELATION IS NON-MONOTONE, WHICH IS INSTRUCTIVE:**
+
+| supersessions | R@1 at 200 |
+|---:|---:|
+| 47 | **73.3%** |
+| 98 | 56.7% |
+| 265 | 33.3% |
+| 1033 | 16.7% |
+| 29246 | 53.3% |
+
+When EVERYTHING is damaged, ranking does not suffer: the harm is uniform
+and the shares survive. When damage is selective, it lands on the most
+typical item — the true fact. The worst place is in between. The same
+principle as in ranking and in sleep's homeostatic downscaling: the share
+matters, not the absolute.
+
+**WHAT WAS DONE — PATTERN SEPARATION.** A correction replaces ONE specific
+memory. If a dozen nodes respond equally well to the new text, "which one
+is being corrected" has no answer, and the honest answer is to touch none
+of them and store separately. `pattern_separation_limit = 2`.
+
+In the brain the dentate gyrus does this, and does it AT THE INPUT:
+similar inputs get dissimilar codes BEFORE storage, so they will not
+interfere later. We had been fighting the consequence.
+
+Measured over five seeds with the default encoder:
+
+| distractors | R@1 before | R@1 after | R@5 before | R@5 after |
+|---:|---:|---:|---:|---:|
+| 50 | 46.7% | **73.3%** | 100.0% | 86.7% |
+| 200 | 53.3% | **73.3%** | 83.3% | 73.3% |
+| 800 | 56.7% | **73.3%** | 83.3% | 73.3% |
+
+Alongside: the share of important items in the top 5 on the ordering bench
+went 83.3% -> 89.3%, the MRR gap +0.052 -> +0.056, retention 30 nodes ->
+25 at the same 100%/100%. LongMemEval did not move by a point, including
+the knowledge-update type (70%) — real corrections did not break.
+
+**THE PRICE IS STATED PLAINLY: R@5 drops by 10 points.** The old recall
+was bought by damaging everything around — weakened duplicates left room
+in the top five. Now they keep their strength and crowd the answer out.
+And R@1 became EQUAL to R@3: with all strengths equal, pure relevance
+decides, and there are no intermediate positions.
+
+This is half of a biological pair. The dentate gyrus separates; area CA3
+COMPLETES — restoring the whole from a partial cue. The lost recall is
+exactly a completion failure: the answer is in memory, but a fragment of a
+cue does not reach it. Our spreading activation runs AFTER the winners are
+chosen, so it completes from what was found rather than converging to it.
+The second half is separate work.
+
+THIS WAS FOUND BECAUSE THE CODE WAS SPLIT BY OWNER. While it sat in one
+file, the question "where is our pattern separation" never arose: there
+was no place where its absence showed. A split by function would not have
+helped — there supersession legitimately lives next to search, and nothing
+hints that biology has a separate mandatory step before storage.
+
 ## 3. What remains
 
 ### 3.1 Defects
