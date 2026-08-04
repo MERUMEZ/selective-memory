@@ -128,7 +128,10 @@ def test_decay_survives_null_last_decayed_at_on_node(mg):
     )
 
     cursor = mg.db._conn.cursor()
-    cursor.execute("UPDATE nodes SET last_decayed_at = NULL WHERE id = ?", (node_id,))
+        # ПИШЕМ В episodes, А НЕ В nodes: последний стал видом над двумя
+    # хранилищами, а вид править нельзя. Тест воспроизводит старую базу,
+    # где колонка ещё не заполнялась.
+    cursor.execute("UPDATE episodes SET last_decayed_at = NULL WHERE id = ?", (node_id,))
     mg.db._conn.commit()
 
     mg.apply_decay(now=300.0)  # не должно бросить TypeError
@@ -376,7 +379,7 @@ def test_stability_survives_null_for_legacy_rows(mg):
         context="x", response="y", weight=0.8, timestamp=0.0, node_type="episodic"
     )
     cursor = mg.db._conn.cursor()
-    cursor.execute("UPDATE nodes SET stability = NULL WHERE id = ?", (node_id,))
+    cursor.execute("UPDATE episodes SET stability = NULL WHERE id = ?", (node_id,))
     mg.db._conn.commit()
 
     mg.apply_decay(now=3600.0)  # не должно бросить TypeError

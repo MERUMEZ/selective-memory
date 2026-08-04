@@ -61,6 +61,40 @@ logger = logging.getLogger(__name__)
 # уникальным по обоим хранилищам. Их раздаёт node_seq.
 # ============================================================================
 
+
+# ВИД `nodes` НАД ДВУМЯ ХРАНИЛИЩАМИ.
+#
+# Сорок три запроса читают из `nodes`, и переписывать их все — риск на
+# ровном месте. Вид оставляет чтение как есть и приводит два разных
+# набора колонок к одному: у коры нет силы спайка и ожидания награды, у
+# эпизода нет числа встреч.
+#
+# is_meta выводится из рода: модель себя, модель собеседника и эпоха
+# мозга — это состояние, а не воспоминание, и вытеснение по ёмкости их
+# не трогает.
+NODES_VIEW = """
+CREATE VIEW IF NOT EXISTS nodes AS
+    SELECT id, context, response, weight, created_at, last_accessed,
+           0 AS is_meta, 'episodic' AS node_type, last_decayed_at,
+           stability, reward_expectation, embedding, spike_strength, strength
+    FROM episodes
+    UNION ALL
+    SELECT id, text AS context, meaning AS response, weight, created_at,
+           last_accessed,
+           is_meta,
+           kind AS node_type, last_decayed_at,
+           1.0 AS stability, reward_expectation, embedding,
+           NULL AS spike_strength, strength
+    FROM cortex;
+"""
+
+EPISODES_FTS_SCHEMA = """
+CREATE VIRTUAL TABLE IF NOT EXISTS episodes_fts USING fts5(
+    context, response, content='episodes', content_rowid='id',
+    tokenize='unicode61'
+);
+"""
+
 NODE_SEQ_SCHEMA = """
 CREATE TABLE IF NOT EXISTS node_seq (
     id INTEGER PRIMARY KEY AUTOINCREMENT
@@ -93,6 +127,8 @@ CREATE TABLE IF NOT EXISTS cortex (
     weight             REAL DEFAULT 1.0,
     strength           REAL,
     occurrences        INTEGER DEFAULT 1,
+    reward_expectation REAL DEFAULT 0.0,
+    is_meta            INTEGER DEFAULT 0,
     created_at         REAL,
     last_accessed      REAL,
     last_decayed_at    REAL,
@@ -133,10 +169,15 @@ CREATE TABLE IF NOT EXISTS edges (
     node_from      INTEGER NOT NULL,
     node_to        INTEGER NOT NULL,
     weight         REAL NOT NULL DEFAULT 0.2,
-    last_activated REAL NOT NULL,
-    FOREIGN KEY (node_from) REFERENCES nodes(id) ON DELETE CASCADE,
-    FOREIGN KEY (node_to)   REFERENCES nodes(id) ON DELETE CASCADE
+    last_activated REAL NOT NULL
 );
+-- ВНЕШНЕГО КЛЮЧА ЗДЕСЬ НЕТ, и это следствие разъезда на два хранилища.
+-- Связь может вести из эпизода в понятие, из слова в слово, из схемы в
+-- источник — то есть в ЛЮБОЕ из двух хранилищ. Ссылка на одну таблицу
+-- этого не выражает, а ссылаться на вид SQLite не умеет.
+--
+-- Целостность держится тем, что номера раздаёт node_seq и они уникальны
+-- по обоим хранилищам, а удаление узла чистит связи явно.
 """
 
 INDEX_EDGE_FROM = """
@@ -365,6 +406,42 @@ class Database:
         logger.info("[DB INIT] Schema nodes + edges ready (%s)", self.db_path)
 
 
+
+    # ------------------------------------------------------------------
+    # ЗАПИСЬ В ДВА ХРАНИЛИЩА
+    # ------------------------------------------------------------------
+    def _nodes_is_table(self) -> bool:
+        """
+        Старые миграции правят таблицу `nodes`. После разъезда она стала
+        видом, и править его нельзя — да и незачем: колонки давно на месте.
+        """
+        row = self._conn.execute(
+            "SELECT type FROM sqlite_master WHERE name = 'nodes'"
+        ).fetchone()
+        return row is not None and row[0] == "table"
+
+    def _both(self, sql: str, params) -> None:
+        """
+        Один и тот же запрос по обеим таблицам.
+
+        Работает потому, что НОМЕРА УНИКАЛЬНЫ ПО ОБОИМ ХРАНИЛИЩАМ: их
+        раздаёт node_seq. Значит `WHERE id = ?` попадёт ровно в одну
+        строку, а вторая таблица честно ответит «ноль изменений».
+
+        Дешевле, чем сначала спрашивать «где лежит этот узел»: оба запроса
+        идут по первичному ключу.
+        """
+        cursor = self._conn.cursor()
+        for table in ("episodes", "cortex"):
+            cursor.execute(sql.replace("{table}", table), params)
+        self._conn.commit()
+
+    def _next_id(self) -> int:
+        """Общий номер для обоих хранилищ — на него ссылаются рёбра."""
+        cursor = self._conn.cursor()
+        cursor.execute("INSERT INTO node_seq DEFAULT VALUES")
+        return int(cursor.lastrowid)
+
     def _migrate_two_stores(self) -> None:
         """
         Разъезд на два хранилища: эпизоды в `episodes`, накопленное в
@@ -385,52 +462,109 @@ class Database:
         cursor.execute(INDEX_CORTEX_KIND)
         self._conn.commit()
 
-        moved = cursor.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
-        moved += cursor.execute("SELECT COUNT(*) FROM cortex").fetchone()[0]
-        if moved:
-            return  # уже разъехались
+        # `nodes` уже вид? Значит разъезд состоялся раньше.
+        kind = cursor.execute(
+            "SELECT type FROM sqlite_master WHERE name = 'nodes'"
+        ).fetchone()
+        if kind is None or kind[0] == "view":
+            return
 
         total = cursor.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
-        if not total:
-            return
+        if total:
+            cursor.execute("""
+                INSERT INTO episodes (id, context, response, weight, strength,
+                                      created_at, last_accessed, last_decayed_at,
+                                      stability, spike_strength, reward_expectation,
+                                      embedding)
+                SELECT id, context, response, weight, strength, created_at,
+                       last_accessed, last_decayed_at, stability, spike_strength,
+                       reward_expectation, embedding
+                FROM nodes WHERE node_type = 'episodic'
+            """)
+            cursor.execute("""
+                INSERT INTO cortex (id, kind, text, meaning, weight, strength,
+                                    occurrences, created_at, last_accessed,
+                                    last_decayed_at, embedding)
+                SELECT id, COALESCE(node_type, 'concept'), context, response,
+                       weight, strength, 1, created_at, last_accessed,
+                       last_decayed_at, embedding
+                FROM nodes WHERE node_type IS NULL OR node_type <> 'episodic'
+            """)
+            # Счётчик номеров продолжает с максимума: иначе новый узел
+            # получил бы уже занятый номер и ребро указало бы не туда.
+            top = cursor.execute("SELECT COALESCE(MAX(id), 0) FROM nodes").fetchone()[0]
+            if top:
+                cursor.execute("INSERT INTO node_seq (id) VALUES (?)", (top,))
+            self._conn.commit()
 
-        cursor.execute("""
-            INSERT INTO episodes (id, context, response, weight, strength,
-                                  created_at, last_accessed, last_decayed_at,
-                                  stability, spike_strength, reward_expectation,
-                                  embedding)
-            SELECT id, context, response, weight, strength, created_at,
-                   last_accessed, last_decayed_at, stability, spike_strength,
-                   reward_expectation, embedding
-            FROM nodes WHERE node_type = 'episodic'
-        """)
-        cursor.execute("""
-            INSERT INTO cortex (id, kind, text, meaning, weight, strength,
-                                occurrences, created_at, last_accessed,
-                                last_decayed_at, embedding)
-            SELECT id, node_type, context, response, weight, strength, 1,
-                   created_at, last_accessed, last_decayed_at, embedding
-            FROM nodes WHERE node_type IS NULL OR node_type <> 'episodic'
-        """)
-        # Счётчик номеров продолжает с максимума, иначе новый узел получил
-        # бы номер уже занятый — и ребро указало бы не туда.
-        top = cursor.execute("SELECT COALESCE(MAX(id), 0) FROM nodes").fetchone()[0]
-        if top:
-            cursor.execute("INSERT INTO node_seq (id) VALUES (?)", (top,))
-        self._conn.commit()
-
-        ep = cursor.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
-        cx = cursor.execute("SELECT COUNT(*) FROM cortex").fetchone()[0]
-        if ep + cx != total:
-            logger.error(
-                "[TWO STORES] Перенос неполон: было %d, стало %d + %d. "
-                "Старая таблица не тронута.", total, ep, cx,
+            ep = cursor.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+            cx = cursor.execute("SELECT COUNT(*) FROM cortex").fetchone()[0]
+            if ep + cx != total:
+                logger.error(
+                    "[TWO STORES] Перенос неполон: было %d, стало %d + %d. "
+                    "Старая таблица не тронута, разъезд отменён.", total, ep, cx,
+                )
+                cursor.execute("DELETE FROM episodes")
+                cursor.execute("DELETE FROM cortex")
+                self._conn.commit()
+                return
+            logger.info(
+                "[TWO STORES] Разъезд: %d эпизодов, %d корковых узлов из %d",
+                ep, cx, total,
             )
-            return
-        logger.info(
-            "[TWO STORES] Разъезд: %d эпизодов, %d корковых узлов из %d",
-            ep, cx, total,
+
+        self._replace_nodes_with_view()
+
+    def _replace_nodes_with_view(self) -> None:
+        """
+        Старая таблица уступает место ВИДУ над двумя хранилищами.
+
+        Делается только после того, как перенос сошёлся по счёту. Чтение
+        от этого не меняется: сорок три запроса продолжают спрашивать
+        `nodes` и получают объединение.
+
+        Полнотекстовый индекс переезжает на `episodes`: искать по тексту
+        нужно события, а не словарь — его узлы служебные и однажды уже
+        давали ложные совпадения на любом повторённом слове.
+        """
+        cursor = self._conn.cursor()
+        cursor.execute("DROP TABLE IF EXISTS nodes_fts")
+        # Рёбра пересобираются без внешнего ключа: он указывал на таблицу
+        # nodes, которая становится видом, а связь теперь может вести в
+        # любое из двух хранилищ.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS edges_new (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_from      INTEGER NOT NULL,
+                node_to        INTEGER NOT NULL,
+                weight         REAL NOT NULL DEFAULT 0.2,
+                last_activated REAL NOT NULL,
+                last_decayed_at REAL DEFAULT NULL,
+                edge_type      TEXT DEFAULT NULL
+            )
+        """)
+        cols = [r[1] for r in cursor.execute("PRAGMA table_info(edges)")]
+        shared = [c for c in cols if c in
+                  ("id", "node_from", "node_to", "weight", "last_activated",
+                   "last_decayed_at", "edge_type")]
+        cursor.execute(
+            f"INSERT INTO edges_new ({','.join(shared)}) "
+            f"SELECT {','.join(shared)} FROM edges"
         )
+        cursor.execute("DROP TABLE edges")
+        cursor.execute("ALTER TABLE edges_new RENAME TO edges")
+        cursor.execute(INDEX_EDGE_FROM)
+        cursor.execute(INDEX_EDGE_TO)
+        cursor.execute(UNIQUE_EDGE_PAIR)
+        cursor.execute("DROP TABLE IF EXISTS nodes")
+        cursor.execute(NODES_VIEW)
+        cursor.execute(EPISODES_FTS_SCHEMA)
+        cursor.execute(
+            "INSERT INTO episodes_fts(rowid, context, response) "
+            "SELECT id, context, response FROM episodes"
+        )
+        self._conn.commit()
+        logger.info("[TWO STORES] nodes стал видом; индекс переехал на episodes")
 
     def _migrate_meta_columns(self) -> None:
         """
@@ -439,6 +573,8 @@ class Database:
         TABLE has no IF NOT EXISTS for columns, so sqlite3.OperationalError
         ("duplicate column name") is caught instead.
         """
+        if not self._nodes_is_table():
+            return
         cursor = self._conn.cursor()
         migrated_any = False
 
@@ -471,6 +607,8 @@ class Database:
         last_accessed/last_activated: their decay clock simply starts
         ticking from that moment, with no artificial "debt".
         """
+        if not self._nodes_is_table():
+            return
         cursor = self._conn.cursor()
         migrated_any = False
         try:
@@ -504,6 +642,8 @@ class Database:
         predating the mechanism, but they get no undeserved immortality
         either — from here on, usefulness decides.
         """
+        if not self._nodes_is_table():
+            return
         cursor = self._conn.cursor()
         migrated = False
         for statement in (ALTER_ADD_STABILITY, ALTER_ADD_REWARD_EXPECTATION,
@@ -560,26 +700,45 @@ class Database:
         """
         ts = timestamp if timestamp is not None else time.time()
         cursor = self._conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO nodes (context, response, weight, created_at, last_accessed,
-                               last_decayed_at, node_type, spike_strength, strength)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            # spike_strength is the birth weight, kept as it was. Weight goes
-            # on decaying; this stays, because forgetting has to be able to
-            # ask later how hard the event hit at the time.
-            #
-            # strength starts from the same number but lives by different
-            # rules: it grows with reinforcement and use and NEVER falls
-            # because time passed. See ALTER_ADD_STRENGTH.
-            (context, response, weight, ts, ts, ts, node_type, weight, weight),
-        )
-        node_id = cursor.lastrowid
-        cursor.execute(
-            "INSERT INTO nodes_fts(rowid, context, response) VALUES (?, ?, ?)",
-            (node_id, context, response),
-        )
+        # РАЗВИЛКА ПО ХРАНИЛИЩУ, и она здесь единственная в коде.
+        #
+        # Эпизод — то, что случилось однажды: у него есть сила спайка при
+        # рождении и ожидание награды. Корковый узел накапливает: у него
+        # есть число встреч, а силы спайка быть не может, потому что не
+        # было единичного события.
+        node_id = self._next_id()
+        if node_type == "episodic":
+            cursor.execute(
+                """
+                INSERT INTO episodes (id, context, response, weight, created_at,
+                                      last_accessed, last_decayed_at,
+                                      spike_strength, strength)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                # spike_strength — вес при рождении, и он не меняется.
+                # Weight продолжит затухать, а забывание должно уметь
+                # спросить позже, насколько сильно ударило тогда.
+                #
+                # strength стартует с того же числа, но живёт по другим
+                # правилам: растёт от подкрепления и пользы и НИКОГДА не
+                # падает оттого, что прошло время.
+                (node_id, context, response, weight, ts, ts, ts, weight, weight),
+            )
+            cursor.execute(
+                "INSERT INTO episodes_fts(rowid, context, response) VALUES (?, ?, ?)",
+                (node_id, context, response),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO cortex (id, kind, text, meaning, weight, strength,
+                                    occurrences, created_at, last_accessed,
+                                    last_decayed_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+                """,
+                (node_id, node_type or "concept", context, response,
+                 weight, weight, ts, ts, ts),
+            )
         self._conn.commit()
         logger.info(
             "[MEMORY SAVED] id=%s weight=%.3f node_type=%s context=%r",
@@ -630,7 +789,7 @@ class Database:
                 # настоящего ассистента ответы содержательные, и редкость
                 # слова оказалась бы систематически заниженной.
                 row = cursor.execute(
-                    "SELECT COUNT(*) AS n FROM nodes_fts WHERE nodes_fts MATCH ?",
+                    "SELECT COUNT(*) AS n FROM episodes_fts WHERE episodes_fts MATCH ?",
                     ('context: "' + term + '"',),
                 ).fetchone()
                 result[word] = int(row["n"]) if row else 0
@@ -661,8 +820,8 @@ class Database:
         cursor = self._conn.cursor()
         try:
             cursor.execute(
-                "SELECT n.* FROM nodes_fts f JOIN nodes n ON n.id = f.rowid "
-                "WHERE nodes_fts MATCH ? AND n.node_type IN ('episodic', 'concept') "
+                "SELECT n.* FROM episodes_fts f JOIN nodes n ON n.id = f.rowid "
+                "WHERE episodes_fts MATCH ? AND n.node_type IN ('episodic', 'concept') "
                 "ORDER BY rank LIMIT ?",
                 (query, limit),
             )
@@ -699,11 +858,7 @@ class Database:
     def update_weight(self, node_id: int, new_weight: float) -> None:
         """Updates a node's weight (after decay or reinforcement, say)."""
         cursor = self._conn.cursor()
-        cursor.execute(
-            "UPDATE nodes SET weight = ? WHERE id = ?",
-            (new_weight, node_id),
-        )
-        self._conn.commit()
+        self._both("UPDATE {table} SET weight = ? WHERE id = ?", (new_weight, node_id))
 
     def update_last_accessed(self, node_id: int, timestamp: Optional[float] = None) -> None:
         """
@@ -729,26 +884,30 @@ class Database:
         cursor = self._conn.cursor()
         cursor.execute(
             """
-            UPDATE nodes
+            UPDATE episodes
             SET last_accessed = ?,
                 last_decayed_at = ?,
                 stability = MIN(?, COALESCE(stability, ?) * ?),
-                -- Сила растёт от ПОЛЬЗЫ: успешное извлечение и есть
-                -- доказательство, что память пригодилась. В отличие от
-                -- веса, часы её не трогают, поэтому важное не тонет
-                -- просто от того, что о нём давно не спрашивали.
                 strength = MIN(?, COALESCE(strength, weight) + ?)
             WHERE id = ?
             """,
-            (
-                ts, ts,
-                self.settings.stability_max,
-                self.settings.stability_initial,
-                self.settings.stability_growth_factor,
-                self.settings.strength_max,
-                self.settings.strength_use_step,
-                node_id,
-            ),
+            (ts, ts, self.settings.stability_max, self.settings.stability_initial,
+             self.settings.stability_growth_factor, self.settings.strength_max,
+             self.settings.strength_use_step, node_id),
+        )
+        # У КОРЫ СТАБИЛЬНОСТИ НЕТ, и это не упущение: стабильность —
+        # свойство следа о событии, продлевающее его срок. Корковое знание
+        # живёт не сроком, а числом встреч.
+        cursor.execute(
+            """
+            UPDATE cortex
+            SET last_accessed = ?,
+                last_decayed_at = ?,
+                strength = MIN(?, COALESCE(strength, weight) + ?)
+            WHERE id = ?
+            """,
+            (ts, ts, self.settings.strength_max,
+             self.settings.strength_use_step, node_id),
         )
         self._conn.commit()
 
@@ -759,15 +918,11 @@ class Database:
         ниже нуля не опускаемся.
         """
         cursor = self._conn.cursor()
-        cursor.execute(
-            """
-            UPDATE nodes
-            SET strength = MAX(0.0, MIN(?, COALESCE(strength, weight) + ?))
-            WHERE id = ?
-            """,
+        self._both(
+            "UPDATE {table} SET strength = "
+            "MAX(0.0, MIN(?, COALESCE(strength, weight) + ?)) WHERE id = ?",
             (cap, delta, node_id),
         )
-        self._conn.commit()
 
     def update_embedding(self, node_id: int, blob: Optional[bytes]) -> None:
         """
@@ -776,8 +931,7 @@ class Database:
         filled in lazily on the first search.
         """
         cursor = self._conn.cursor()
-        cursor.execute("UPDATE nodes SET embedding = ? WHERE id = ?", (blob, node_id))
-        self._conn.commit()
+        self._both("UPDATE {table} SET embedding = ? WHERE id = ?", (blob, node_id))
 
     def update_stability(self, node_id: int, stability: float) -> None:
         """
@@ -786,7 +940,7 @@ class Database:
         pile rather than being deleted.
         """
         cursor = self._conn.cursor()
-        cursor.execute("UPDATE nodes SET stability = ? WHERE id = ?", (stability, node_id))
+        cursor.execute("UPDATE episodes SET stability = ? WHERE id = ?", (stability, node_id))
         self._conn.commit()
 
     def update_reward_expectation(self, node_id: int, expectation: float) -> None:
@@ -799,17 +953,17 @@ class Database:
         criticism.
         """
         cursor = self._conn.cursor()
-        cursor.execute(
-            "UPDATE nodes SET reward_expectation = ? WHERE id = ?",
+        self._both(
+            "UPDATE {table} SET reward_expectation = ? WHERE id = ?",
             (expectation, node_id),
         )
-        self._conn.commit()
 
     def delete_node(self, node_id: int) -> None:
         """Physically deletes a node (used by the sleep cycle when forgetting)."""
         cursor = self._conn.cursor()
-        cursor.execute("DELETE FROM nodes_fts WHERE rowid = ?", (node_id,))
-        cursor.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
+        cursor.execute("DELETE FROM episodes_fts WHERE rowid = ?", (node_id,))
+        cursor.execute("DELETE FROM episodes WHERE id = ?", (node_id,))
+        cursor.execute("DELETE FROM cortex WHERE id = ?", (node_id,))
         self._conn.commit()
         logger.info("[MEMORY FORGOTTEN] id=%s deleted from the database", node_id)
 
@@ -824,7 +978,14 @@ class Database:
         """
         cursor = self._conn.cursor()
         cursor.executemany(
-            "UPDATE nodes SET weight = :weight, last_decayed_at = :last_decayed_at WHERE id = :id",
+            "UPDATE episodes SET weight = :weight, last_decayed_at = :last_decayed_at WHERE id = :id",
+            updates,
+        )
+        # СЛОВАРЬ ТОЖЕ ЗАТУХАЕТ, только медленнее: тридцать суток против
+        # семи часов. Направить затухание только в эпизоды значило бы
+        # сделать словарь вечным.
+        cursor.executemany(
+            "UPDATE cortex SET weight = :weight, last_decayed_at = :last_decayed_at WHERE id = :id",
             updates,
         )
         self._conn.commit()
@@ -1146,13 +1307,21 @@ class Database:
         if existing is None:
             cursor.execute(
                 """
-                INSERT INTO nodes (context, response, weight, created_at, last_accessed, is_meta, node_type)
-                VALUES (?, ?, ?, ?, ?, 1, ?)
+                INSERT INTO cortex (id, text, meaning, weight, strength,
+                                    created_at, last_accessed, last_decayed_at,
+                                    kind, is_meta)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """,
-                (content, content, weight, ts, ts, node_type),
+                # is_meta ХРАНИТСЯ, а не выводится из списка родов.
+                # Первая версия выводила его из перечисления, и в
+                # перечисление не попал last_decision — витрина перестала
+                # видеть решение. Выводить то, что раньше хранилось,
+                # значит терять всё, чего не предусмотрел.
+                (nid := self._next_id(), content, content, weight, weight,
+                 ts, ts, ts, node_type),
             )
             self._conn.commit()
-            node_id = cursor.lastrowid
+            node_id = nid
             logger.info(
                 "[META NODE CREATED] type=%s id=%s weight=%.2f",
                 node_type, node_id, weight,
@@ -1161,8 +1330,9 @@ class Database:
 
         cursor.execute(
             """
-            UPDATE nodes
-            SET context = ?, response = ?, weight = ?, last_accessed = ?
+            UPDATE cortex
+            SET text = ?, meaning = ?, weight = ?, last_accessed = ?,
+                occurrences = occurrences + 1
             WHERE id = ?
             """,
             (content, content, weight, ts, existing["id"]),
@@ -1214,13 +1384,14 @@ class Database:
         if existing is None:
             cursor.execute(
                 """
-                INSERT INTO nodes (context, response, weight, created_at, last_accessed, last_decayed_at, node_type)
-                VALUES (?, ?, ?, ?, ?, ?, 'concept')
+                INSERT INTO cortex (id, text, meaning, weight, strength, created_at, last_accessed, last_decayed_at, kind)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (name, definition, weight, ts, ts, ts),
+                (nid := self._next_id(), name, definition, weight, weight,
+                 ts, ts, ts, "concept"),
             )
             self._conn.commit()
-            node_id = cursor.lastrowid
+            node_id = nid
             logger.info(
                 "[CONCEPT CREATED] id=%s name=%r weight=%.2f",
                 node_id, name, weight,
@@ -1230,8 +1401,9 @@ class Database:
         new_weight = min(1.0, existing["weight"] + 0.05)
         cursor.execute(
             """
-            UPDATE nodes
-            SET response = ?, weight = ?, last_accessed = ?, last_decayed_at = ?
+            UPDATE cortex
+            SET meaning = ?, weight = ?, last_accessed = ?, last_decayed_at = ?,
+                occurrences = occurrences + 1
             WHERE id = ?
             """,
             (definition, new_weight, ts, ts, existing["id"]),
@@ -1287,13 +1459,14 @@ class Database:
         if existing is None:
             cursor.execute(
                 """
-                INSERT INTO nodes (context, response, weight, created_at, last_accessed, last_decayed_at, node_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO cortex (id, text, meaning, weight, strength, created_at, last_accessed, last_decayed_at, kind)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (text, text, initial_weight, ts, ts, ts, node_type),
+                (nid := self._next_id(), text, text, initial_weight,
+                 initial_weight, ts, ts, ts, node_type),
             )
             self._conn.commit()
-            node_id = cursor.lastrowid
+            node_id = nid
             logger.debug(
                 "[LEXICAL CREATED] type=%s id=%s text=%r weight=%.3f",
                 node_type, node_id, text, initial_weight,
@@ -1302,7 +1475,8 @@ class Database:
 
         new_weight = min(max_weight, existing["weight"] + reinforce_step)
         cursor.execute(
-            "UPDATE nodes SET weight = ?, last_accessed = ?, last_decayed_at = ? WHERE id = ?",
+            "UPDATE cortex SET weight = ?, last_accessed = ?, last_decayed_at = ?, "
+            "occurrences = occurrences + 1 WHERE id = ?",
             (new_weight, ts, ts, existing["id"]),
         )
         self._conn.commit()
