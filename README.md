@@ -207,36 +207,83 @@ A guard now blocks the worst of it: supersession also requires a quarter
 of the content words to be shared, which cuts that to 372. The guard is a
 floor, not a fix. **Pass an encoder for your language.**
 
-### The bundled model is worth replacing, and here is by how much
+### The configuration this library claims
+
+English, `longmemeval_oracle.json`, 500 questions, defaults except where
+noted. Every row is reproducible with one command.
+
+| install | how it understands meaning | turns written | R@1 | R@10 |
+|---|---|---:|---:|---:|
+| `pip install selective-memory` | **grown from its own experience** — no dependencies, no download, works offline | 41.1% | **97.4%** | 97.6% |
+| the same, matched selectivity (`base_plasticity_threshold=0.32`) | " | 25.8% | 92.6% | 92.8% |
+| `pip install selective-memory[semantic]` | potion-base-8M, 30 MB fetched on first use | 26.3% | **96.2%** | 96.4% |
+| semantics switched off (`Memory(encoder=lambda t: None)`) | shared words only | 18.3% | 88.2% | 88.2% |
+
+```bash
+python tools/bench_longmemeval.py --encoder bare      # row 1
+python tools/bench_longmemeval.py --encoder bare --plasticity 0.32
+python tools/bench_longmemeval.py --encoder builtin   # row 3
+python tools/bench_longmemeval.py --encoder none      # row 4
+```
+
+**Read the first row with the third.** The bare install looks better only
+because it writes 1.6 times as much: novelty is measured against a
+perception that starts empty, so early on everything surprises it. Held to
+the same selectivity it lands 3.6 points BELOW the bundled model. The
+honest reading is not "grown perception wins" but "the zero-dependency
+install is genuinely usable, and installing the model buys you 3.6 points
+at the same volume".
+
+**Recommended:** `pip install selective-memory[semantic]`. Take the bare
+install when the machine has no network, when 30 MB of model is
+unacceptable, or when you are shipping something that must not download
+anything behind the user's back.
+
+Ask any instance what it ended up with — semantics degrades SILENTLY
+otherwise:
+
+```python
+>>> print(memory.describe_setup())
+смысл: potion-base-8M | значимость: своя, из внутренней среды | порог записи: 0.25 | ёмкость: без предела
+```
+
+**Two honest caveats.** `longmemeval_oracle` is the light variant of the
+benchmark — haystacks of a couple of dozen turns, not the full set; these
+numbers are not comparable with published LongMemEval results. And every
+row above loads the haystack first and asks afterwards, whereas a live
+assistant retrieves before each write — a mode measured only on a small
+stand so far, where it made retrieval WORSE (3/6 → 1/6 at k=1). Until that
+is measured properly, treat these numbers as an upper bound.
+
+### What the encoder buys, on sixteen questions
 
 `tools/probe_semantic.py` holds sixteen pairs of "fact → how someone will
-ask about it". Half of the pairs share no word with the fact ("where do I
-live" against "we live at 12 Pushkin Street") — those are the ones that
-actually test semantics.
+ask about it". Half share no word with the fact ("where do I live" against
+"we live at 12 Pushkin Street") — those are the ones that test semantics.
 
-| model | hits | RAM | disk |
-|---|---|---|---|
-| navec, bundled | 8/16 = 50% | 376 MB | 51 MB |
-| potion-base-8M | 7/16 = 44% | 351 MB | 30 MB |
-| potion-retrieval-32M | 7/16 = 44% | 351 MB | 130 MB |
-| **potion-multilingual-128M** | **12/16 = 75%** | 1.6 GB | 1 GB |
+| configuration | hits |
+|---|---:|
+| potion-base-8M (`[semantic]`) | **9/16** |
+| grown perception (bare install) | 6/16 |
+| shared words only | 6/16 |
 
-Read the bundled model's number together with one fact: **eight pairs are
-solvable by plain word overlap, and they are the same eight.** navec adds
-nothing to retrieval.
+```bash
+python tools/probe_semantic.py --lang en           # with the model
+python tools/probe_semantic.py --lang en --grown   # as a bare install
+python tools/probe_semantic.py --lang ru           # Russian set
+```
 
-This section used to say that weighting words by rarity "did not change a
-single hit". That is true FOR THIS BENCH and only for it: on sixteen facts
-nearly every word occurs once, and rarity distinguishes nobody from
-nobody. On LongMemEval haystacks of hundreds of turns the same change
-lifted preference questions from 20% to 60% R@1 — see §2.20 of the audit.
+This bench and the one above disagree about grown perception, and the
+disagreement is instructive: sixteen isolated facts give it nothing to
+learn from, while a benchmark haystack is hundreds of turns in the very
+vocabulary the questions use. Perception grown from experience is good at
+the language it has actually seen and knows nothing of the rest.
 
-The cause is the domain, not the size: navec was trained on literary
-fiction. "Love ~ prefer" scores 0.580, but "language ~ programming"
-0.114 and "language ~ python" 0.145 — in fiction a "language" is a
-tongue and a "python" is a snake.
+**For Russian take `[semantic-ru]`.** The default model is English; on
+Russian it scores "cat ~ concrete" 0.803 against "cat ~ kitty" 0.643, and
+three tests in this repository skip themselves when they detect it.
 
-A working replacement, if 1.6 GB of RAM is acceptable:
+A working replacement, if 1.6 GB of RAM is acceptable:A working replacement, if 1.6 GB of RAM is acceptable:
 
 ```python
 from model2vec import StaticModel

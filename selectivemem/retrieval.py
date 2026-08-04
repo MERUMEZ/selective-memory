@@ -215,6 +215,22 @@ class RetrievalMixin:
         # emptiness with no hint as to why. That is exactly how half a day
         # went on the benchmark before it became clear the search was not
         # broken, merely blind.
+        if query_vector is None and threshold is None:
+            # ПОРОГ ЗАВИСИТ ОТ ТОГО, ЕСТЬ ЛИ СМЫСЛОВОЕ СЛАГАЕМОЕ.
+            #
+            # Умолчание 0.20 калибровано по шкале, в которой к совпадению
+            # слов прибавляется близость векторов. Без семантики счёт
+            # живёт на другой шкале, и тот же порог отсекает ПОЧТИ ВСЁ.
+            # Замер на LongMemEval без кодировщика:
+            #
+            #     порог 0.20 (умолчание)  ->  R@1  0.0%
+            #     порог 0.12              ->  R@1 31.2%
+            #     порог 0.06              ->  R@1 91.2%
+            #
+            # То есть библиотека без модели выглядела сломанной, хотя
+            # искать умела: она молча не отдавала найденное.
+            effective_threshold = self.settings.memory_search_threshold_lexical
+
         if query_vector is None and not self._warned_no_semantics:
             self._warned_no_semantics = True
             logger.warning(

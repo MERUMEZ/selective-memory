@@ -333,6 +333,36 @@ class Memory:
             learned_words=learned.new_words,
         )
 
+    def describe_setup(self) -> str:
+        """
+        В какой конфигурации работает ЭТОТ экземпляр памяти.
+
+        Семантика необязательна и отваливается тихо, а разница между
+        режимами — троекратная. Строка отвечает на вопрос «почему поиск
+        стал хуже» до того, как его зададут.
+
+            >>> print(memory.describe_setup())
+            смысл: potion-base-8M | значимость: своя | пишет: при плотности >= 0.25
+        """
+        from selectivemem import embeddings
+
+        if self.graph.encoder is not None:
+            meaning = "кодировщик приложения"
+        elif self.graph.perception is not None:
+            grown = self.graph.perception
+            meaning = (f"выращенное восприятие "
+                       f"(показов {grown.exposures}, словарь {grown.vocabulary})")
+        else:
+            meaning = embeddings.describe()
+
+        significance = ("своя, из внутренней среды" if self.settings.intrinsic_emotion
+                        else "только переданная приложением")
+        capacity = (f"{self.settings.memory_capacity}" if self.settings.memory_capacity
+                    else "без предела")
+        return (f"смысл: {meaning} | значимость: {significance} | "
+                f"порог записи: {self.settings.base_plasticity_threshold} | "
+                f"ёмкость: {capacity}")
+
     def feel(self) -> InternalState:
         """
         Самочувствие организма прямо сейчас.

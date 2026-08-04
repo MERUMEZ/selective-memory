@@ -908,6 +908,67 @@ pattern is not an addendum to a list but part of recall itself. For it to
 work, an association must earn its own score from connectivity rather than
 inherit a fraction of its source's.
 
+### 2.28 The out-of-the-box configuration: claimed, measured, reproducible
+
+The project lacked **one claimed configuration with a number**. Measurements
+were taken in different modes, figures wandered from 70.8% to 96.8%, and
+anyone reading the README would have got something other than what it said.
+There are now three named configurations, each with the command that
+reproduces it.
+
+| install | meaning | written | R@1 | R@10 |
+|---|---|---:|---:|---:|
+| bare, no dependencies | grown perception | 41.1% | 97.4% | 97.6% |
+| the same, matched selectivity | " | 25.8% | 92.6% | 92.8% |
+| `[semantic]` | potion-base-8M | 26.3% | **96.2%** | 96.4% |
+| semantics off | shared words only | 18.3% | 88.2% | 88.2% |
+
+**The first row cannot be read without the second.** The bare install looks
+better only because it writes 1.6 times as much: novelty is judged against
+a perception that starts empty. Held to the same selectivity it lands 3.6
+points BELOW the model.
+
+**THREE DEFECTS FOUND ALONG THE WAY, ALL OF THEM "DOES NOT WORK OUT OF THE
+BOX".**
+
+**1. The search threshold was calibrated for the semantic mode only.**
+Without an encoder the score lives on a different scale, and the default
+0.20 cut off almost everything: R@1 0.0% at 0.20, 31.2% at 0.12, 91.2% at
+0.06 (80 questions). On the full set the library without a model returned
+**9.2%** — it looked broken while it could search perfectly well; it simply
+never handed the results over. `memory_search_threshold_lexical = 0.06` now
+applies when there is no query vector at all: **9.2% -> 88.2%**. The
+threshold is flat between 0.04 and 0.10, so this is not curve-fitting.
+
+**2. Neither word list contained a single English function word.**
+`_FUNCTION_WORDS` held 64 Russian entries and zero English ones — while the
+default model is English and the external benchmark is English. The primary
+language was served worse than the secondary one.
+
+**3. But they could not simply be added, and that matters more than the fix
+itself.** Extending the lists dropped the benchmark from 96.0% to 93.2%.
+The culprit was not the keyword list but the **filtering before the
+encoder**: a SENTENCE-level model is trained on natural text, and stripping
+prepositions and copulas hands it something it has never seen. Filtering
+only makes sense for a dictionary-style model (navec), where the phrase
+vector is an average of word vectors.
+
+The phrase now goes into potion whole — and the result beat the original:
+96.0% -> **96.2%**, because the model also gets the punctuation that
+rebuilding from tokens used to lose.
+
+**INCIDENTAL: ONE TEST HAD BEEN PASSING BY ACCIDENT.** "у меня есть собака"
+against "у меня есть кошка" stopped being distinguishable from a correction
+(cosine 0.955) the moment filtering was removed. The test is Russian and the
+model is English — a combination the library explicitly does not support,
+and `requires_model` could not tell the difference. It was replaced with a
+CAPABILITY check: the active model must rank "cat ~ kitty" above "cat ~
+concrete". Three Russian tests now skip themselves honestly.
+
+**`describe_setup()` WAS ADDED.** Semantics degrades silently and the gap
+between modes reaches tenfold in R@1. The line answers "why did retrieval
+get worse" before anyone asks.
+
 ## 3. What remains
 
 ### 3.1 Defects

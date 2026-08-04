@@ -139,6 +139,21 @@ _FUNCTION_WORDS = {
     "их", "есть", "быть", "мой", "моя", "моё", "мне", "меня", "мной", "твой",
     "тебя", "тебе", "про", "о", "об", "при", "же", "уж", "вот", "так", "там",
     "тут", "ещё", "еще", "уже", "бы", "чтобы", "если", "когда", "где",
+    # АНГЛИЙСКИЕ — ИХ ЗДЕСЬ НЕ БЫЛО ВОВСЕ, и это не мелочь: модель по
+    # умолчанию английская (potion-base-8M), внешний бенчмарк английский,
+    # а фраза уходила в кодировщик со всеми "the", "is", "my" внутри.
+    # Русская половина списка при этом чистила фразу исправно — то есть
+    # заявленный основной язык обслуживался хуже второстепенного.
+    "i", "me", "my", "mine", "myself", "we", "us", "our", "ours",
+    "you", "your", "yours", "he", "him", "his", "she", "her", "hers",
+    "it", "its", "they", "them", "their", "theirs",
+    "a", "an", "the", "and", "or", "but", "if", "then", "than", "so",
+    "as", "of", "at", "by", "for", "with", "about", "into", "to", "from",
+    "in", "on", "up", "out", "over", "under", "is", "am", "are", "was",
+    "were", "be", "been", "being", "do", "does", "did", "have", "has",
+    "had", "will", "would", "can", "could", "should", "not", "no",
+    "this", "that", "these", "those", "there", "here", "what", "when",
+    "where", "who", "how", "why", "which",
 }
 
 # Module settings: an application may replace them via configure()
@@ -290,10 +305,19 @@ def encode(text: str):
     # служебных слов ниже. model2vec кодирует строку целиком и делает
     # усреднение сам.
     if hasattr(model, "encode"):
-        words = _content_words(text)
-        if not words:
-            return None
-        return model.encode([" ".join(words)])[0]
+        # ФРАЗА ИДЁТ ЦЕЛИКОМ, БЕЗ ОТСЕВА СЛУЖЕБНЫХ СЛОВ.
+        #
+        # Здесь стоял тот же отсев, что и для navec, и он молча не работал:
+        # в списке служебных слов не было ни одного английского, а модель
+        # по умолчанию английская. Когда английские слова в список внесли,
+        # отсев заработал — и бенчмарк упал с R@1 96.0% до 93.2%.
+        #
+        # Так и должно быть. Модель уровня ПРЕДЛОЖЕНИЯ обучена на
+        # естественном тексте; выдирая из фразы предлоги и связки, мы
+        # подаём ей то, чего она не видела. Отсев осмыслен только для
+        # словарной модели ниже, где вектор фразы собирается усреднением и
+        # служебные слова его размывают.
+        return model.encode([text])[0]
 
     vectors = [model[w] for w in _content_words(text) if w in model]
     if not vectors:
@@ -373,3 +397,28 @@ def from_blob(blob: Optional[bytes]):
 def similarity(text: str, blob: Optional[bytes]) -> float:
     """Convenience wrapper: similarity of a text to a node's stored vector."""
     return cosine(encode(text), from_blob(blob))
+
+
+def describe() -> str:
+    """
+    Чем эта установка различает смысл — одной строкой.
+
+    ЗАЧЕМ. Семантика здесь необязательна и деградирует ТИХО: нет
+    model2vec — поиск молча становится словарным, стоит не тот путь к
+    модели — то же самое. Замер показывает разницу между этими режимами в
+    три раза (9/16 против 3/16 на английском стенде), а узнать, в каком ты
+    режиме, можно было только по логам при подходящем уровне.
+    """
+    if not _settings.embeddings_enabled:
+        return "семантика выключена настройкой (embeddings_enabled=False)"
+    if _settings.embedding_model_path:
+        model = _load_model()
+        if model is None:
+            return f"модель не загрузилась: {_settings.embedding_model_path}"
+        return f"navec: {_settings.embedding_model_path}"
+    try:
+        from model2vec import StaticModel  # noqa: F401
+    except ImportError:
+        return ("model2vec не установлен — организм отрастит восприятие сам "
+                "(pip install selective-memory[semantic] даёт готовую модель)")
+    return "potion-base-8M" if _load_model() is not None else "potion-base-8M не загрузилась"

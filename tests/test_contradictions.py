@@ -37,6 +37,33 @@ requires_model = pytest.mark.skipif(
 )
 
 
+def _handles_russian() -> bool:
+    """
+    Различает ли ДЕЙСТВУЮЩАЯ модель русские слова по смыслу.
+
+    Проверка возможности, а не наличия. Тексты здесь русские, а модель по
+    умолчанию английская (potion-base-8M) — сочетание, которое библиотека
+    прямо не поддерживает и советует заменить на [semantic-ru]. Раньше
+    такие проверки проходили случайно: перед кодированием из фразы
+    выдирались служебные слова, и это сглаживало разницу. Когда отсев для
+    модели уровня предложения убрали (он ронял английский бенчмарк с 96.0
+    до 93.2), обман вскрылся: «у меня есть собака» и «у меня есть кошка»
+    получили косинус 0.955 и стали неотличимы от поправки.
+    """
+    if not embeddings.is_available():
+        return False
+    near = embeddings.cosine(embeddings.encode("кот"), embeddings.encode("кошка"))
+    far = embeddings.cosine(embeddings.encode("кот"), embeddings.encode("бетон"))
+    return near is not None and far is not None and near > far + 0.1
+
+
+requires_russian = pytest.mark.skipif(
+    not _handles_russian(),
+    reason="действующая модель не различает русские слова по смыслу; "
+           "для русского нужен [semantic-ru]",
+)
+
+
 @pytest.fixture
 def mg():
     return MemoryGraph(db=Database(db_path=":memory:"))
@@ -97,7 +124,7 @@ def test_repetition_is_not_a_contradiction(mg):
     assert mg.find_superseded("мою собаку зовут Рекс") == []
 
 
-@requires_model
+@requires_russian
 @pytest.mark.parametrize(
     "old,new",
     [

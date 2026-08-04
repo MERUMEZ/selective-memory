@@ -40,8 +40,44 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 if "--logs" not in sys.argv:
     os.environ["LOG_LEVEL"] = "ERROR"
 
+# АНГЛИЙСКИЙ НАБОР — ОСНОВНОЙ.
+#
+# Библиотека по умолчанию грузит potion-base-8M, модель английскую, и
+# английский же язык у внешнего бенчмарка. Русский набор ниже остался
+# потому, что на нём поймана половина дефектов проекта, но заявленная
+# конфигурация меряется здесь.
+FACTS_EN = [
+    "i am allergic to penicillin",
+    "my daughter liza is six years old",
+    "i prefer python over java",
+    "i work as a backend developer at a fintech",
+    "my flight to istanbul is on the twentieth of may",
+    "i have not eaten meat for three years",
+    "my wife is called marina her birthday is in april",
+    "we live at twelve pushkin street apartment forty",
+]
+
+PROBES_EN = [
+    ("what are my allergies", 0),
+    ("what medication must i avoid", 0),
+    ("what is my daughter called", 1),
+    ("how old is my child", 1),
+    ("which language do i write code in", 2),
+    ("what programming languages do i like", 2),
+    ("what do i do for a living", 3),
+    ("where am i employed", 3),
+    ("when do i fly", 4),
+    ("where is my ticket to", 4),
+    ("am i a vegetarian", 5),
+    ("do i eat meat", 5),
+    ("what is my wife called", 6),
+    ("when is marina birthday", 6),
+    ("my address", 7),
+    ("where do i live", 7),
+]
+
 # Восемь фактов, какие человек рассказывает ассистенту о себе
-FACTS = [
+FACTS_RU = [
     "у меня аллергия на пенициллин",
     "моя дочь Лиза, ей шесть лет",
     "я предпочитаю Python, не Java",
@@ -54,7 +90,7 @@ FACTS = [
 
 # Как он спросит о том же самом. Помечены пары, где НЕТ общих слов, —
 # именно они отделяют настоящую семантику от совпадения по буквам.
-PROBES = [
+PROBES_RU = [
     ("какие у меня аллергии", 0),
     ("что мне нельзя принимать", 0),
     ("как зовут мою дочь", 1),
@@ -73,16 +109,33 @@ PROBES = [
     ("где я живу", 7),
 ]
 
+FACTS, PROBES = FACTS_EN, PROBES_EN
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Качество поиска на реальных вопросах")
     parser.add_argument("--no-semantics", action="store_true",
                         help="отключить кодировщик: видно, сколько даёт совпадение слов")
     parser.add_argument("--logs", action="store_true")
+    parser.add_argument("--lang", choices=("en", "ru"), default="en",
+                        help="набор фактов и вопросов; en — заявленная конфигурация")
+    parser.add_argument("--grown", action="store_true",
+                        help="как при голой установке: готовой модели нет, "
+                             "организм отращивает восприятие сам")
     args = parser.parse_args()
+
+    global FACTS, PROBES
+    FACTS, PROBES = (FACTS_EN, PROBES_EN) if args.lang == "en" else (FACTS_RU, PROBES_RU)
 
     from selectivemem import Memory
     from selectivemem.graph_memory import MemoryGraph
+
+    if args.grown:
+        # Голая установка: model2vec не поставлен, модели нет. Библиотека
+        # в этом случае отращивает восприятие сама.
+        from selectivemem import embeddings
+        embeddings.is_available = lambda: False
+        embeddings.encode = lambda text: None
 
     encoder = (lambda text: None) if args.no_semantics else None
     memory = Memory(":memory:", encoder=encoder)

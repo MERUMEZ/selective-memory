@@ -69,8 +69,17 @@ def build_encoder(kind: str):
     """Кодировщик для стенда. None означает «только совпадение слов»."""
     if kind == "none":
         return lambda text: None
+    if kind == "bare":
+        # ГОЛАЯ УСТАНОВКА: `pip install selective-memory` без дополнений.
+        # Ни model2vec, ни navec нет, скачивать нечего — организм
+        # отращивает восприятие сам. Это и есть заявка «работает из
+        # коробки», и её надо мерить, а не предполагать.
+        from selectivemem import embeddings
+        embeddings.is_available = lambda: False
+        embeddings.encode = lambda text: None
+        return None
     if kind == "builtin":
-        return None                      # navec, как в пакете по умолчанию
+        return None                      # potion-base-8M, как в пакете
     if kind == "potion":
         from model2vec import StaticModel
         model = StaticModel.from_pretrained("minishlab/potion-base-8M")
@@ -162,7 +171,7 @@ def main() -> None:
     parser.add_argument("--data", default=DEFAULT_DATA)
     parser.add_argument("--limit", type=int, default=0, help="0 = все инстансы")
     parser.add_argument("--mode", choices=("normal", "archive"), default="normal")
-    parser.add_argument("--encoder", choices=("none", "builtin", "potion"), default="none")
+    parser.add_argument("--encoder", choices=("none", "bare", "builtin", "potion"), default="none")
     parser.add_argument("--threshold", type=float, default=None,
                         help="порог поиска; по умолчанию из настроек")
     parser.add_argument("--content-tokens", type=int, default=None,
