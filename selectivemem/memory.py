@@ -176,6 +176,9 @@ class Memory:
         # получал вовсе — то же расхождение витрины с пакетом, что было с
         # ассоциациями. Найдено tools/check_liveness.py.
         self.stm = WorkingMemory(settings=self.settings)
+        # Последняя выдача: (запрос, id узлов, время). Нужна, чтобы
+        # СЛЕДУЮЩИЙ вопрос мог её оценить — см. _judge_previous_recall.
+        self._last_recall: Optional[tuple] = None
 
     # ----------------------------------------------------------------------
     # 1. Observing
@@ -309,9 +312,14 @@ class Memory:
         spacing effect.
         """
         ts = timestamp if timestamp is not None else self.clock()
+        # СНАЧАЛА СУДИМ ПРЕДЫДУЩУЮ ВЫДАЧУ, потом ищем. Если пришёл тот же
+        # вопрос, значит прошлый ответ не подошёл — и узнать это можно
+        # только сейчас, до того как новый поиск затрёт след.
+        self._judge_previous_recall(query, ts)
         matches = self.graph.search(
             query, top_k=top_k, timestamp=ts, with_associations=with_associations,
         )
+        self._last_recall = (query, [m.id for m in matches], ts)
         self._remember_used([m.id for m in matches])
         # То, что было активно сейчас, свяжется со следующей записью — см.
         # associate_recalled_limit в observe.
@@ -449,6 +457,62 @@ class Memory:
                     edge_type="association",
                 )
         self._recently_recalled = []
+
+    def _judge_previous_recall(self, query: str, ts: float) -> int:
+        """
+        ПОДКРЕПЛЕНИЕ ПО ПОСЛЕДСТВИЮ, отрицательная ветвь.
+
+        Тот же вопрос, заданный снова, — свидетельство, что прошлый ответ
+        не подошёл. Это единственный сигнал о качестве выдачи, который
+        библиотека получает БЕЗ участия приложения: `feedback()` почти
+        никто не зовёт, а переспрашивают все.
+
+        ЗАЧЕМ ИМЕННО ОТРИЦАТЕЛЬНАЯ. Сила уже растёт от извлечения, но
+        растёт у всего, что попало в выдачу, — у верного и неверного
+        одинаково. Замер показал, к чему это ведёт: ускорение подкрепления
+        ускоряло и закрепление ошибок (раздел 2.16 аудита). Недоставало не
+        скорости, а провала — того самого, который у дофамина случается на
+        обещанную и не полученную награду.
+
+        Положительной ветви здесь намеренно нет. «Разговор пошёл дальше» —
+        слишком слабое свидетельство: оно наступает по умолчанию, и
+        награждать по нему значило бы снова растить всё подряд.
+
+        Возвращает число наказанных узлов.
+        """
+        penalty = self.settings.consequence_penalty
+        if penalty <= 0.0 or not self._last_recall:
+            return 0
+        prev_query, prev_ids, prev_ts = self._last_recall
+        if not prev_ids or ts - prev_ts > self.settings.consequence_window:
+            return 0
+        if self._query_similarity(query, prev_query) < self.settings.consequence_repeat_threshold:
+            return 0
+
+        for node_id in prev_ids:
+            self.graph.db.add_strength(node_id, -penalty, self.settings.strength_max)
+        logger.info(
+            "[CONSEQUENCE] Question repeated (%r ~ %r) — %d nodes weakened by %.3f",
+            query[:30], prev_query[:30], len(prev_ids), penalty,
+        )
+        self._last_recall = None
+        return len(prev_ids)
+
+    def _query_similarity(self, a: str, b: str) -> float:
+        """
+        Насколько два запроса — один и тот же вопрос.
+
+        По смыслу, если кодировщик есть: «когда у меня отпуск» и «а отпуск
+        когда» — один вопрос разными словами, и строковое сравнение это
+        упустит. Без кодировщика остаётся строковое, и тогда механизм ловит
+        только буквальные повторы. Деградация честная и объявлена.
+        """
+        from selectivemem import embeddings
+
+        va, vb = self.graph._encode(a), self.graph._encode(b)
+        if va is not None and vb is not None:
+            return max(0.0, embeddings.cosine(va, vb))
+        return self.graph._compute_fuzzy_similarity(a.strip().lower(), b.strip().lower())
 
     def _remember_used(self, node_ids: List[int]) -> None:
         """

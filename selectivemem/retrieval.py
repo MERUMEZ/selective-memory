@@ -297,10 +297,29 @@ class RetrievalMixin:
                     base = _importance_base(own, self.settings.strength_headroom)
                 else:
                     base = row["weight"]
-                combined_score = min(
-                    1.0,
-                    relevance + base * self.settings.memory_weight_influence,
-                )
+                if self.settings.importance_scales_relevance:
+                    # МОДУЛЯЦИЯ ВМЕСТО СЛОЖЕНИЯ, и это третий раз, когда в
+                    # этом проекте побеждает та же форма.
+                    #
+                    # Сложение упирается в min(1.0, ...): чем весомее
+                    # важность, тем чаще сумма переваливает за единицу, и
+                    # кандидаты схлопываются в один балл. Замерено прямо:
+                    # доля важности 0.15 -> 73.3%, 0.40 -> 30.0%,
+                    # 0.80 -> 13.3%. Канал нельзя расширить не потому, что
+                    # важность вредна, а потому что расти ей некуда.
+                    #
+                    # Умножение сохраняет порядок по релевантности и лишь
+                    # растягивает его: сильный узел обгоняет равного себе по
+                    # смыслу, но не обгоняет того, кто отвечает лучше.
+                    # Потолка нет, насыщения нет.
+                    combined_score = relevance * (
+                        1.0 + base * self.settings.memory_weight_influence
+                    )
+                else:
+                    combined_score = min(
+                        1.0,
+                        relevance + base * self.settings.memory_weight_influence,
+                    )
 
             if combined_score >= effective_threshold:
                 scored.append(
