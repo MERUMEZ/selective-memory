@@ -469,7 +469,24 @@ class RetrievalMixin:
                     existing_ids.add(assoc.id)
 
             if associative_extras:
-                top_matches = top_matches + associative_extras
+                if self.settings.associations_compete:
+                    # СОРЕВНУЮТСЯ ЗА МЕСТО, А НЕ ЖДУТ В КОНЦЕ.
+                    #
+                    # Дописывание в хвост означает, что растекание НЕ МОЖЕТ
+                    # повлиять на recall@k по устройству: когда
+                    # ранжированных совпадений набралось k, ассоциация
+                    # встаёт на k+1 и в окно не попадает никогда. Замер:
+                    # при top_k=3 дописанный узел стабильно оказывался на
+                    # позиции 3, то есть четвёртым.
+                    #
+                    # В живом достраивание образа не добавка к списку, а
+                    # часть самого припоминания: CA3 сваливается в целый
+                    # образ, а не выдаёт «вот ответ, а вот ещё связанное».
+                    merged = top_matches + associative_extras
+                    merged.sort(key=lambda m: m.similarity, reverse=True)
+                    top_matches = merged[:top_k]
+                else:
+                    top_matches = top_matches + associative_extras
 
         return top_matches
 
