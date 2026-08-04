@@ -7,6 +7,32 @@ Russian pair: [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md).
 
 ---
 
+## What changed in the last session
+
+Five changes went into the defaults; four mechanisms were measured and
+rejected. Details sit in place below; this is the summary so the
+walkthrough can be read knowing what is new in it.
+
+| change | before | after | measured |
+|---|---|---|---|
+| **pattern separation at the input** | supersession fired on any look-alike | do not supersede when more than two candidates respond | near-duplicates R@1 44.4% → **83.3%** |
+| **importance multiplies relevance** | `min(1, relevance + importance·share)` | `relevance × (1 + importance·share)` | R@5 75.0% → **83.3%**, R@10 → **85.0%** |
+| **retrieval threshold** | 0.30 | **0.20** | changes only together with the form |
+| **strength ceiling lifted** | `min(1, own)` — the top of the scale did not exist | `strength_headroom = 1.0` | share of important in top 5 83.3% → **100.0%** |
+| **words weighted by rarity** | "planning" and "Denver" counted alike | weight falls with the number of entries containing the word | preferences R@1 20% → **60%** |
+
+| measured and rejected | why |
+|---|---|
+| tagging and capture (deferred consolidation) | R@1 65.0% → **46.7%**: capture writes everything near a spike and floods the store |
+| credit by consequence | one question in thirty, no dose-response |
+| suppression of losers | does not restore discrimination: +0.028 → +0.028 → +0.025 |
+| replay and downscaling in sleep | they fire; no benefit could be measured |
+
+Everything rejected is kept in the code, switched off, with the
+measurements recorded in the settings comments.
+
+---
+
 ## PART I. A message on its way in
 
 Entry point: `memory.py:observe(text, response, emotion=0.0, load=0.0, timestamp=None)`.
