@@ -179,6 +179,9 @@ class Memory:
         # Последняя выдача: (запрос, id узлов, время). Нужна, чтобы
         # СЛЕДУЮЩИЙ вопрос мог её оценить — см. _judge_previous_recall.
         self._last_recall: Optional[tuple] = None
+        # Помеченные слабые следы: (текст, ответ, плотность, время).
+        # Ждут сильного события рядом по времени — см. _tag/_capture_tags.
+        self._tags: List[tuple] = []
 
     # ----------------------------------------------------------------------
     # 1. Observing
@@ -237,6 +240,13 @@ class Memory:
                 context=text, response=response, weight=weight, timestamp=ts,
             )
             self._associate_with_recalled(node_id, ts)
+            # ЗАХВАТ: сильное событие производит "белки" на всю клетку, и
+            # помеченные слабые следы рядом по времени их перехватывают.
+            self._capture_tags(decision.density, ts)
+        else:
+            # МЕТКА: гейт не пропустил, но след не исчезает совсем — он
+            # лабилен и ждёт своего часа в пределах окна.
+            self._tag(text, response, decision.density, ts)
 
         self._consolidation = None
         if self.settings.consolidate_from_stm:
@@ -457,6 +467,76 @@ class Memory:
                     edge_type="association",
                 )
         self._recently_recalled = []
+
+    def _tag(self, text: str, response: str, density: float, ts: float) -> None:
+        """
+        МЕТКА НА СЛАБОМ СЛЕДЕ (Фрей и Моррис, 1997).
+
+        Гейт решает в момент события и необратимо: не прошло — следа нет
+        никогда. В мозге не так. Слабое воздействие ставит на синапсе
+        метку, белков для закрепления не хватает, и след угаснет — но
+        если в ближайший час-два рядом случится сильное событие, клетка
+        произведёт эти белки на всю себя, и помеченный синапс их
+        перехватит.
+
+        Так спокойно сказанное закрепляется задним числом. Наши
+        предпочтения страдают от отсутствия этого больше всего: «я больше
+        люблю кофе, чем чай» не несёт удивления и порога не берёт, а это
+        худший тип на внешнем наборе — 20% R@1.
+
+        Метка живёт в памяти процесса, а не в базе: след ЛАБИЛЕН по
+        определению, и переживать перезапуск ему незачем.
+        """
+        if self.settings.tagging_window <= 0.0:
+            return
+        self._tags.append((text, response, density, ts))
+        limit = max(1, self.settings.tagging_buffer)
+        if len(self._tags) > limit:
+            del self._tags[:-limit]
+
+    def _capture_tags(self, spike_density: float, ts: float) -> int:
+        """
+        ЗАХВАТ: сильное событие закрепляет помеченные следы рядом по времени.
+
+        Ждёт метка не одобрения, а ЛЮБОГО сильного события — знак не
+        важен, важна интенсивность. Так и в мозге: новизна, возбуждение и
+        награда открывают пластичность одинаково.
+
+        Чем дальше метка по времени, тем меньше достаётся: доля падает
+        линейно до края окна. Захваченный след получает лишь часть
+        плотности спайка (tagging_capture_factor) — закрепляется слабое
+        воспоминание, а не копия сильного.
+
+        Возвращает число закреплённых следов.
+        """
+        window = self.settings.tagging_window
+        if window <= 0.0 or not self._tags:
+            return 0
+
+        captured = 0
+        remaining = []
+        for text, response, density, tag_ts in self._tags:
+            age = ts - tag_ts
+            if age < 0 or age > window:
+                continue  # вне окна — след угас, и это нормально
+            proximity = 1.0 - (age / window)
+            weight = max(
+                density,
+                spike_density * self.settings.tagging_capture_factor * proximity,
+            )
+            node_id = self.graph.save_connection(
+                context=text, response=response, weight=weight, timestamp=tag_ts,
+            )
+            if node_id is not None:
+                captured += 1
+        self._tags = remaining
+
+        if captured:
+            logger.info(
+                "[TAG CAPTURE] Spike (density %.3f) consolidated %d tagged traces",
+                spike_density, captured,
+            )
+        return captured
 
     def _judge_previous_recall(self, query: str, ts: float) -> int:
         """

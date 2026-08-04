@@ -244,7 +244,30 @@ class RetrievalMixin:
         # ------------------------------------------------------------------
         prefiltered = self._prefilter(rows, query_keywords, query_vector, top_k)
 
+        # РЕДКОЕ СЛОВО РАЗЛИЧАЕТ, ЧАСТОЕ — НЕТ, и без этого поправка на
+        # общий оборот речи невозможна. Замер на LongMemEval показал, чем
+        # проигрывает верная запись:
+        #
+        #   вопрос  "I'm planning a trip to DENVER..."
+        #   первым  "I'm planning a trip with friends"
+        #   вторым  "I'm planning a trip to California"
+        #   улика   "During my previous visit to Denver..."  — третья
+        #
+        # Побеждает общий зачин, проигрывает единственное слово по делу.
+        # Совпадение по словам считало их поровну.
+        #
+        # Частота берётся ПО КАНДИДАТАМ, а не по всей базе: это те, кто уже
+        # откликнулся на запрос, и различать надо именно их. Слово, общее
+        # для всей выдачи, не говорит ни о чём.
+        idf = self._keyword_idf(prefiltered, query_keywords)
+
         for row, keyword_score, semantic_score in prefiltered:
+            if idf is not None:
+                keyword_score = self._keyword_overlap(
+                    query_keywords,
+                    self._extract_keywords(row["context"].strip().lower()),
+                    idf=idf,
+                )
             context_normalized = row["context"].strip().lower()
             fuzzy_score = self._compute_fuzzy_similarity(query_normalized, context_normalized)
 
@@ -500,12 +523,53 @@ class RetrievalMixin:
         }
 
     @staticmethod
-    def _keyword_overlap(query_keywords: Set[str], context_keywords: Set[str]) -> float:
+    def _keyword_overlap(query_keywords: Set[str], context_keywords: Set[str],
+                         idf: Optional[Dict[str, float]] = None) -> float:
+        """
+        Доля совпавших слов. С idf — доля совпавшей РАЗЛИЧАЮЩЕЙ СИЛЫ.
+
+        Без взвешивания «Denver» и «planning» стоят одинаково, и запись,
+        разделяющая с вопросом только общий зачин, обходит ту, что
+        разделяет единственное слово по делу.
+        """
         if not query_keywords or not context_keywords:
             return 0.0
         intersection = query_keywords & context_keywords
-        smallest_set_size = min(len(query_keywords), len(context_keywords))
-        return len(intersection) / smallest_set_size if smallest_set_size else 0.0
+        if idf is None:
+            smallest_set_size = min(len(query_keywords), len(context_keywords))
+            return len(intersection) / smallest_set_size if smallest_set_size else 0.0
+        total = sum(idf.get(w, 1.0) for w in query_keywords)
+        if total <= 0.0:
+            return 0.0
+        return sum(idf.get(w, 1.0) for w in intersection) / total
+
+    def _keyword_idf(self, prefiltered, query_keywords: Set[str]):
+        """
+        Различающая сила каждого слова запроса среди КАНДИДАТОВ.
+
+        idf(слово) = log(1 + N / сколько кандидатов его содержат)
+
+        Слово, встречающееся у всех, получает около нуля и перестаёт
+        решать; слово у одного-двух — максимум.
+
+        ПРОШЛАЯ ПОПЫТКА БЫЛА ОТВЕРГНУТА И ОТВЕРГНУТА ЗРЯ. Её мерили на
+        probe_semantic — шестнадцать фактов, — где частота слова
+        бессмысленна по построению: почти всякое слово встречается один
+        раз. Вывод «не изменило ни одного попадания» был верен для того
+        стенда и неприменим к стогам в сотни реплик.
+        """
+        if not self.settings.keyword_idf or not query_keywords or not prefiltered:
+            return None
+        import math
+
+        counts = {w: 0 for w in query_keywords}
+        for row, _kw, _sem in prefiltered:
+            words = self._extract_keywords(row["context"].strip().lower())
+            for w in query_keywords:
+                if w in words:
+                    counts[w] += 1
+        total = len(prefiltered)
+        return {w: math.log(1.0 + total / max(1, c)) for w, c in counts.items()}
 
     @staticmethod
     def _compute_fuzzy_similarity(query: str, context: str) -> float:
