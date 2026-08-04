@@ -122,7 +122,7 @@ decay curves will save the design.
 ## Five calls
 
 ```python
-obs = memory.observe(text, response="", emotion=0.0)   # show an event
+obs = memory.observe(text, response="")               # show an event
 memory.feedback(+1.0)                                  # rate the last action
 memory.recall("query", top_k=3)                        # find what fits
 memory.context_for("query")                            # the same, ready for a prompt
@@ -142,8 +142,9 @@ obs.surprise   # 0.340
 
 ### Where `emotion` and `feedback` come from
 
-The core does not infer emotion and knows no words of approval — that is
-your application's job:
+The core does not read significance off the text and knows no words of
+approval — that is your application's job when it knows better than the
+core can:
 
 | Where | `emotion` on observe | `feedback` |
 |---|---|---|
@@ -151,8 +152,21 @@ your application's job:
 | NPC | significance of the game event: death 1.0, picked up a blade of grass 0.0 | quest outcome, faction reaction |
 | Support bot | ticket priority | customer's rating of the resolution |
 
-You may pass nothing at all: with `emotion=0.0` writing is driven by
-novelty alone, and that is a perfectly good default mode.
+**You may pass nothing at all — and by default the organism answers for
+itself.** Left out, `emotion` and `load` come from its own internal state:
+how crowded its store is, how much of the world it currently understands,
+how often it is being corrected. Two channels come out of that — urgency
+makes writing easier, strain makes it harder — and they meet in the same
+gate. See `interoception.py`.
+
+Measured on LongMemEval, 500 questions: 43.9% -> **25.9%** of turns
+written, R@1 96.8% -> 96.0%. Two fifths fewer nodes for eight tenths of a
+point. Set `intrinsic_emotion=False` if completeness matters more than
+volume.
+
+Whatever you pass explicitly always wins: an application that read the
+text with a model, or got a rating from a human, knows more than the core
+can.
 
 ### Time comes from outside
 
@@ -397,7 +411,7 @@ meaningless 100% everywhere.
 
 | Mechanism | What it does |
 |---|---|
-| **Spike gate** | Stores when `(emotion + surprise) / 2 >= threshold`. The threshold rises under load. |
+| **Spike gate** | Stores when `surprise * (1 + emotion) / 2 >= threshold`. Emotion MULTIPLIES the plasticity novelty has opened, rather than being averaged with it. The threshold rises under load. |
 | **Its own surprise** | Prediction error against its own graph of words and their pairings, not the entropy of a string. Experience lowers it; a short utterance surprises less, because it carries less information. |
 | **Two memory parameters** | `weight` — how vividly it is remembered now; `stability` — how slowly it fades. Stability grows on every recall. |
 | **Dopamine** | Reinforcement by reward prediction error (Rescorla–Wagner): expected praise barely moves the weight, unexpected praise moves it a lot. |

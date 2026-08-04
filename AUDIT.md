@@ -689,6 +689,225 @@ of 0.6 — and here I failed to apply it.
 weighting does not fix them: the evidence is found (R@5 50%) but does not
 come first.
 
+### 2.22 Two stores: the hippocampus and the cortex moved apart
+
+Measurement had found no gain in splitting: search sped up by 5%, inside
+the noise, while the cost was real (a shared id counter, edges crossing the
+boundary). **It was done anyway, on a different ground.** The goal of this
+project is fidelity to the machinery, not throughput. The hippocampus and
+the cortex are different tissue with different trace lifetimes; holding
+them in one table with a type column modelled a distinction the medium did
+not have.
+
+    episodes  (id, context, response, weight, strength, spike_strength, ...)
+    cortex    (id, kind, text, meaning, occurrences, is_meta, ...)
+    node_seq  (id INTEGER PRIMARY KEY AUTOINCREMENT)
+    CREATE VIEW nodes AS SELECT ... UNION ALL SELECT ...
+
+Three of my assumptions turned out wrong, and only the migration caught
+them: `reward_expectation` belongs to the cortex too, decay applies to it
+too, and `is_meta` must be stored rather than derived.
+
+**What it bought, in substance:** capacity now limits the hippocampus
+only. Cortical facts are never evicted — which is exactly why forgetting
+became compression rather than plain loss (see 2.25).
+
+### 2.23 Perception the organism grows for itself
+
+Random indexing: each word gets a random sparse fingerprint, and its
+meaning vector is the sum of its neighbours' fingerprints. Words in similar
+company converge without ever meeting. Pure Python, no dependencies, no
+downloads.
+
+**It turns on as a fallback** — no encoder supplied AND no bundled model
+present.
+
+| | hits out of 16 |
+|---|---:|
+| bundled model | 9 |
+| grown, 973+ exposures | 7 |
+| no semantics at all | 5 |
+
+Where a model exists, the grown one would REPLACE it (mixing two vector
+spaces makes cosine meaningless) and lose four hits. Where none exists, the
+choice is 7 against 5. Weightier than the probe: the whole test suite on a
+machine with no model gives **22 failures without perception, 2 with it**.
+
+**TWO DEFECTS FOUND BY CHECKING MY OWN WORK.** `encode` summed word vectors
+UNNORMALISED, and vector length grows with how often a word was seen — so a
+word's contribution to a phrase was proportional to its frequency, meaning
+function words decided the phrase. Measured on live speech: in "я не ем
+мясо уже три года" the contribution of "уже" was 13.5%, "не" 12.4%, and
+"мясо" only 9.4%. Second: a neighbour left its trace with weight 1
+regardless of whether it occurs everywhere or rarely, so every word
+accumulated a common clerical component — similarity between deliberately
+UNRELATED words crept from +0.04 to +0.12 over 2700 exposures.
+
+Both are fixed by habituation to the frequent — the very conclusion already
+proven by measurement elsewhere in this library (rarity weighting in
+search). Noise between unrelated phrases fell 0.174 -> 0.082.
+
+**A PREMISE WAS RETIRED.** "The bundled model adds nothing over word
+overlap" rested on a substitution of quantities: the number of pairs
+sharing a word (8) was reported as the number of pairs word search
+actually solves (5). The real count is 9 against 5. The probe was fixed and
+now computes its baseline with a second run instead of counting pairs.
+
+### 2.24 The internal environment: significance stopped arriving from outside
+
+Significance used to arrive as an argument and defaulted to zero — the
+gate's emotional input was dead for the ordinary library user. There is
+nothing wrong with the split itself: the hippocampus does not compute fear
+or pleasure either; significance reaches it from the amygdala and the brain
+stem. What was wrong is that those parts did not exist AT ALL.
+
+**Three drives, all of them real:** crowding (at capacity the weakest
+traces are lost for good), comprehensibility (how far the world yields to
+prediction — a TWO-SIDED variable, since both chaos and routine are bad)
+and coherence (how often the new contradicts the stored).
+
+**MY MISTAKE, AND IT WAS STRUCTURAL.** The first version folded all three
+into one arousal that MADE WRITING EASIER. For crowding that is a loop
+eating itself: the fuller the store, the more eagerly it writes, the more
+it evicts. In living tissue it is the opposite — acute stress raises
+plasticity, chronic stress suppresses it; glucocorticoids inhibit LTP. So
+two channels:
+
+| channel | grows from | effect |
+|---|---|---|
+| URGENCY | incoherence | writing EASIER |
+| STRAIN | crowding + incomprehensibility | writing HARDER |
+
+Valence is computed from CHANGE, not level — constant crowding stops being
+bad news; growing crowding is. The same machinery as reward prediction
+error.
+
+**A second mistake: mean instead of sum.** Strain was a weighted average,
+so a drive at its limit yielded only 0.375 because the other one was
+satisfied. Stressors summate; being fed does not cancel pain.
+
+**MEASURED.** LongMemEval, 500 questions: 43.9% -> **25.9%** of turns
+written, R@1 96.8% -> 96.0%. Two fifths fewer nodes for eight tenths of a
+point. **On by default** since selectivity is the whole point of this
+library.
+
+**THE SYNTHETIC STAND MISSED IT, and that is the lesson.** Its
+environments are EXTREME — surprise is either 0.00 or 1.00. Where it is
+zero nothing was written anyway; where it is one, strain is not enough (see
+below). Real conversation lives in the MIDDLE of the scale, and that is
+where a threshold shift decides.
+
+**THE CEILING OF SELF-PRESERVATION.** Density at zero emotion is
+surprise/2, at most 0.5; the threshold under stress is 0.25 + strain·0.25
+and hits the same 0.5. Strain can never overpower maximal novelty, only
+match it: at modifier 0.55 the threshold reaches 0.58 and an incoherent
+stream drops from 98.4% written to 0.0%. The channel works, but it switches
+rather than grades. The default was left alone: it also affects those who
+report overload themselves.
+
+### 2.25 Forgetting became compression — but saves one theme in five
+
+A stand was built for the question that had never been asked: when the
+details are evicted, does anything remain?
+
+| capacity | with cortex | without |
+|---:|---:|---:|
+| 25 | 5/5 | 4/5 |
+| 10 | 3/5 | 2/5 |
+| 3 | **2/5** | 1/5 |
+
+At capacity 3 the hippocampus holds three episodes and the organism can
+still answer two themes — the cortex answers for what is no longer there.
+The gain, however, is exactly one theme and does not grow with pressure.
+
+**The stand caught three defects in itself.** Eviction lives inside
+`forget()` and the stand never called it — 42 episodes at capacity 30,
+i.e. measurement over a memory where eviction had never once run. Theme
+episodes were fed with `emotion=0.9`, so eviction spared them and all three
+conditions gave the same number. And questions sharing no words with the
+theme are not answerable by this system at all, so they would have measured
+the encoder's weakness rather than the loss from forgetting.
+
+### 2.26 The cortex tells a theme from a turn of phrase
+
+Generalisation produced junk more readily than sense: at capacity 25, two
+real themes out of nine facts; the rest were clerical fragments of the
+filler ("рано утром", "прислал счёт"), with the words scrambled because the
+theme was built from a SET intersection.
+
+**The first criterion was inert.** A rarity check existed but applied ONLY
+to a single word: two or more passed unchallenged, as if many shared words
+were stronger evidence. It is exactly backwards — a real theme usually
+shares ONE word, while a repeated turn of phrase shares many, because it is
+the same phrase. Extending the check to every word did not help either:
+share-of-episodes does not separate, since "рано утром" sits in five
+percent of records.
+
+**What separates is how familiar the word is in the organism's own graph of
+language:**
+
+| real themes | | clerical | |
+|---|---:|---|---:|
+| виолончель | 0.264 | утром | 1.000 |
+| пенициллин | 0.264 | обедом | 1.000 |
+
+Junk 7 -> 3 at capacity 25 and 4 -> 0 at capacity 10, with the compression
+curve unchanged — the same answers from five times fewer facts.
+LongMemEval: R@1 96.8% -> 96.6%, other columns unchanged.
+
+**REVIEW DURING SLEEP.** Selection happens AT THE MOMENT the theme is
+derived, and the organism knows little then: in its first days even
+boilerplate is novel, so a turn of phrase that came early settled in
+forever. Living tissue solves this by revisiting rather than by filtering
+at the door — a consolidated memory becomes labile again on reactivation.
+`review_cortex_facts` drops a theme once ALL of its words have become
+familiar; one rare word is enough to keep it.
+
+### 2.27 Spreading activation: 2787 firings, zero effect
+
+The most frequent mechanism in the system — 2787 firings in an
+eighty-message conversation — and its effect on quality had never been
+measured by any of the five stands.
+
+**LongMemEval with `--associations` returns numbers identical to the byte.**
+The cause was not that the mechanism is useless:
+
+    episode-to-episode edges after loading a haystack:   0
+    word-to-word edges (the graph of language):        640
+
+Links between memories are born in `_associate_with_recalled`: the new one
+attaches to what was PULLED OUT of memory shortly before. The benchmark
+loads the haystack and only then asks — no recall happens along the way, so
+no associative network forms. **The same is true of all five stands in this
+project**: every one of them is "write everything, then ask".
+
+A stand with the living order was built — retrieve first, then store:
+
+| condition | edges | k=1 | k=3 | k=5 |
+|---|---:|---|---|---|
+| load then ask | 0 | 3->3 | 4->4 | 4->4 |
+| recall as you go | 45 | 1->1 | 1->1 | 4->4 |
+| + competing for slots | 45 | 1->1 | 1->1 | 4->4 |
+
+**Not one number moved.** The reason is twofold and structural. Pulled-in
+nodes are APPENDED past `top_k` — at `top_k=3` the appended node was
+consistently fourth. And letting them compete (`associations_compete`,
+added and left off) does not help either, which cuts deeper: an
+association's score is its SOURCE's score times the edge decay, hence
+always below the source. It can only overtake what already ranked lower.
+
+**Incidental and unpleasant:** recalling as you go MAKES later search
+worse, 3/6 -> 1/6 at k=1. Retrieval touches nodes and shifts their
+freshness. The living order of work costs quality in itself — a separate
+job and a separate measurement.
+
+**What this means.** A mechanism occupying a visible share of the search
+code and advertised as multi-hop retrieval retrieves nothing. It is not
+broken — it is wired in the wrong place: in living tissue, completing a
+pattern is not an addendum to a list but part of recall itself. For it to
+work, an association must earn its own score from connectivity rather than
+inherit a fraction of its source's.
+
 ## 3. What remains
 
 ### 3.1 Defects
