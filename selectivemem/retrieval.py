@@ -436,7 +436,11 @@ class RetrievalMixin:
         # ------------------------------------------------------------------
         self.last_activation_traces = []
 
-        if with_associations:
+        if with_associations and self.settings.pattern_completion:
+            top_matches = self._complete_pattern(
+                top_matches, scored, top_k, timestamp,
+            )
+        elif with_associations:
             existing_ids = {m.id for m in top_matches}
             associative_extras: List[MemoryMatch] = []
 
@@ -505,6 +509,86 @@ class RetrievalMixin:
                     top_matches = top_matches + associative_extras
 
         return top_matches
+
+    def _complete_pattern(self, top_matches, scored, top_k, timestamp):
+        """
+        ДОСТРАИВАНИЕ ОБРАЗА ПО ЧАСТИ, а не приписка к списку.
+
+        Прежнее растекание брало каждого победителя и подтягивало соседей
+        со счётом «счёт источника × затухание × вес ребра». Из этой формулы
+        следовало, что подтянутый узел НИКОГДА не может обойти своего
+        источника, а поскольку результат ещё и дописывался в хвост за
+        пределы top_k, механизм не мог повлиять на выдачу вовсе. Замер это
+        и показал: 2787 срабатываний за разговор, ноль изменённых чисел.
+
+        Здесь иначе, и разница ровно та, что делает CA3 полем
+        достраивания:
+
+          * активация НАКАПЛИВАЕТСЯ. Узел, связанный с тремя победителями,
+            получает втрое больше, чем от одного. Сходящиеся свидетельства
+            складываются — в том и смысл восстановления целого по части.
+          * собственная уместность узла и пришедшая активация СКЛАДЫВАЮТСЯ
+            в один счёт, и дальше все соревнуются наравне. Подтянутый узел
+            может обойти слабое прямое совпадение — и должен, если к нему
+            сходится больше связей.
+
+        Возвращает top_k узлов по совокупному счёту.
+        """
+        self.last_activation_traces = []
+        decay = self.settings.edge_activation_decay
+        activation: dict = {}
+        sources: dict = {}
+
+        for source in top_matches:
+            neighbours = self.get_associated_nodes(
+                source.id,
+                min_weight=self.settings.edge_activation_threshold,
+                limit=self.settings.edge_max_hop_nodes,
+                timestamp=timestamp,
+            )
+            for neighbour in neighbours:
+                delivered = source.similarity * decay * neighbour.edge_weight
+                activation[neighbour.id] = activation.get(neighbour.id, 0.0) + delivered
+                sources.setdefault(neighbour.id, neighbour)
+                self.last_activation_traces.append(
+                    ActivationTrace(
+                        source_id=source.id,
+                        target_id=neighbour.id,
+                        edge_weight=neighbour.edge_weight,
+                        activation_score=delivered,
+                    )
+                )
+
+        if not activation:
+            return top_matches
+
+        # Прямые совпадения: к собственной уместности прибавляется то, что
+        # к узлу натекло по связям.
+        merged = []
+        by_id = {}
+        for match in scored:
+            boost = activation.pop(match.id, 0.0)
+            if boost:
+                match = MemoryMatch(
+                    id=match.id, context=match.context, response=match.response,
+                    weight=match.weight, similarity=min(1.0, match.similarity + boost),
+                    created_at=match.created_at, last_accessed=match.last_accessed,
+                )
+            by_id[match.id] = match
+            merged.append(match)
+
+        # Узлы, которых прямой поиск не нашёл вовсе: их держит только
+        # сходимость связей, и это законное основание попасть в выдачу.
+        for node_id, total in activation.items():
+            node = sources[node_id]
+            merged.append(MemoryMatch(
+                id=node_id, context=node.context, response=node.response,
+                weight=node.weight, similarity=min(1.0, total),
+                created_at=0.0, last_accessed=0.0,
+            ))
+
+        merged.sort(key=lambda m: m.similarity, reverse=True)
+        return merged[:top_k]
 
     def _node_vector(self, row):
         """

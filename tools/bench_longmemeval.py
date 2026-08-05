@@ -200,6 +200,8 @@ def main() -> None:
                         help="ёмкость кратковременного буфера; у человека ~4 чанка")
     parser.add_argument("--gate-gain", type=float, default=None,
                         help="эмоция УМНОЖАЕТ новизну вместо среднего")
+    parser.add_argument("--completion", action="store_true",
+                        help="достраивание образа: активация накапливается")
     parser.add_argument("--live", action="store_true",
                         help="живой порядок: вспоминать перед каждой записью")
     parser.add_argument("--intrinsic", action="store_true",
@@ -269,6 +271,8 @@ def main() -> None:
 
     encoder = build_encoder(args.encoder)
     settings_kwargs = {}
+    if args.completion:
+        settings_kwargs["pattern_completion"] = True
     if args.intrinsic:
         settings_kwargs["intrinsic_emotion"] = True
     if args.threshold is not None:

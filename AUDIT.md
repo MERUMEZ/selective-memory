@@ -1006,6 +1006,63 @@ for showing that a mechanism EXISTS (edges are there or they are not) —
 quality cannot be judged on it, and the conclusion that stood in the README
 was exactly that kind.
 
+### 2.30 Pattern completion: the first positive result for spreading activation
+
+The previous section ended with a verdict: 2787 firings, zero effect. The
+verdict was right about that construction and WRONG about the mechanism.
+
+**WHAT CHANGED.** The old spreading gave a pulled-in node the score
+"source score x decay x edge weight" and appended the result to the tail.
+The formula meant it could never overtake its own source; the appending
+meant it never entered top_k at all.
+
+Activation now **accumulates**: a node three winners converge on receives
+three times what one would give, and that sum is **added to the node's own
+relevance**. Everything then competes on equal terms. Converging evidence
+reinforces itself — which is what completing a whole from a part means.
+
+**MEASURING IT NEEDED A NEW STAND.** LongMemEval scores a hit BY SESSION,
+so reshuffling inside a session it has already found is invisible: the
+result set changed in 30 questions out of 40 while R@k did not move at all.
+A stand of 60 multi-hop chains was built, where the answer sits in a node
+that shares NO word with the question.
+
+| variant | k=3 | k=5 |
+|---|---:|---:|
+| direct search | 0/60 | 0/60 |
+| appended to the tail (as before) | 0/60 | 20/60 |
+| competing for slots | 10/60 | 44/60 |
+| **completion** | **23/60** | 36/60 |
+
+At small k completion wins by a factor of two. **On by default**: the cost
+on LongMemEval is R@1 97.4% -> 97.2%, one question in five hundred, while a
+whole class of questions moves from "impossible" to "solved a third of the
+time".
+
+**THE REAL BOTTLENECK TURNED OUT NOT TO BE THE SCORE.** A link between
+memories forms only if the retrieval BEFORE the write already found the
+related one. And it finds it less and less as the store fills:
+
+    first 20 chains:   anchor found in 17/20
+    middle 20:                          2/20
+    last 20:                            0/20
+
+Associations form while memory is small and stop once it fills. Part of
+that is a real phenomenon (cue overload), part is vocabulary reuse in the
+stand itself. Telling them apart is separate work, and it matters more than
+further tinkering with the score.
+
+**THE EIGHTH CASE OF DEGENERATE DATA, THIS TIME IN MY OWN GENERATOR.** The
+first version of the sixty chains was stamped from a single template — and
+the gate stored TWO of the sixty: after the third repetition of a form, a
+phrase stops surprising. Six different phrasings for the anchor and six for
+the fact were needed. Separately: chain links are now written by force
+(emotion=1.0), because the stand measures RETRIEVAL, not the gate.
+
+**AND THE SIZE LESSON AGAIN.** The verdict "zero effect" rested on six
+chains. On sixty the same mechanism showed 20/60. Six numbers do not
+separate signal from noise — this session established that three times.
+
 ## 3. What remains
 
 ### 3.1 Defects

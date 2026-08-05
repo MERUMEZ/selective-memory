@@ -35,7 +35,34 @@
 второму ведёт ребро, и ответ достаётся целиком. Это ровно то, чем занята
 CA3: по обрывку восстановить образ целиком.
 
-ИЗМЕРЕНО. РЕЗУЛЬТАТ ОТРИЦАТЕЛЬНЫЙ ВО ВСЕХ ТРЁХ УСЛОВИЯХ.
+ИЗМЕРЕНО НА ШЕСТИДЕСЯТИ ЦЕПОЧКАХ. Прямой поиск не находит ответ НИКОГДА —
+в узле-ответе нет ни одного слова из вопроса, — поэтому левая колонка
+всюду ноль, и это не поломка, а условие задачи.
+
+                            k=3     k=5
+    дописывание в хвост    0/60   20/60   (как было)
+    соревнование за места 10/60   44/60
+    ДОСТРАИВАНИЕ          23/60   36/60
+
+На малых k — а их и берёт приложение — достраивание выигрывает вдвое.
+Включено по умолчанию: цена на LongMemEval 0.2 пункта, один вопрос из
+пятисот, а целый класс вопросов переходит из «нерешаемо» в «решается».
+
+УЗКОЕ МЕСТО ОКАЗАЛОСЬ НЕ В СЧЁТЕ, А В ОБРАЗОВАНИИ СВЯЗЕЙ. Связь возникает,
+только если поиск ПЕРЕД записью уже нашёл родственное воспоминание. А он
+находит всё хуже по мере наполнения:
+
+    первые 20 цепочек:   якорь найден в 17/20
+    средние 20:                          2/20
+    последние 20:                        0/20
+
+То есть ассоциации завязываются, пока память мала, и перестают, когда она
+наполняется. Часть этого — настоящее явление (перегрузка ключа: чем больше
+записей делят подсказку, тем труднее достать любую), часть — повторное
+использование словаря в самом стенде. Разделить их — отдельная работа.
+
+ПРЕЖНИЙ ВЫВОД БЫЛ «НОЛЬ ВЛИЯНИЯ ВО ВСЕХ УСЛОВИЯХ», и он держался на шести
+цепочках. Ниже — что именно с ним было не так.
 
     условие                          рёбер   k=1      k=3      k=5
     залить и спросить потом              0   3->3     4->4     4->4
@@ -96,20 +123,86 @@ from selectivemem.settings import MemorySettings
 # (слов вопроса не содержит) и сам вопрос с искомым словом.
 # ----------------------------------------------------------------------
 
-CHAINS = [
-    (["мою сестру зовут аня", "аня работает ветеринаром в частной клинике"],
-     "кем работает моя сестра", "ветеринар"),
-    (["нашего кота зовут маркиз", "маркиз ест только сухой корм"],
-     "чем питается наш кот", "корм"),
-    (["мой руководитель это степан петрович", "степан петрович уходит в отпуск в августе"],
-     "когда у моего руководителя отпуск", "август"),
-    (["дачу мы купили в сосновке", "в сосновке нет центрального водопровода"],
-     "что с водой на даче", "водопровод"),
-    (["наш подрядчик называется гранитстрой", "гранитстрой сорвал сроки дважды"],
-     "как себя показал подрядчик", "сроки"),
-    (["мою старшую дочь зовут вера", "вера поступила на биофак в этом году"],
-     "куда поступила старшая дочь", "биофак"),
+# ЦЕПОЧКИ ПОРОЖДАЮТСЯ, А НЕ ПЕРЕЧИСЛЯЮТСЯ.
+#
+# Первая версия держала шесть штук вручную, и по ним был сделан вывод,
+# который потом опроверг полный набор: разница «3/6 против 1/6» — это два
+# вопроса, и те же числа поехали от посторонней правки кодировщика.
+# Шестьдесят цепочек отличают сигнал от шума.
+#
+# Строение цепочки: узел-зацепка делит слово с вопросом, узел-ответ не
+# делит с вопросом НИЧЕГО. Связь между ними возникает только от
+# совместного припоминания — то есть проверяется именно достраивание.
+
+_RELATIONS = ["sister", "brother", "neighbour", "dentist", "landlord",
+              "trainer", "tutor", "plumber", "barber", "accountant",
+              "nephew", "godmother", "roommate", "supervisor", "florist"]
+_NAMES = ["mira", "kovalenko", "brendt", "ashworth", "delgado", "okonkwo",
+          "vasilyev", "haruki", "lindqvist", "moreau", "tanaka", "novak",
+          "reyes", "fitzgerald", "abubakar"]
+_PREDICATES = [
+    ("breeds pedigree spaniels", "spaniels"),
+    ("collects prewar postage stamps", "stamps"),
+    ("restores upright pianos", "pianos"),
+    ("teaches evening pottery", "pottery"),
+    ("races vintage motorcycles", "motorcycles"),
+    ("grows heirloom tomatoes", "tomatoes"),
+    ("repairs mechanical watches", "watches"),
+    ("photographs migrating cranes", "cranes"),
+    ("brews unfiltered cider", "cider"),
+    ("carves alabaster figurines", "figurines"),
+    ("studies medieval calligraphy", "calligraphy"),
+    ("sails a wooden ketch", "ketch"),
+    ("bakes sourdough overnight", "sourdough"),
+    ("tunes concert harpsichords", "harpsichords"),
+    ("paints watercolour marshes", "marshes"),
 ]
+
+
+# Разные обороты для зацепки и для ответа. ОБЯЗАТЕЛЬНО: первая версия
+# генератора лепила все шестьдесят цепочек по одному шаблону, и гейт
+# записал ДВЕ из шестидесяти — после третьего повторения формы фраза
+# перестаёт удивлять. Восьмой случай вырожденных данных в этом проекте, и
+# на этот раз в стенде, который сам же и проверяет память.
+_ANCHOR_FORMS = [
+    "my {rel} is called {name}",
+    "we finally met my {rel}, {name}",
+    "{name} turned out to be my {rel} after all",
+    "everyone in the family calls my {rel} just {name}",
+    "i introduced my {rel} {name} to the neighbours",
+    "my {rel} signs everything as {name}",
+]
+_FACT_FORMS = [
+    "{name} {pred}",
+    "apparently {name} {pred} on weekends",
+    "nobody knew that {name} {pred}",
+    "{name} has {pred} since childhood",
+    "it turns out {name} {pred} rather seriously",
+    "{name} quietly {pred} and never mentions it",
+]
+
+
+def make_chains(count: int):
+    """Собрать цепочки, не повторяя ни словаря, ни оборота подряд."""
+    chains = []
+    for index in range(count):
+        relation = _RELATIONS[index % len(_RELATIONS)]
+        name = _NAMES[(index * 7) % len(_NAMES)]
+        predicate, answer = _PREDICATES[(index * 11) % len(_PREDICATES)]
+        anchor = _ANCHOR_FORMS[index % len(_ANCHOR_FORMS)]
+        fact = _FACT_FORMS[(index * 5) % len(_FACT_FORMS)]
+        round_index = index // len(_RELATIONS)
+        tag = "" if round_index == 0 else f" on the {_NAMES[round_index]} side"
+        chains.append((
+            [anchor.format(rel=relation + tag, name=name),
+             fact.format(name=name, pred=predicate)],
+            f"what does my {relation} do",
+            answer,
+        ))
+    return chains
+
+
+CHAINS = make_chains(60)
 
 # Посторонние реплики между звеньями: без них цепочки шли бы подряд и
 # связывались бы просто потому, что рядом во времени.
@@ -122,7 +215,8 @@ NOISE = [
 ]
 
 
-def build(with_recall: bool, compete: bool = False) -> Memory:
+def build(with_recall: bool, compete: bool = False,
+          completion: bool = False) -> Memory:
     """
     Прожить разговор.
 
@@ -137,19 +231,25 @@ def build(with_recall: bool, compete: bool = False) -> Memory:
     """
     settings = MemorySettings()
     settings.associations_compete = compete
+    settings.pattern_completion = completion
     memory = Memory(":memory:", settings=settings)
     clock = 0.0
     lines = []
     for index, (chain, _, _) in enumerate(CHAINS):
-        lines.append(chain[0])
-        lines.append(NOISE[index % len(NOISE)])
-        lines.append(chain[1])
+        lines.append((chain[0], True))
+        lines.append((NOISE[index % len(NOISE)], False))
+        lines.append((chain[1], True))
 
-    for line in lines:
+    for line, is_chain in lines:
         if with_recall:
             # Ассистент сначала ищет, чем ответить, и только потом пишет.
             memory.recall(line, top_k=3, timestamp=clock)
-        memory.observe(line, timestamp=clock)
+        # ЗВЕНЬЯ ЦЕПОЧЕК ПИШУТСЯ ПРИНУДИТЕЛЬНО (emotion=1.0 — документный
+        # путь «пользователь сказал запомни»). Стенд меряет ПОИСК, а не
+        # гейт, а гейт при шестидесяти однотипных цепочках записывал семь
+        # из шестидесяти — и мерить было бы нечего. Посторонний поток идёт
+        # обычным путём и тесноту создаёт честно.
+        memory.observe(line, emotion=1.0 if is_chain else 0.0, timestamp=clock)
         clock += 3600.0
     return memory
 
@@ -179,11 +279,12 @@ def main() -> None:
     print(" ДАЁТ ЛИ ЧТО-НИБУДЬ РАСТЕКАНИЕ АКТИВАЦИИ")
     print("=" * 78)
 
-    for label, with_recall, compete in (
-            ("залить и спросить потом", False, False),
-            ("вспоминать по ходу разговора", True, False),
-            ("вспоминать по ходу + соревнование", True, True)):
-        memory = build(with_recall, compete)
+    for label, with_recall, compete, completion in (
+            ("залить и спросить потом", False, False, False),
+            ("вспоминать по ходу разговора", True, False, False),
+            ("вспоминать по ходу + соревнование", True, True, False),
+            ("вспоминать по ходу + ДОСТРАИВАНИЕ", True, False, True)):
+        memory = build(with_recall, compete, completion)
         edges = count_episode_edges(memory)
         print(f"\n  {label}  (рёбер эпизод-эпизод: {edges})")
         print(f"    {'k':>3} {'без растекания':>16} {'с растеканием':>15}")

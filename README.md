@@ -269,6 +269,13 @@ on the strength of a six-question stand. The full set overturned it — and
 the same six numbers moved again when an unrelated encoder change landed.
 Six questions do not separate signal from noise.
 
+**Multi-hop questions.** When the answer sits in a memory that shares no
+word with the question, direct search never finds it — 0/60 on a stand of
+sixty such chains. Spreading activation with accumulated scores brings that
+to **23/60 at k=3**, and it is on by default (`pattern_completion`). It
+only works when your application retrieves before it writes: links between
+memories form from co-recall, and a batch load creates none.
+
 **One honest caveat remains.** `longmemeval_oracle` is the light variant of
 the benchmark — haystacks of a couple of dozen turns, not the full set —
 so these numbers are not comparable with published LongMemEval results.
