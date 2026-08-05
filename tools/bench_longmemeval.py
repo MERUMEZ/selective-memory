@@ -41,6 +41,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -330,6 +331,14 @@ def main() -> None:
         # Archive смешивает две причины и не даёт их разделить.
         settings_kwargs.update({"age_t0": 1e12, "decay_rate": 1e-9})
 
+    # ХОД ПРОГОНА ИДЁТ В stderr, И ЕГО НЕЛЬЗЯ ВЫБРАСЫВАТЬ.
+    #
+    # На полном наборе (246 750 реплик) прогон занимает от сорока минут до
+    # нескольких часов, а итог печатается только в конце. Запуск вида
+    # `... 2>/dev/null > out.txt` оставляет наблюдателя с пустым файлом и
+    # вопросом «оно считает или повисло». Проверено на себе.
+    started = time.time()
+
     totals = {f"r@{k}": 0 for k in KS}
     by_type: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
     stored = turns = counted = 0
@@ -348,7 +357,13 @@ def main() -> None:
             by_type[outcome["type"]][f"r@{k}"] += outcome[f"r@{k}"]
         by_type[outcome["type"]]["n"] += 1
         if index % 25 == 0:
-            print(f"  ...{index}/{len(data)}", file=sys.stderr)
+            spent = time.time() - started
+            rate = spent / index
+            left = rate * (len(data) - index)
+            hits = totals[f"r@{KS[0]}"] / max(1, counted)
+            print(f"  ...{index}/{len(data)}  R@{KS[0]} пока {hits:.1%}  "
+                  f"прошло {spent/60:.0f} мин, осталось ~{left/60:.0f}",
+                  file=sys.stderr, flush=True)
 
     print("=" * 78)
     print(f" LONGMEMEVAL — {path.name}, режим {args.mode}, кодировщик {args.encoder}")
