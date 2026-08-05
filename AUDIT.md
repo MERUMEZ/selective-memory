@@ -1063,6 +1063,59 @@ the fact were needed. Separately: chain links are now written by force
 chains. On sixty the same mechanism showed 20/60. Six numbers do not
 separate signal from noise — this session established that three times.
 
+### 2.31 Why links stop forming: cue overload, not volume
+
+The previous section left a question open: links between memories formed in
+the first third of the stand (17/20) and stopped in the last (0/20). Two
+causes were suspected — genuine cue overload and vocabulary reuse in the
+stand itself. Measurement separated them.
+
+**STORE SIZE HAS NOTHING TO DO WITH IT.** With the vocabulary made unique,
+and the filler made unique too (otherwise the gate discards it and the
+store does not grow — that is how the first version of this check failed,
+showing 125 nodes under every condition):
+
+| condition | nodes | anchor found |
+|---|---:|---:|
+| unique vocabulary | 180 | 13/60 |
+| the same, 4x the filler | 360 | 16/60 |
+| the same, 12x | 840 | **24/60** |
+
+With a five-fold store, links form MORE often, not less. "Memory filled up,
+so it stopped working" is simply wrong.
+
+**WHAT MATTERS IS HOW MANY RECORDS SHARE ONE CUE.** A graded check:
+everything unique except the name, shared by N chains.
+
+| chains per name | anchor found |
+|---:|---:|
+| 1 | 23/60 |
+| 2 | 16/60 |
+| 4 | **3/60** |
+| 8 | 4/60 |
+
+A clear dose-response — the very criterion by which credit-by-consequence
+was rejected in this project. Between "one record per name" and "four" the
+difference is eightfold.
+
+**THIS IS NOT A DEFECT BUT A KNOWN PHENOMENON.** Cue overload is described
+in memory research in exactly these terms: retrieval degrades with the
+number of traces attached TO A GIVEN CUE and barely depends on how much is
+stored in total. Our memory behaves the same way, and the match was not
+engineered — it fell out of the measurement.
+
+**FOR A PRODUCT IT IS STILL A LIMITATION**, and it should be stated
+plainly: if a user mentions "Anna" in eight different circumstances, links
+between those memories will mostly fail to form, and the assistant will not
+bring them together.
+
+**THE DIRECTION OF A FIX, NOT TAKEN HERE.** Living memory separates such
+traces not only by content but by TEMPORAL CONTEXT: an episode is tied to a
+moment. Our list of link sources comes from ordinary search ranked by
+relevance alone, with recency playing no part. Biasing the choice of link
+sources towards the recent looks right both biologically and structurally —
+but it is separate work with a separate measurement.
+
 ## 3. What remains
 
 ### 3.1 Defects
