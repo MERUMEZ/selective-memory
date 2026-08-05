@@ -160,8 +160,10 @@ makes writing easier, strain makes it harder — and they meet in the same
 gate. See `interoception.py`.
 
 Measured on LongMemEval, 500 questions: 43.9% -> **25.9%** of turns
-written, R@1 96.8% -> 96.0%. Two fifths fewer nodes for eight tenths of a
-point. Set `intrinsic_emotion=False` if completeness matters more than
+written, R@1 96.8% -> 96.0% ON THE LIGHT SET. Two fifths fewer nodes for
+eight tenths of a point. Like every configuration comparison in this file,
+that pair comes from `longmemeval_oracle`; the claimed quality figure is
+the full-set one above. Set `intrinsic_emotion=False` if completeness matters more than
 volume.
 
 Whatever you pass explicitly always wins: an application that read the
@@ -393,7 +395,8 @@ flags.
 The gap between the rows is the price of writing selectively: **9 points
 of recall for three quarters of the storage.**
 
-By question type, because the average hides the interesting part:
+By question type, because the average hides the interesting part
+(**light set** — for the claimed figures see the full-set table above):
 
 | type | n | R@5 | archive |
 |---|---:|---:|---:|

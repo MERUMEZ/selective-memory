@@ -1,6 +1,6 @@
 # Audit
 
-**Date:** 2026-08-02 · **Tests:** 286 · **Lines of Python:** ~18,400
+**Date:** 2026-08-05 · **Commit:** `95dac0b` · **Tests:** 327 · **Python lines in the library:** 9522
 
 Everything asserted here comes from **runs**, not from reading code. The
 numbers are reproducible: `tools/simulate_learning.py`,

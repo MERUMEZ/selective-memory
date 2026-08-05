@@ -16,7 +16,7 @@ that alone solves a class of questions direct search cannot reach.
 
 | change | was | is | measurement |
 |---|---|---|---|
-| **internal environment** | `emotion` defaulted to `0.0` — the gate's input was dead | significance derived from its own state on two channels | written 43.9% -> **25.9%** at R@1 96.8% -> 96.0% |
+| **internal environment** | `emotion` defaulted to `0.0` — the gate's input was dead | significance derived from its own state on two channels | written 43.9% -> **25.9%** at R@1 96.8% -> 96.0% (light set) |
 | **pattern completion** | a neighbour got a fraction of its source's score and was appended past top_k | activation ACCUMULATES and adds to the node's own relevance | multi-hop: 0/60 -> **23/60** at k=3 |
 | **temporal contiguity** | links only from joint recall | plus a link to what was stored close in time | 10/120 -> **108/120** at k=3, at no cost |
 | **two stores** | one table with a type column | `episodes` and `cortex` apart, a view on top | fidelity to the machinery |
