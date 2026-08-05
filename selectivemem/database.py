@@ -385,7 +385,20 @@ class Database:
         """Creates the nodes/edges tables and their indexes if absent."""
         cursor = self._conn.cursor()
         cursor.execute(SCHEMA)
-        cursor.execute(INDEX_CONTEXT)
+        # ИНДЕКС СТАВИТСЯ, ТОЛЬКО ПОКА `nodes` — ТАБЛИЦА.
+        #
+        # На свежей базе SCHEMA создаёт её таблицей, и индекс законен. Но
+        # после разъезда на два хранилища `nodes` становится ВИДОМ, а вид
+        # индексировать нельзя — SQLite отвечает "views may not be
+        # indexed". Значит при КАЖДОМ повторном открытии базы с данными
+        # библиотека падала прямо в конструкторе.
+        #
+        # Не поймал ни один тест: все они открывают ":memory:", то есть
+        # всегда свежую базу. Поймал живой запуск примера, где ассистент
+        # закрыл базу и открыл её снова — то есть на самом обычном
+        # сценарии из всех возможных.
+        if self._nodes_is_table():
+            cursor.execute(INDEX_CONTEXT)
         cursor.execute(EDGES_SCHEMA)
         cursor.execute(INDEX_EDGE_FROM)
         cursor.execute(INDEX_EDGE_TO)

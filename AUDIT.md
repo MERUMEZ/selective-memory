@@ -1214,6 +1214,42 @@ every row: the evidence was either taken first or not found at all. On the
 full set they separate (67.0 / 76.2 / 79.0 / 81.0), so the metric finally
 discriminates. Before this, it could say nothing about ordering at all.
 
+### 2.34 The library could not open its own database twice
+
+A live run of the assistant example brought the library down **in the
+constructor**:
+
+    sqlite3.OperationalError: views may not be indexed
+
+The application closed the database and opened it again on the next run —
+the most ordinary scenario there is, and it was broken.
+
+**THE CAUSE.** After the split into two stores, `nodes` stopped being a
+table and became a VIEW over `episodes` and `cortex`. `_init_schema` went
+on building an index over it unconditionally. On a fresh database this
+passes: `SCHEMA` creates `nodes` as a table and the view appears later,
+during migration. On the second open the view is already there — and SQLite
+refuses to index it.
+
+The guard `_nodes_is_table()` existed in the project, written for exactly
+this, but `_init_schema` never asked it.
+
+**WHY 327 TESTS MISSED IT.** Every one of them opens `":memory:"` — always
+a fresh database where `nodes` is still a table. Not one opened a file
+database TWICE. The gap was not in line coverage but in scenario: schema
+creation was tested, working with an already-created schema was not.
+
+`tests/test_persistence.py` was added: open-write-close-open, survive three
+sessions, and separately that reopening does not multiply nodes (an error
+in the migrations would show up exactly that way and would be noticed a
+week into production).
+
+**THE LESSON IS WIDER THAN THIS BUG.** The store split was measured by
+every stand and passed them all — because the stands run on `":memory:"`
+too. A change that touches the SCHEMA must be checked against a file
+database opened a second time. Otherwise a whole class of breakage stays
+invisible until the first live run.
+
 ## 3. What remains
 
 ### 3.1 Defects
