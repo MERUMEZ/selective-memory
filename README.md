@@ -215,9 +215,16 @@ floor, not a fix. **Pass an encoder for your language.**
 turns, 47 sessions per question.** Defaults, English, `[semantic]`
 installed:
 
-| | written | R@1 | R@3 | R@5 | R@10 |
+| install | written | R@1 | R@3 | R@5 | R@10 |
 |---|---:|---:|---:|---:|---:|
-| **selectivemem, defaults** | **23.2%** | **67.0%** | 76.2% | 79.0% | **81.0%** |
+| **`[semantic]`** (recommended) | **23.2%** | **67.0%** | 76.2% | 79.0% | **81.0%** |
+| bare, no dependencies | 34.2% | 51.6% | 65.6% | 70.8% | 79.6% |
+
+The model earns its 30 MB: fifteen points at k=1 while writing a third
+less. The bare install is usable and needs nothing, but it pays for that
+independence twice — in accuracy and in speed (the same run takes about
+three hours against forty minutes, because grown perception computes its
+vectors in pure Python).
 
 ```bash
 python tools/bench_longmemeval.py --data storage/bench/longmemeval_s.json --encoder builtin
