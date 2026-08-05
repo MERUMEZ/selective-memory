@@ -40,6 +40,18 @@ export ASSISTANT_API_KEY=sk-...        # any OpenAI-compatible endpoint
 python examples/assistant.py
 ```
 
+```python
+memory.observe("Levi", response="nice to meet you", fills_gap=True)
+```
+
+`fills_gap` is the caller stating a fact the library cannot obtain: **this
+answers something I asked for.** We tried to have memory notice its own
+gaps — recall returns little, so the next event matters — and it never
+fired once in thirty-six turns. Asked "what is the dog called", search
+returned 0.776 for "I have a dog": memory FOUND something, confidently and
+wrong. It measures similarity, not whether a need was met, and no
+confidence threshold separates those.
+
 It also shows the two things an application must decide FOR the memory,
 because the library sees text and not a conversation: an outright "remember
 this" (significance 1.0, written past the threshold), and a short reply to

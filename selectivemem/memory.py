@@ -199,6 +199,7 @@ class Memory:
         response: str = "",
         emotion: Optional[float] = None,
         load: Optional[float] = None,
+        fills_gap: bool = False,
         timestamp: Optional[float] = None,
         action_type: str = "observation",
     ) -> Observation:
@@ -215,6 +216,24 @@ class Memory:
                    passed 0.0 still means 0.0: "not charged" and "did not
                    say" are different things, and the signature tells them
                    apart;
+        fills_gap — this event answers something the application ASKED
+                   FOR. Not a hint but a fact only the caller has: the
+                   assistant asked "what is your dog called" because it
+                   did not know, and "Levi" is the answer.
+
+                   WHY THE LIBRARY CANNOT WORK THIS OUT ITSELF, measured
+                   rather than assumed. A gap was built inside: recall
+                   returns little or nothing -> the next event gets a
+                   boost. It never fired once in thirty-six turns. The
+                   search for "what is the dog called" returned 0.776 for
+                   "I have a dog" — memory FOUND something, confidently
+                   and wrong. It measures similarity, not whether a need
+                   was met, and no confidence threshold separates the two.
+
+                   Novelty cannot stand in for it either: "Levi" is one
+                   familiar word, surprise 0.06, and nothing in the
+                   conversation matters more.
+
         load     — current overload, [0, 1]: raises the write threshold.
                    LEFT OUT, the organism reports its own strain — how
                    crowded its store is and how little of the world it
@@ -239,6 +258,14 @@ class Memory:
         # облегчает, напряжение — затрудняет. Свести их в один было бы
         # неверно: организм, которому тесно, должен писать МЕНЬШЕ, а
         # организм, чья модель мира разъехалась, — БОЛЬШЕ.
+        # ЗАПОЛНЕНИЕ ЗАЯВЛЕННОЙ НУЖДЫ ИДЁТ ОТДЕЛЬНЫМ ВХОДОМ, а не
+        # множителем. Плотность равна новизна * (1 + значимость) / 2, то
+        # есть при новизне 0.33 не превысит 0.33 ни при какой значимости
+        # ниже единицы, — а порог под напряжением поднимается к 0.40.
+        # Проверено: со значимостью 0.8 кличка по-прежнему терялась.
+        if fills_gap and emotion is None:
+            emotion = self.settings.gap_fill_significance
+
         inner = self.interoception.state
         if self.settings.intrinsic_emotion:
             if emotion is None:
