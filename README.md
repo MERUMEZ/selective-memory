@@ -40,6 +40,14 @@ export ASSISTANT_API_KEY=sk-...        # any OpenAI-compatible endpoint
 python examples/assistant.py
 ```
 
+It also shows the two things an application must decide FOR the memory,
+because the library sees text and not a conversation: an outright "remember
+this" (significance 1.0, written past the threshold), and a short reply to
+a question the assistant itself asked. The second one is easy to miss and
+expensive: asked "what is your dog called", a user answers "Levi" —
+novelty 0.06, one familiar word, and the name is never stored. The reply
+carries the whole point of the exchange and surprises no one.
+
 Without a key it still runs and shows the memory working — the model
 answer is stubbed, the memory is real. No dependencies: the HTTP call goes
 through urllib.

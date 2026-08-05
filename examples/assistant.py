@@ -47,6 +47,36 @@ API_KEY = os.environ.get("ASSISTANT_API_KEY", "")
 API_BASE = os.environ.get("ASSISTANT_API_BASE", "https://api.openai.com/v1")
 MODEL = os.environ.get("ASSISTANT_MODEL", "gpt-4o-mini")
 
+# СЛОВА, КОТОРЫМИ ЧЕЛОВЕК ПРЯМО ПРОСИТ ЗАПОМНИТЬ.
+#
+# Библиотека обещает: emotion=1.0 значит «пользователь сказал запомни», и
+# такая запись проходит мимо порога новизны. Но значимость приходит СНАРУЖИ
+# — распознать просьбу обязано приложение, и пример этого не делал.
+#
+# Живой запуск показал цену: человек написал «запомни», память не записала
+# ничего, и на следующей реплике он справедливо возмутился.
+REMEMBER_WORDS = ("запомни", "запиши", "не забудь", "remember", "note that")
+
+
+def looks_like_answer(previous_bot: str, text: str) -> bool:
+    """
+    Короткая реплика ПОСЛЕ вопроса ассистента — это ответ, и в нём смысл.
+
+    Живой запуск: на вопрос «как зовут пса?» человек ответил «Леви».
+    Новизна 0.06 — одно знакомое слово, — и кличка не записалась ни разу.
+    То же с «шпиц» и «омлет». Односложный ответ несёт ВЕСЬ смысл обмена и
+    при этом не удивляет вовсе.
+
+    Знание о том, что предыдущая реплика была вопросом, есть только у
+    приложения: библиотека видит текст, а не разговор.
+    """
+    return (
+        previous_bot.rstrip().endswith("?")
+        and len(text.split()) <= 4
+        and not text.startswith("/")
+    )
+
+
 SYSTEM = (
     "Ты ассистент с долговременной памятью. Ниже — то, что ты помнишь об "
     "этом человеке. Если помнишь что-то относящееся к вопросу, опирайся на "
@@ -96,6 +126,7 @@ def ask_model(profile: str, context: str, question: str) -> str:
 
 def main() -> None:
     memory = Memory("assistant.db")
+    previous_answer = ""
     print("=" * 70)
     print(" АССИСТЕНТ С ПАМЯТЬЮ")
     print("=" * 70)
@@ -139,11 +170,35 @@ def main() -> None:
         answer = ask_model(profile, context, question)
         print(f"\nассистент: {answer}")
 
-        # 3. ПОКАЗАТЬ ПАМЯТИ. Она сама решит, стоит ли это хранить.
-        result = memory.observe(question, response=answer)
+        # 3. ПОКАЗАТЬ ПАМЯТИ. Она сама решит, стоит ли это хранить, —
+        #    но значимость обязано сообщить приложение: библиотека видит
+        #    текст, а не разговор.
+        lowered = question.lower()
+        if any(word in lowered for word in REMEMBER_WORDS):
+            emotion = 1.0          # прямая просьба: пишем мимо порога
+            why = " (сказано «запомни»)"
+        elif looks_like_answer(previous_answer, question):
+            # ЕДИНИЦА, А НЕ 0.8, И ЭТО АРИФМЕТИКА, А НЕ ВКУС.
+            #
+            # Плотность = новизна * (1 + значимость) / 2, то есть при
+            # новизне 0.33 она не превысит 0.33 ни при какой значимости
+            # ниже единицы. Порог же под напряжением поднимается к 0.40.
+            # Проверено: с 0.8 «Леви» по-прежнему не записывался.
+            #
+            # Единица — отдельный вход, минуя порог. Он для того и есть, и
+            # ответ на ПРЯМОЙ вопрос ассистента его заслуживает: ассистент
+            # спросил, потому что ему нужно было знать.
+            emotion = 1.0
+            why = " (ответ на вопрос ассистента)"
+        else:
+            emotion = 0.0          # обычная реплика: решает одна новизна
+            why = ""
+
+        result = memory.observe(question, response=answer, emotion=emotion)
+        previous_answer = answer
         mark = "записано" if result.node_id else "не записано"
         extra = " (поправка: старая версия ослаблена)" if result.superseded_ids else ""
-        print(f"   [{mark}, новизна {result.surprise:.2f}]{extra}")
+        print(f"   [{mark}, новизна {result.surprise:.2f}]{why}{extra}")
         parts = []
         if profile:
             parts.append(f"профиль {len(profile.splitlines())}")
