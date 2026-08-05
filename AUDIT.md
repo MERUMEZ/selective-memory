@@ -1167,6 +1167,53 @@ LESSON HERE.**
 The fifth was sound: real words, fifteen chains per run (so every cue is
 unique), aggregated over eight runs.
 
+### 2.33 The full set: the claimed figure dropped by thirty points
+
+Every measurement in this project — mine and the ones standing in the
+README — was taken on `longmemeval_oracle`. That is the light variant of
+the benchmark: **one session per question**. The full set
+(`longmemeval_s`) has **forty-seven**.
+
+| set | sessions per question | turns | written | R@1 | R@10 |
+|---|---:|---:|---:|---:|---:|
+| oracle | 1 | 10,960 | 26.3% | 96.2% | 96.4% |
+| **s** | 47 | **246,750** | 23.2% | **67.0%** | **81.0%** |
+
+**Thirty points of difference.** Our 96% was a property of the light set
+rather than a quality of the memory, and claiming it would have been a lie
+— the more so because in this same session I wrote the caveat "these
+numbers are not comparable with published results" into the README and left
+them standing as the claim anyway.
+
+The claimed figure is now **R@1 67.0% at 23.2% written**.
+
+**BY QUESTION TYPE, BECAUSE THE AVERAGE HIDES A GREAT DEAL:**
+
+| type | n | R@1 | R@10 |
+|---|---:|---:|---:|
+| knowledge-update | 78 | 83% | 91% |
+| single-session-assistant | 56 | 82% | 91% |
+| multi-session | 133 | 75% | 89% |
+| temporal-reasoning | 133 | 64% | 80% |
+| single-session-user | 70 | 49% | 60% |
+| **single-session-preference** | 30 | **17%** | 53% |
+
+Preferences are the weak spot and have been for a long time: "I would
+rather not fly early" is stated once, in passing, without emphasis, and the
+gate has nothing to catch it by. On the light set this type scored 97% —
+the problem was hidden entirely.
+
+**WHAT THIS MEANS FOR EVERY EARLIER MEASUREMENT.** Comparisons BETWEEN
+configurations still stand: they were made on the same set, and the
+relative differences are honest. The absolute figures are not. Every place
+that said "96%" is now marked as a comparison between configurations rather
+than a claim about quality.
+
+**AND A NOTE ON THE COLUMNS.** On the light set R@1 = R@3 = R@5 = R@10 in
+every row: the evidence was either taken first or not found at all. On the
+full set they separate (67.0 / 76.2 / 79.0 / 81.0), so the metric finally
+discriminates. Before this, it could say nothing about ordering at all.
+
 ## 3. What remains
 
 ### 3.1 Defects

@@ -209,84 +209,46 @@ floor, not a fix. **Pass an encoder for your language.**
 
 ### The configuration this library claims
 
-English, `longmemeval_oracle.json`, 500 questions, defaults except where
-noted. Every row is reproducible with one command.
+**LongMemEval, the FULL set (`longmemeval_s`), 500 questions, 246,750
+turns, 47 sessions per question.** Defaults, English, `[semantic]`
+installed:
 
-| install | how it understands meaning | turns written | R@1 | R@10 |
-|---|---|---:|---:|---:|
-| `pip install selective-memory` | **grown from its own experience** — no dependencies, no download, works offline | 41.1% | **97.4%** | 97.6% |
-| the same, matched selectivity (`base_plasticity_threshold=0.32`) | " | 25.8% | 92.6% | 92.8% |
-| `pip install selective-memory[semantic]` | potion-base-8M, 30 MB fetched on first use | 26.3% | **96.2%** | 96.4% |
-| semantics switched off (`Memory(encoder=lambda t: None)`) | shared words only | 18.3% | 88.2% | 88.2% |
+| | written | R@1 | R@3 | R@5 | R@10 |
+|---|---:|---:|---:|---:|---:|
+| **selectivemem, defaults** | **23.2%** | **67.0%** | 76.2% | 79.0% | **81.0%** |
 
 ```bash
-python tools/bench_longmemeval.py --encoder bare      # row 1
-python tools/bench_longmemeval.py --encoder bare --plasticity 0.32
-python tools/bench_longmemeval.py --encoder builtin   # row 3
-python tools/bench_longmemeval.py --encoder none      # row 4
+python tools/bench_longmemeval.py --data storage/bench/longmemeval_s.json --encoder builtin
 ```
 
-**Read the first row with the third.** The bare install looks better only
-because it writes 1.6 times as much: novelty is measured against a
-perception that starts empty, so early on everything surprises it. Held to
-the same selectivity it lands 3.6 points BELOW the bundled model. The
-honest reading is not "grown perception wins" but "the zero-dependency
-install is genuinely usable, and installing the model buys you 3.6 points
-at the same volume".
+By question type, because the average hides a great deal:
 
-**Recommended:** `pip install selective-memory[semantic]`. Take the bare
-install when the machine has no network, when 30 MB of model is
-unacceptable, or when you are shipping something that must not download
-anything behind the user's back.
+| type | n | R@1 | R@10 |
+|---|---:|---:|---:|
+| knowledge-update | 78 | 83% | 91% |
+| single-session-assistant | 56 | 82% | 91% |
+| multi-session | 133 | 75% | 89% |
+| temporal-reasoning | 133 | 64% | 80% |
+| single-session-user | 70 | 49% | 60% |
+| **single-session-preference** | 30 | **17%** | 53% |
 
-Ask any instance what it ended up with — semantics degrades SILENTLY
-otherwise:
+Preferences are the weak spot and have been for a long time: "I would
+rather not fly early" is a fact stated once, in passing, without emphasis —
+the gate has nothing to catch it by.
 
-```python
->>> print(memory.describe_setup())
-смысл: potion-base-8M | значимость: своя, из внутренней среды | порог записи: 0.25 | ёмкость: без предела
-```
+**THE EASY SET FLATTERS BY THIRTY POINTS.** Most published measurements —
+including every one made in this repository before now — use
+`longmemeval_oracle`, where the haystack is a SINGLE session per question
+instead of forty-seven:
 
-**The live order was measured too, and it is BETTER.** A real assistant
-retrieves before each write rather than loading everything and asking
-afterwards. Add `--live` to any row above:
+| set | sessions per question | R@1 | R@10 |
+|---|---:|---:|---:|
+| oracle (light) | 1 | 96.2% | 96.4% |
+| **s (full)** | 47 | **67.0%** | **81.0%** |
 
-| order | install | written | R@1 |
-|---|---|---:|---:|
-| load, then ask | `[semantic]` | 26.3% | 96.2% |
-| **retrieve before each write** | `[semantic]` | 26.0% | **97.4%** |
-| load, then ask | bare | 41.1% | 97.4% |
-| retrieve before each write | bare | 41.7% | 96.8% |
-
-Recall raises the stability of what was recalled, so what gets used stops
-being forgotten — the spacing effect. With the model it pays 1.2 points;
-on the bare install it costs 0.6. Both differences are five or six
-questions out of five hundred, so read them as "the live order does not
-cost you anything", not as a ranking.
-
-An earlier note here claimed the live order made retrieval markedly WORSE,
-on the strength of a six-question stand. The full set overturned it — and
-the same six numbers moved again when an unrelated encoder change landed.
-Six questions do not separate signal from noise.
-
-**Multi-hop questions.** When the answer sits in a memory that shares no
-word with the question, direct search never finds it — 0/60 on a stand of
-sixty such chains. Spreading activation with accumulated scores brings that
-to **23/60 at k=3**, and it is on by default (`pattern_completion`). It
-only works when your application retrieves before it writes: links between
-memories form from co-recall, and a batch load creates none.
-
-Two mechanisms drive that, and only the second survives a crowded cue.
-Memories link when they are **recalled together**, and separately when they
-are **stored close in time** — the temporal contiguity effect. The second
-matters because the first fails exactly where it is needed: when four
-records share one cue, recall-based linking succeeds 3 times out of 60
-instead of 23. On 120 multi-hop chains, temporal linking lifts k=3 from
-**10/120 to 108/120** at no measurable cost on LongMemEval.
-
-**One honest caveat remains.** `longmemeval_oracle` is the light variant of
-the benchmark — haystacks of a couple of dozen turns, not the full set —
-so these numbers are not comparable with published LongMemEval results.
+Read any number about this library, or any other, together with the file it
+came from. The figures below in this section come from the light set and
+are kept for comparison between configurations, not as a claim of quality.
 
 ### What the encoder buys, on sixteen questions
 
