@@ -233,11 +233,30 @@ class RetrievalMixin:
 
         if query_vector is None and not self._warned_no_semantics:
             self._warned_no_semantics = True
-            logger.warning(
-                "[SEARCH] No semantics available — matching by shared words only. "
-                "A query worded differently from the stored text will find nothing. "
-                "Attach an encoder: MemoryGraph(encoder=...) or "
-                "pip install selective-memory[semantic] ([semantic-ru] for Russian)"
+            # ДВЕ РАЗНЫЕ ПРИЧИНЫ, И СОВЕТ У НИХ РАЗНЫЙ.
+            #
+            # Здесь стоял один текст на оба случая: «поставьте
+            # кодировщик». Но если организм ОТРАЩИВАЕТ восприятие сам,
+            # ставить ничего не надо — надо подождать: словарь пуст ровно
+            # до тех пор, пока он не увидит достаточно слов. Совет
+            # «поставьте модель» в этом случае сбивает с толку и выглядит
+            # поломкой там, где всё идёт по замыслу.
+            if self.perception is not None:
+                logger.warning(
+                    "[SEARCH] Semantics is still growing: the organism has "
+                    "seen %d words so far and cannot encode this query yet. "
+                    "It will start matching differently-worded questions as "
+                    "it reads more. Install a ready model to skip the wait: "
+                    "pip install selective-memory[semantic]",
+                    self.perception.vocabulary,
+                )
+            else:
+                logger.warning(
+                    "[SEARCH] No semantics available — matching by shared words only. "
+                    "A query worded differently from the stored text will find "
+                    "nothing. Attach an encoder: MemoryGraph(encoder=...) or "
+                    "pip install selective-memory[semantic] "
+                    "([semantic-ru] for Russian)"
             )
 
         # ------------------------------------------------------------------
