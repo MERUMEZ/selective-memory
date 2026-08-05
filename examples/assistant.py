@@ -4,7 +4,8 @@
 ================================================================================
 Показывает единственное, что нужно знать для встраивания: ПОРЯДОК ВЫЗОВОВ.
 
-    1. recall / context_for  — достать из памяти то, чем отвечать
+    0. profile_text          — что о человеке известно ВСЕГДА
+    1. recall / context_for  — достать то, что подходит к ЭТОМУ вопросу
     2. запрос к языковой модели с этим контекстом
     3. observe                — показать памяти, что произошло
 
@@ -54,7 +55,7 @@ SYSTEM = (
 )
 
 
-def ask_model(context: str, question: str) -> str:
+def ask_model(profile: str, context: str, question: str) -> str:
     """Запрос к модели. Без ключа — честная заглушка, а не выдумка."""
     if not API_KEY:
         return "(ключа нет — отвечает заглушка; память при этом настоящая)"
@@ -62,9 +63,18 @@ def ask_model(context: str, question: str) -> str:
     payload = json.dumps({
         "model": MODEL,
         "messages": [
+            # ПРОФИЛЬ ИДЁТ В КАЖДЫЙ ЗАПРОС, а найденное по вопросу —
+            # отдельно. Это разные вещи: профиль это то, что о человеке
+            # известно ВСЕГДА, и держать его надо при себе постоянно.
+            # Живой разговор показал, зачем: на «может ещё что-то?»
+            # ассистент ответил «больше ничего не знаю» при двадцати
+            # записях в памяти — запрос не совпал ни с чем.
             {"role": "system",
-             "content": SYSTEM + ("\n\nПамять:\n" + context if context else
-                                  "\n\nПамять пуста.")},
+             "content": SYSTEM
+                        + ("\n\nЧто известно о человеке:\n" + profile
+                           if profile else "")
+                        + ("\n\nПодходящее к вопросу:\n" + context
+                           if context else "")},
             {"role": "user", "content": question},
         ],
     }).encode()
@@ -90,7 +100,7 @@ def main() -> None:
     print(" АССИСТЕНТ С ПАМЯТЬЮ")
     print("=" * 70)
     print(f" {memory.describe_setup()}")
-    print(" Команды: /память  /состояние  /забыть  /выход")
+    print(" Команды: /профиль  /память  /состояние  /забыть  /выход")
     print("-" * 70)
 
     while True:
@@ -102,6 +112,9 @@ def main() -> None:
             continue
         if question == "/выход":
             break
+        if question == "/профиль":
+            print("  ", memory.profile_text() or "— пока ничего о вас не знаю")
+            continue
         if question == "/состояние":
             print("  ", memory.feel().describe())
             continue
@@ -117,12 +130,13 @@ def main() -> None:
         #    и обрабатывать её надо: память, которая всегда что-то
         #    подмешивает, подмешивает шум.
         context = memory.context_for(question, top_k=3)
+        profile = memory.profile_text(limit=8)
         if question == "/память":
             print("  ", context or "— пусто")
             continue
 
         # 2. ОТВЕТИТЬ.
-        answer = ask_model(context, question)
+        answer = ask_model(profile, context, question)
         print(f"\nассистент: {answer}")
 
         # 3. ПОКАЗАТЬ ПАМЯТИ. Она сама решит, стоит ли это хранить.
@@ -130,8 +144,13 @@ def main() -> None:
         mark = "записано" if result.node_id else "не записано"
         extra = " (поправка: старая версия ослаблена)" if result.superseded_ids else ""
         print(f"   [{mark}, новизна {result.surprise:.2f}]{extra}")
+        parts = []
+        if profile:
+            parts.append(f"профиль {len(profile.splitlines())}")
         if context:
-            print(f"   [в ответ подмешано из памяти: {len(context.splitlines())} шт.]")
+            parts.append(f"по вопросу {len(context.splitlines())}")
+        if parts:
+            print(f"   [подмешано: {', '.join(parts)}]")
 
     memory.close()
     print("\nпамять сохранена в assistant.db — при следующем запуске всё на месте")

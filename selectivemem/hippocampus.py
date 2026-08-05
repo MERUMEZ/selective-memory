@@ -145,6 +145,31 @@ class HippocampusMixin:
             overlap = self._keyword_overlap(new_words, old_words)
             if overlap >= self.settings.contradiction_repeat_threshold:
                 continue  # a repetition, not a new version
+
+            # ОБЩЕЕ СЛОВО ОБЯЗАНО БЫТЬ РЕДКИМ — иначе это не поправка, а
+            # совпадение по обороту речи.
+            #
+            # Живой разговор без этой проверки: за 23 реплики семь
+            # вытеснений, ВСЕ СЕМЬ ошибочные. «тосты люблю, и омлет»
+            # ослабило «я люблю кофе» — совпадение по слову «люблю».
+            # Настоящая поправка делит ПРЕДМЕТ («собака», «рейс») и меняет
+            # значение; предмет редок, оборот — нет.
+            #
+            # Первая попытка спрашивала только граф языка и не сработала
+            # ни разу: в разговоре из двадцати трёх реплик редко ВСЁ.
+            # Понадобилось априорное знание о частотности (lexicon.py) —
+            # то, с чем взрослый приходит в разговор.
+            ceiling = self.settings.contradiction_subject_familiarity
+            if ceiling < 1.0:
+                shared = new_words & old_words
+                known = self._familiarity(shared)
+                if not any(known.get(w, 0.0) <= ceiling for w in shared):
+                    logger.info(
+                        "[SUPERSEDE] Отклонено: общие слова частые, "
+                        "предмета нет — %r против %r",
+                        text[:40], (row["context"] or "")[:40],
+                    )
+                    continue
             if overlap < self.settings.contradiction_min_overlap:
                 # Слишком мало общих слов — защита от чужого кодировщика,
                 # см. тот же охранник в _superseded_via_search. Здесь он
@@ -163,6 +188,24 @@ class HippocampusMixin:
             )
 
         return self._separate_patterns(text, found)
+
+    def _familiarity(self, words) -> dict:
+        """
+        Насколько привычно каждое слово: опыт ИЛИ априорное знание.
+
+        Берётся максимум. Граф языка — запись того, что организм слышал;
+        `lexicon` — то, что он знал о языке до первого разговора. Второе
+        не отменяет первого, а закрывает его слепое пятно: в коротком
+        разговоре редко ВСЁ, включая «люблю» и «просто».
+        """
+        from selectivemem.lexicon import prior_familiarity
+
+        words = sorted(words)
+        if not words:
+            return {}
+        rows = self.gate.semantic.lexical_by_texts("word", words)
+        seen = {row["context"]: row["weight"] for row in rows}
+        return {w: max(seen.get(w, 0.0), prior_familiarity(w)) for w in words}
 
     def _separate_patterns(
         self, text: str, found: List["SupersededNode"]
@@ -302,8 +345,11 @@ class HippocampusMixin:
         # ОГОВОРКА ЧЕСТНАЯ: зазор такой широкий на стенде, где наполнитель
         # собран из шести оборотов и потому насыщается до единицы. В живой
         # речи он будет уже, и порог придётся перемерить.
-        rows = self.gate.semantic.lexical_by_texts("word", sorted(shared))
-        familiarity = {row["context"]: row["weight"] for row in rows}
+        # Привычность — максимум из опыта и априорного знания о языке.
+        # Без второго проверка слепа в начале жизни: в первые дни
+        # организму незнаком и канцелярит, поэтому «рано утром» оседало
+        # темой и снималось только пересмотром во сне.
+        familiarity = self._familiarity(shared)
         ceiling = self.settings.cortex_theme_max_familiarity
         shared = {w for w in shared if familiarity.get(w, 0.0) <= ceiling}
         if not shared:
