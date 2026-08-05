@@ -7,10 +7,15 @@ into a vector store means paying to keep noise and drowning in it at
 retrieval. `selectivemem` writes about a quarter of what it is shown, and
 ranks what it kept by what has actually earned its place.
 
-Measured on LongMemEval, 500 questions, at stock settings: **R@1 70.8%,
-R@5 84.6%** while storing 24.7% of the turns. The same system with the write filter
-removed and forgetting off scores 93.2% — so selective writing costs
-about nine points of recall and saves three quarters of the storage.
+Measured on LongMemEval, **the full set** (`longmemeval_s`: 500 questions,
+246,750 turns, 47 sessions of haystack each), at stock settings:
+**R@1 67.0%, R@10 81.0%** while storing **23.2%** of the turns.
+
+That number is deliberately the hard one. Most published figures for this
+benchmark — and every figure this repository quoted until recently — come
+from `longmemeval_oracle`, where the haystack is a SINGLE session. The same
+build scores 96.2% there. Thirty points of difference sit between those two
+files, so ask which one any number came from, including ours.
 
 Where it earns its keep is memory full of NEAR-DUPLICATES: one user, one
 subject returned to for months. With 200 competing look-alikes in the
@@ -22,6 +27,14 @@ pretend otherwise.
 Nothing is deleted by age. Long-term memory in people does not fill up
 either; what fades there is the ROUTE to a memory, not the memory —
 the classmate's name you cannot summon but recognise on sight.
+
+**See it work in one command** — thirty-six turns of conversation, the
+gate's decision on each, questions whose words are not in memory, and
+forgetting:
+
+```bash
+python tools/demo.py
+```
 
 ```python
 from selectivemem import Memory
