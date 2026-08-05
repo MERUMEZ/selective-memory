@@ -9,27 +9,45 @@ Russian pair: [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md).
 
 ## What changed in the last session
 
-Five changes went into the defaults; four mechanisms were measured and
-rejected. Details sit in place below; this is the summary so the
-walkthrough can be read knowing what is new in it.
+The organism stopped receiving significance from outside, the cortex
+learned to tell a theme from a turn of phrase, perception gained a
+fallback, and spreading activation went from "zero effect" to a mechanism
+that alone solves a class of questions direct search cannot reach.
 
-| change | before | after | measured |
+| change | was | is | measurement |
 |---|---|---|---|
-| **pattern separation at the input** | supersession fired on any look-alike | do not supersede when more than two candidates respond | near-duplicates R@1 44.4% → **83.3%** |
-| **importance multiplies relevance** | `min(1, relevance + importance·share)` | `relevance × (1 + importance·share)` | R@5 75.0% → **83.3%**, R@10 → **85.0%** |
-| **retrieval threshold** | 0.30 | **0.20** | changes only together with the form |
-| **strength ceiling lifted** | `min(1, own)` — the top of the scale did not exist | `strength_headroom = 1.0` | share of important in top 5 83.3% → **100.0%** |
-| **words weighted by rarity** | "planning" and "Denver" counted alike | weight falls with the number of entries containing the word | preferences R@1 20% → **60%** |
+| **internal environment** | `emotion` defaulted to `0.0` — the gate's input was dead | significance derived from its own state on two channels | written 43.9% -> **25.9%** at R@1 96.8% -> 96.0% |
+| **pattern completion** | a neighbour got a fraction of its source's score and was appended past top_k | activation ACCUMULATES and adds to the node's own relevance | multi-hop: 0/60 -> **23/60** at k=3 |
+| **temporal contiguity** | links only from joint recall | plus a link to what was stored close in time | 10/120 -> **108/120** at k=3, at no cost |
+| **two stores** | one table with a type column | `episodes` and `cortex` apart, a view on top | fidelity to the machinery |
+| **theme vs turn of phrase** | a theme was any shared word | a theme must be RARE in the organism's language graph | junk 7->3 and **4->0** |
+| **review during sleep** | what the cortex derived was never revisited | a theme is dropped once all its words are familiar | early boilerplate no longer settles forever |
+| **grown perception** | no model meant no semantics at all | the organism grows meanings when there is nothing else | on a machine with no model **22 failures -> 2** |
+| **threshold without semantics** | 0.20 on any scale | a separate threshold when there is no vector | R@1 **9.2% -> 88.2%** |
 
 | measured and rejected | why |
 |---|---|
-| tagging and capture (deferred consolidation) | R@1 65.0% → **46.7%**: capture writes everything near a spike and floods the store |
+| appending associations to the tail | 2787 firings per conversation, not one number changed |
+| tagging and capture | R@1 65.0% -> 46.7% |
 | credit by consequence | one question in thirty, no dose-response |
-| suppression of losers | does not restore discrimination: +0.028 → +0.028 → +0.025 |
+| suppressing the losers | returns no discrimination |
 | replay and downscaling in sleep | they fire; no benefit could be measured |
 
-Everything rejected is kept in the code, switched off, with the
-measurements recorded in the settings comments.
+**Found along the way, and it matters more than some of the changes.**
+
+All five stands in this project are built as "load everything, then ask",
+so no associative network between memories forms in them at all — zero
+episode-to-episode edges. The live order ("retrieve first, then store") was
+measured for the first time and turned out BETTER by 1.2 points, not worse
+as a small stand had suggested.
+
+What throttles linking is not the size of memory but **cue overload**: four
+records per cue give 3 cases out of 60 instead of 23, while a five-fold
+larger store does not hinder linking at all.
+
+And ten times in one session the stand proved craftier than the thing it
+tested: templated data, reused vocabulary, filler the gate discards,
+conclusions drawn from six questions. Every case is written up in the audit.
 
 ---
 
@@ -160,16 +178,52 @@ the details but a pointer to cortical traces.
 **Divergence.** Our node stores the text itself; there is no split between
 index and content.
 
-### Step 5. Binding to what was active
+### Step 5. Binding: two independent paths
 
-`memory.py: _associate_with_recalled(node_id, ts)`
+`memory.py: _associate_with_recalled()` and `_associate_with_recent()`
 
-The new node is linked to whatever was retrieved **before** it appeared —
-up to `associate_recalled_limit = 3` of them, with edges stepped by
-`edge_boost_step = 0.15`.
+**THE FIRST IS JOINT ACTIVATION.** A new memory attaches to whatever the
+application has just pulled out of memory. The rule is Hebbian: what fires
+together wires together.
 
-**In the brain.** The recurrent network of area CA3, Hebb's rule: what
-fires together wires together.
+**IT HAS A LIMIT, AND THE LIMIT IS MEASURED AS A DOSE.** The path leans on
+search and therefore fails exactly where it is needed most — under cue
+overload:
+
+| chains per name | link formed |
+|---:|---:|
+| 1 | 23/60 |
+| 2 | 16/60 |
+| 4 | **3/60** |
+
+An eightfold difference. The size of memory has nothing to do with it: with
+the store grown from 180 to 840 nodes, links form MORE often (13/60 ->
+24/60). This is cue overload in the precise sense — retrieval degrades with
+the number of traces sharing ONE cue.
+
+**THE SECOND IS TEMPORAL CONTIGUITY**, and it does not depend on search at
+all. A new memory links to a few recently stored ones regardless of
+content, at a lower weight (0.15 against 0.6).
+
+**In the brain.** In free recall, having named one episode a person most
+often names its neighbour IN TIME next, not in meaning. The hippocampus
+holds a slowly drifting temporal context, and everything within one window
+attaches to one state of it.
+
+**MEASURED** on 120 chains with unique cues, k=3:
+
+| window | hits |
+|---:|---:|
+| 0 (off) | 10/120 |
+| **2** | **108/120** |
+| 5 | 99/120 |
+
+Tenfold, at zero cost on LongMemEval. Larger windows are worse: distant
+neighbours in time yield essentially random links.
+
+**BOTH PATHS ARE SILENT ON A BATCH LOAD.** If the application never
+retrieves as it goes, the first never fires; the second still works, but
+completing a pattern from temporal links alone is not the same thing.
 
 ### Step 6. The short-term buffer
 
@@ -339,19 +393,39 @@ is strengthened, not the answer that turned out to be right. While that
 holds, any speed-up of reinforcement also speeds up the entrenchment of
 errors.
 
-### Step 6. Spreading activation
+### Step 6. Completing the pattern
 
-`retrieval.py: get_associated_nodes(node_id)`
+`retrieval.py: _complete_pattern(top_matches, scored, top_k, timestamp)`
 
-Neighbours of the winners are pulled in through edges of weight ≥
-`edge_activation_threshold = 0.3` and join the result with a weakened
-score. Over an 80-message conversation this fires about 2800 times.
+The winners of the search inject activation into their neighbours along
+edges. Activation **accumulates**: a node three winners converge on gets
+three times what one gives, and that sum is **added to the node's own
+relevance**. Everything then competes on equal terms.
 
-**In the brain.** Area CA3 — completing a whole from a part.
+**In the brain.** Field CA3 — restoring the whole from a part. Converging
+evidence reinforces itself; this is not an addendum to a list but part of
+recall itself.
 
-**Divergence.** Ours runs **after** the winners are chosen, so it completes
-from what was found. Real CA3 works the other way: a partial cue converges
-on the nearest stable state by itself.
+**WHAT IT WAS AND WHY IT DID NOTHING.** A pulled-in node scored "source
+score x decay x edge weight" and was appended to the tail. The formula
+meant it could never overtake its source; the appending meant it never
+entered `top_k`. Measurement: 2787 firings per conversation, not one number
+changed.
+
+**MEASURED** on 60 multi-hop chains where the answer sits in a node sharing
+no word with the question:
+
+| variant | k=3 | k=5 |
+|---|---:|---:|
+| direct search | 0/60 | 0/60 |
+| appended to the tail (as before) | 0/60 | 20/60 |
+| **completion** | **23/60** | 36/60 |
+
+The cost on LongMemEval is 0.2 points, one question in five hundred.
+
+**THE REAL LIMIT IS NOT HERE BUT IN LINK FORMATION.** You can only complete
+along what is linked, and links come from the two paths of Step 5. On a
+batch load there are none at all.
 
 ---
 
