@@ -28,6 +28,22 @@ Nothing is deleted by age. Long-term memory in people does not fill up
 either; what fades there is the ROUTE to a memory, not the memory —
 the classmate's name you cannot summon but recognise on sight.
 
+**A working assistant in sixty lines** — `examples/assistant.py`. It shows
+the only thing that matters for integration, the ORDER of calls: retrieve
+what to answer with, ask the model, then show memory what happened. That
+order is not cosmetic — links between memories are born from what was
+pulled out shortly before a write, and reversing it produces no
+associative network at all.
+
+```bash
+export ASSISTANT_API_KEY=sk-...        # any OpenAI-compatible endpoint
+python examples/assistant.py
+```
+
+Without a key it still runs and shows the memory working — the model
+answer is stubbed, the memory is real. No dependencies: the HTTP call goes
+through urllib.
+
 **See it work in one command** — thirty-six turns of conversation, the
 gate's decision on each, questions whose words are not in memory, and
 forgetting:
