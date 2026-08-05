@@ -276,6 +276,14 @@ to **23/60 at k=3**, and it is on by default (`pattern_completion`). It
 only works when your application retrieves before it writes: links between
 memories form from co-recall, and a batch load creates none.
 
+Two mechanisms drive that, and only the second survives a crowded cue.
+Memories link when they are **recalled together**, and separately when they
+are **stored close in time** — the temporal contiguity effect. The second
+matters because the first fails exactly where it is needed: when four
+records share one cue, recall-based linking succeeds 3 times out of 60
+instead of 23. On 120 multi-hop chains, temporal linking lifts k=3 from
+**10/120 to 108/120** at no measurable cost on LongMemEval.
+
 **One honest caveat remains.** `longmemeval_oracle` is the light variant of
 the benchmark — haystacks of a couple of dozen turns, not the full set —
 so these numbers are not comparable with published LongMemEval results.

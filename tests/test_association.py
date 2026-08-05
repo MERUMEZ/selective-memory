@@ -29,8 +29,15 @@ from selectivemem import Memory, MemorySettings
 
 
 @pytest.fixture
+# ВТОРОЙ ИСТОЧНИК СВЯЗЕЙ ВЫКЛЮЧАЕТСЯ ЗДЕСЬ ЯВНО.
+#
+# Кроме связывания по припоминанию у памяти есть временная смежность:
+# новое цепляется за записанное рядом по времени независимо от
+# содержания. Проверки в этом файле про ПЕРВЫЙ механизм, и без явного
+# temporal_link_window=0 они падали на рёбрах, созданных вторым.
+
 def memory():
-    m = Memory(":memory:", settings=MemorySettings(associate_recalled_limit=3))
+    m = Memory(":memory:", settings=MemorySettings(associate_recalled_limit=3, temporal_link_window=0))
     yield m
     m.close()
 
@@ -65,7 +72,7 @@ def test_without_recall_nothing_is_linked(memory):
 
 def test_zero_limit_restores_previous_behaviour():
     """Ноль обязан полностью выключать механизм: это путь отката."""
-    m = Memory(":memory:", settings=MemorySettings(associate_recalled_limit=0))
+    m = Memory(":memory:", settings=MemorySettings(associate_recalled_limit=0, temporal_link_window=0))
     first = m.observe("у меня аллергия на пенициллин", emotion=0.9).node_id
     m.recall("аллергия")
     second = m.observe("врач выписал другой антибиотик", emotion=0.8).node_id
@@ -124,3 +131,76 @@ def test_a_memory_is_never_linked_to_itself(memory):
     for node_id in {first, second} - {None}:
         edges = memory.graph.db.get_edges_between([node_id])
         assert all(e["node_from"] != e["node_to"] for e in edges)
+
+
+# ---------------------------------------------------------------------------
+# ВРЕМЕННАЯ СМЕЖНОСТЬ — второй, независимый источник связей
+# ---------------------------------------------------------------------------
+def test_temporal_linking_does_not_need_search_to_succeed():
+    """
+    Главное свойство механизма: он работает ТАМ, ГДЕ ПОИСК НЕ РАБОТАЕТ.
+
+    Связывание по припоминанию опирается на поиск и потому глохнет при
+    перегрузке ключа — измерено дозой: когда одну подсказку делят четыре
+    записи вместо одной, связь завязывается в 3 случаях из 60 вместо 23.
+    Временная смежность от поиска не зависит вовсе, и в свободном
+    припоминании человек ведёт себя так же: вспомнив эпизод, чаще называет
+    следующим соседа ПО ВРЕМЕНИ, а не по смыслу.
+
+    Здесь две записи не делят НИ ОДНОГО значимого слова — поиск связать их
+    не может в принципе.
+    """
+    memory = Memory(":memory:", settings=MemorySettings(
+        associate_recalled_limit=0, temporal_link_window=2))
+    first = memory.observe("mira breeds pedigree spaniels", emotion=1.0,
+                           timestamp=0.0).node_id
+    second = memory.observe("the boiler needs descaling again", emotion=1.0,
+                            timestamp=3600.0).node_id
+    assert first and second
+
+    cursor = memory.graph.db._conn.cursor()
+    linked = cursor.execute(
+        "SELECT COUNT(*) FROM edges WHERE (node_from=? AND node_to=?) "
+        "OR (node_from=? AND node_to=?)",
+        (first, second, second, first),
+    ).fetchone()[0]
+    assert linked == 1, "соседние по времени записи не связались"
+    memory.close()
+
+
+def test_temporal_window_bounds_how_far_back_it_reaches():
+    """
+    Окно — это окно, а не «всё подряд».
+
+    Замер показал, что большие окна ХУЖЕ: 108/120 при окне 2 против 99/120
+    при окне 5. Дальние соседи по времени дают уже случайные связи и
+    размывают растекание, поэтому предел обязан соблюдаться.
+    """
+    memory = Memory(":memory:", settings=MemorySettings(
+        associate_recalled_limit=0, temporal_link_window=1))
+    ids = [memory.observe(text, emotion=1.0, timestamp=i * 3600.0).node_id
+           for i, text in enumerate([
+               "mira breeds pedigree spaniels",
+               "the boiler needs descaling again",
+               "tuesday parking permit expires",
+           ])]
+    cursor = memory.graph.db._conn.cursor()
+    far = cursor.execute(
+        "SELECT COUNT(*) FROM edges WHERE (node_from=? AND node_to=?) "
+        "OR (node_from=? AND node_to=?)",
+        (ids[0], ids[2], ids[2], ids[0]),
+    ).fetchone()[0]
+    assert far == 0, "связь ушла дальше окна"
+    memory.close()
+
+
+def test_temporal_linking_is_on_by_default():
+    """
+    Умолчание изменено ПОСЛЕ замера, и обратное переключение тоже должно
+    его потребовать.
+
+    120 многошаговых цепочек с уникальными подсказками: 10/120 при
+    выключенном механизме против 108/120 при окне 2, k=3. Цена на
+    LongMemEval — ноль, R@1 97.2% в обоих случаях.
+    """
+    assert MemorySettings().temporal_link_window == 2

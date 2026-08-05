@@ -35,7 +35,7 @@ sys.path.insert(0, "/var/www/mindnumbness")
 from selectivemem import Memory
 CONS, VOW = "bdfgklmnprstvz", "aeiou"
 
-def run(share, count=60, seed=2):
+def run(share, count=60, seed=2, temporal=0):
     """share — сколько цепочек делят одно имя. Всё остальное уникально."""
     rng = random.Random(seed); seen = set()
     def token(n=3):
@@ -50,7 +50,9 @@ def run(share, count=60, seed=2):
         name = names[i // share]
         chains.append(([f"my {rel} is called {name}", f"{name} {verb} the {obj}"],
                        obj))
-    m = Memory(":memory:"); clock = 0.0; found = 0
+    from selectivemem.settings import MemorySettings
+    st = MemorySettings(); st.temporal_link_window = temporal
+    m = Memory(":memory:", settings=st); clock = 0.0; found = 0
     for chain, ans in chains:
         m.recall(chain[0], top_k=3, timestamp=clock)
         m.observe(chain[0], emotion=1.0, timestamp=clock); clock += 3600
@@ -62,7 +64,7 @@ def run(share, count=60, seed=2):
     m.close()
     return found
 
-print(f"  {'цепочек на одно имя':24} {'якорь найден':>14}")
-print("  " + "-" * 40)
+print(f"  {'цепочек на одно имя':22} {'связей нет':>12} {'+ временная смежность':>22}")
+print("  " + "-" * 58)
 for share in (1, 2, 4, 8):
-    print(f"  {share:<24} {run(share):>10}/60")
+    print(f"  {share:<22} {run(share):>9}/60 {run(share, temporal=3):>18}/60")

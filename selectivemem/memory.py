@@ -171,6 +171,7 @@ class Memory:
         # trace.node_ids: тот принадлежит уже созданному действию, а связывать
         # новый узел надо с тем, что было активно ДО его появления.
         self._recently_recalled: List[int] = []
+        self._recently_stored: List[int] = []
         # Кратковременная память фасада. Была написана в пакете и не
         # использовалась им: консолидацию звала только витрина
         # (core/brain_session.py), поэтому библиотечный пользователь её не
@@ -275,6 +276,7 @@ class Memory:
                 context=text, response=response, weight=weight, timestamp=ts,
             )
             self._associate_with_recalled(node_id, ts)
+            self._associate_with_recent(node_id, ts)
             # ЗАХВАТ: сильное событие производит "белки" на всю клетку, и
             # помеченные слабые следы рядом по времени их перехватывают.
             self._capture_tags(decision.density, ts)
@@ -564,6 +566,45 @@ class Memory:
                     edge_type="association",
                 )
         self._recently_recalled = []
+
+    def _associate_with_recent(self, node_id: Optional[int], timestamp: float) -> None:
+        """
+        Связать новое воспоминание с тем, что записано НЕДАВНО ПО ВРЕМЕНИ,
+        независимо от содержания.
+
+        ЗАЧЕМ ОТДЕЛЬНО ОТ СВЯЗЫВАНИЯ ПО ПРИПОМИНАНИЮ. То связывает с тем,
+        что ПОИСК сумел найти, — и потому глохнет ровно там, где нужнее
+        всего: при перегрузке ключа. Замер дозовой зависимости: когда одну
+        подсказку делят четыре записи вместо одной, связь завязывается в
+        3 случаях из 60 вместо 23. Механизм, который опирается на поиск,
+        не может починить провал поиска.
+
+        Временная смежность от поиска не зависит вовсе. В свободном
+        припоминании человек, вспомнив один эпизод, чаще всего называет
+        следующим сосед по ВРЕМЕНИ, а не по смыслу — эффект устойчивый и
+        симметричный. Гиппокамп удерживает медленно меняющийся временной
+        контекст, и всё, что происходит в одном окне, привязывается к
+        одному состоянию этого контекста.
+
+        Вес здесь МЕНЬШЕ, чем у связи по припоминанию: соседство во
+        времени — свидетельство слабее, чем совместная активация. Ноль в
+        temporal_link_window выключает механизм.
+        """
+        window = self.settings.temporal_link_window
+        if node_id is None or window <= 0:
+            return
+        for source_id in reversed(self._recently_stored[-window:]):
+            if source_id != node_id:
+                self.graph.connect_nodes(
+                    source_id, node_id,
+                    weight_boost=self.settings.temporal_link_weight,
+                    timestamp=timestamp,
+                    edge_type="temporal",
+                )
+        self._recently_stored.append(node_id)
+        # Список держится коротким: помнить надо ровно окно.
+        if len(self._recently_stored) > window * 2:
+            del self._recently_stored[:-window]
 
     def _tag(self, text: str, response: str, density: float, ts: float) -> None:
         """

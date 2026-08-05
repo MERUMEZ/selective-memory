@@ -1116,6 +1116,57 @@ relevance alone, with recency playing no part. Biasing the choice of link
 sources towards the recent looks right both biologically and structurally —
 but it is separate work with a separate measurement.
 
+### 2.32 Temporal contiguity: links where search cannot reach
+
+The previous section hit a wall: links between memories are born of recall,
+and recall fails under cue overload — four records per cue give 3 cases out
+of 60 instead of 23. **A mechanism that leans on search cannot repair a
+failure of search.**
+
+**THE ANSWER IS TAKEN FROM LIVING MEMORY AND DOES NOT DEPEND ON SEARCH.**
+In free recall, having named one episode a person most often names its
+neighbour IN TIME next, not its neighbour in meaning — the temporal
+contiguity effect, one of the most robust findings in the field. The
+hippocampus holds a slowly drifting temporal context, and everything within
+one window attaches to one state of it.
+
+A new memory is now linked to a few recently stored ones **regardless of
+content**, at a weight lower than a recall-based link: adjacency in time is
+weaker evidence than joint activation.
+
+**MEASURED. 120 multi-hop chains, every cue unique:**
+
+| window | hits at k=3 |
+|---:|---:|
+| 0 (off) | 10/120 |
+| **2** | **108/120** |
+| 3 | 102/120 |
+| 5 | 99/120 |
+
+Tenfold. Window 2 beats larger ones: distant neighbours in time produce
+essentially random links and dilute the spreading.
+
+**The cost is zero.** LongMemEval, 500 questions, live order: R@1 97.2%
+with and without. Edges per node 3.0 -> 5.0, growth linear in the window.
+
+**FOUR STANDS IN A ROW MEASURED THE WRONG THING, AND THAT IS THE MAIN
+LESSON HERE.**
+
+1. Fifteen relation words across sixty chains — four records share each, so
+   the stand itself sat in a state of cue overload and its 24/60 ceiling
+   was its own.
+2. Unique cues built from nonsense syllables broke the encoder: it knows no
+   such words, search collapsed to 1/60, and what was being measured was
+   the absence of semantics.
+3. Filler drawn from five recycled lines was discarded by the gate — "four
+   times the filler" produced the same 125 nodes, so the store never grew,
+   and its growth was precisely what the check was for.
+4. The cue-overload stand measured whether SEARCH finds the anchor — a
+   quantity temporal contiguity cannot affect by construction.
+
+The fifth was sound: real words, fifteen chains per run (so every cue is
+unique), aggregated over eight runs.
+
 ## 3. What remains
 
 ### 3.1 Defects
