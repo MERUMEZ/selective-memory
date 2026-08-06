@@ -848,6 +848,45 @@ class Memory:
     # 4. The passage of time
     # ----------------------------------------------------------------------
 
+    def remember_about_user(self, fact: str, timestamp: Optional[float] = None) -> None:
+        """
+        Записать ВЫВЕДЕННЫЙ факт о человеке: предпочтение, привычку,
+        ограничение.
+
+        ЧЕМ ЭТО ОТЛИЧАЕТСЯ ОТ observe. `observe` показывает памяти
+        СОБЫТИЕ, и она сама решает, стоит ли его хранить. Здесь приходит
+        не событие, а вывод из него — «предпочитает материалы на
+        французском», — и решать тут нечего: если приложение сумело это
+        вывести, значит оно того стоит.
+
+        ЛОЖИТСЯ В КОРУ, А НЕ В ЭПИЗОДЫ, и это не мелочь. Корковые факты не
+        вытесняются по ёмкости: аллергия переживёт тесноту, а разговор о
+        погоде — нет. Для персонализации это и нужно.
+
+        ЗАЧЕМ ВООБЩЕ. Предпочтения — худший тип вопросов у памяти (R@1
+        17%), и разбор показал, что дело не в весах: улика выглядит как
+        ЗАПРОС («ищу подкасты на французском»), а спрашивают потом иначе
+        («посоветуй что послушать»). Общих слов нет, связывает знание о
+        мире. Превратить запрос в утверждение способна только модель — и
+        она стоит в цикле приложения, а не здесь.
+
+        Проверено и отвергнуто по дороге: надбавка за речь о себе (в
+        разговоре с ассистентом о себе КАЖДАЯ реплика), кодировщик
+        вчетверо крупнее (разделяет хуже), отбор профиля по тем же
+        признакам (втрое хуже обычного поиска).
+        """
+        text = (fact or "").strip()
+        if not text:
+            return
+        ts = timestamp if timestamp is not None else self.clock()
+        self.graph.gate.semantic.record_fact(
+            theme=text, text=text, meaning=text,
+            strength_step=self.settings.cortex_fact_strength,
+            cap=self.settings.strength_max,
+            timestamp=ts,
+        )
+        logger.info("[О ПОЛЬЗОВАТЕЛЕ] %r", text[:60])
+
     def profile(self, limit: int = 10) -> List[MemoryMatch]:
         """
         Что память знает О ЧЕЛОВЕКЕ — независимо от того, о чём спросили.
@@ -873,6 +912,23 @@ class Memory:
         Порядок — по накопленной силе: наверху то, что подтверждалось
         повторениями и припоминанием, а не то, что сказано последним.
         """
+        # ВЫВЕДЕННЫЕ ФАКТЫ ИДУТ ПЕРВЫМИ, и лишь потом догадки по речи.
+        #
+        # То, что приложение вывело явно («предпочитает французское»),
+        # стоит дороже того, что память угадала по слову «мой». Замер
+        # показал, чего стоит одна догадка: отбор профиля по речи о себе
+        # находит предпочтение в 3 случаях из 30 против 15 у обычного
+        # поиска — потому что в разговоре с ассистентом о себе говорит
+        # КАЖДАЯ реплика, и признак не различает ничего.
+        derived = [
+            MemoryMatch(
+                id=row["id"], context=row["text"], response="",
+                weight=row["weight"], similarity=1.0,
+                created_at=row["created_at"], last_accessed=row["last_accessed"],
+            )
+            for row in self.graph.gate.semantic.facts(limit=limit)
+        ]
+
         rows = self.graph.gate.episodic.searchable()
         pattern = self.graph._SELF_REFERENCE
         about_user = [
@@ -891,14 +947,15 @@ class Memory:
                              else row["weight"]),
             reverse=True,
         )
-        return [
+        guessed = [
             MemoryMatch(
                 id=row["id"], context=row["context"], response=row["response"],
                 weight=row["weight"], similarity=1.0,
                 created_at=row["created_at"], last_accessed=row["last_accessed"],
             )
-            for row in about_user[:limit]
+            for row in about_user
         ]
+        return (derived + guessed)[:limit]
 
     def profile_text(self, limit: int = 10) -> str:
         """Профиль готовой строкой для промпта. Пусто — законный ответ."""

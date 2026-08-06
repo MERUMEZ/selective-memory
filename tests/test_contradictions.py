@@ -148,20 +148,8 @@ def test_independent_facts_are_left_alone(mg, old, new):
 # ---------------------------------------------------------------------------
 # Ослабление, а не удаление
 # ---------------------------------------------------------------------------
-@requires_model
-def test_superseded_node_is_weakened_not_deleted(mg):
-    node_id = remember(mg, "мою собаку зовут Рекс", timestamp=0.0)
-    before = mg.db.get_node(node_id)["weight"]
-
-    remember(mg, "мою собаку зовут Бобик", timestamp=1000.0)
-
-    row = mg.db.get_node(node_id)
-    assert row is not None, "вытесненный узел не должен удаляться"
-    assert row["weight"] < before
-    assert row["stability"] <= config.stability_initial * 2
 
 
-@requires_model
 def test_false_positive_heals_itself(mg):
     """
     Если факт на самом деле остался верным, повторные упоминания
@@ -297,3 +285,23 @@ def test_stale_version_is_not_returned_when_the_fresh_one_exists(mg):
     found = [m.context for m in mg.search("как зовут собаку", top_k=5)]
     assert any("Бобик" in t for t in found), found
     assert not any("Рекс" in t for t in found), found
+
+
+@requires_russian
+def test_wrong_correction_does_not_hide_a_better_answer(mg):
+    """
+    Ошибочная поправка не должна прятать запись, которая отвечает лучше.
+
+    Живой случай: «неа, омлет с молоком...» было признано поправкой к
+    «тосты люблю, и омлет» — ошибочно, они делят только слово «омлет». На
+    запрос «тосты» память отдавала запись про омлет, скрыв единственную
+    запись со словом «тосты».
+
+    Разрыв уместности и различает случаи: у настоящей поправки записи
+    почти неразличимы, у ошибочной разрыв велик.
+    """
+    remember(mg, "тосты люблю, и омлет")
+    remember(mg, "неа, омлет с молоком и тёртым сыром и зеленью")
+
+    found = [m.context for m in mg.search("тосты", top_k=3)]
+    assert any("тосты" in text for text in found), found

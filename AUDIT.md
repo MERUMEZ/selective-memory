@@ -1455,6 +1455,99 @@ The last row is a contradictory state and should be: crowding says "no
 room", boredom says "nothing to learn". A number in the middle reports the
 conflict honestly rather than hiding it.
 
+### 2.38 Receptivity: state drives behaviour, not just writing
+
+The point was put like this: if the assistant asks something, it does so
+only when its plasticity threshold is low and it is ready to record the
+answer; otherwise it talks dryly and closed off. The observation is exact.
+
+**WHAT IT WAS.** The internal state affected the GATE only, so `fills_gap`
+looked like an external crutch.
+
+**WHAT IT IS.** `feel()` reports receptivity as a number. Memory produces
+no speech and cannot ask; the decision belongs to the application. The loop
+closes: the assistant asks BECAUSE memory is receptive, and for the same
+reason the answer deserves storing.
+
+**A FAULT CAUGHT RIGHT AFTER BUILDING IT.** The first version computed
+receptivity as "one minus strain":
+
+    a dull routine       receptivity 0.43
+    an incoherent flood  receptivity 0.40
+
+Nearly identical for OPPOSITE states. Comprehensibility is two-sided (both
+chaos and routine sit far from the optimum) while strain is one-sided, so
+boredom and overload fell into one bucket.
+
+**The sides were separated.** Only overload feeds strain; boredom raises
+receptivity — there is nothing to learn, so it is the moment to ask. That
+is curiosity as described in the literature: an attraction to MANAGEABLE
+novelty, not to novelty as such.
+
+| environment | strain | receptivity |
+|---|---:|---:|
+| dull routine | 0.00 | 1.00 |
+| varied | 0.00 | 1.00 |
+| incoherent flood | 0.60 | 0.40 |
+| crowded | 1.00 | 0.49 |
+
+The last row is a contradictory state and should be: crowding says "no
+room", boredom says "nothing to learn".
+
+### 2.39 Preferences: four hypotheses, three refuted
+
+The worst question type — R@1 17% on the full set — and the central goal if
+memory is meant for personalising an assistant. Inspecting the misses showed
+the problem is NOT in weights and NOT in ranking.
+
+**WHAT IS ACTUALLY HAPPENING.** The questions look like "recommend a show
+for tonight", "suggest a hotel in Miami". The evidence is something said
+earlier: "I'm looking for French podcasts that cover politics". The
+evidence is not a statement of taste but a REQUEST from which taste is only
+inferred. It shares no words with the question; world knowledge is what
+connects them.
+
+**HYPOTHESIS 1: A BONUS FOR SELF-REFERENCE.** Zero change at any weight
+(5/30 at 0.0, 0.15, 0.35). The reason surfaced later: in a conversation
+with an assistant EVERY turn is about oneself — 9 out of 9, 8 out of 8 in
+evidence sessions. The signal discriminates nothing.
+
+**HYPOTHESIS 2: TAGGING AND CAPTURE.** R@1 65% -> 47%, rejected earlier.
+
+**HYPOTHESIS 3: A BIGGER ENCODER.** Compared by the GAP between the right
+and the best wrong candidate (comparing raw cosines across models is
+meaningless):
+
+    potion-base-8M         right above wrong 3/3
+    potion-retrieval-32M   right above wrong 2/3
+
+Four times larger separates WORSE. Caveat: the cases were hand-picked and
+share words with the evidence, which real questions do not — so the check
+is easier than reality and the conclusion is narrow: "just take a bigger
+model" does not work.
+
+**HYPOTHESIS 4: THE PROFILE INSTEAD OF THE QUERY.** The most plausible of
+them: a preference should not be searched for but carried. Measured on all
+thirty:
+
+    found by query (top-5):     15/30
+    present in the profile (20): 3/30
+    in neither:                 14/30
+
+Five times WORSE than query search — for the same reason as hypothesis 1:
+selection goes by self-reference, which is everywhere, so "the twenty
+strongest facts about the person" are just the twenty strongest turns.
+
+**WHAT REMAINS.** Only a model can turn a request into a statement, and one
+already stands in the application's loop. `examples/assistant.py` now
+extracts: the model marks a durable preference on its own line, and
+`memory.remember_about_user()` stores it as a derived fact — in the CORTEX,
+where capacity pressure cannot evict it, and where the profile looks first.
+
+NOT MEASURED on the benchmark: the stand replays fixed dialogues with no
+model in the loop, so extraction cannot be tested with it. That is a stated
+limitation, not an omission.
+
 ## 3. What remains
 
 ### 3.1 Defects

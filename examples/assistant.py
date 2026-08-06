@@ -250,9 +250,10 @@ def main() -> None:
                                 emotion=emotion, fills_gap=fills_gap)
 
         if preference:
-            # Значимость единица: это не наблюдение, а выведенный факт о
-            # человеке, и он должен пройти мимо порога новизны.
-            memory.observe(preference, response="", emotion=1.0)
+            # Не наблюдение, а ВЫВОД о человеке: кладётся в кору, где не
+            # вытесняется по ёмкости и куда профиль смотрит в первую
+            # очередь.
+            memory.remember_about_user(preference)
             print(f"   [предпочтение усвоено: {preference[:60]}]")
         previous_answer = answer
         mark = "записано" if result.node_id else "не записано"
