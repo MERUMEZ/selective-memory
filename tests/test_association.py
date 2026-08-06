@@ -149,13 +149,25 @@ def test_temporal_linking_does_not_need_search_to_succeed():
 
     Здесь две записи не делят НИ ОДНОГО значимого слова — поиск связать их
     не может в принципе.
+
+    ПРОМЕЖУТОК МАЛЕНЬКИЙ, И ЭТО СУЩЕСТВЕННО. Раньше связь ставилась окном
+    из двух последних записей — через любой промежуток, хоть через месяц.
+    Теперь решает временной контекст: сказанное подряд ложится на общий
+    фон, а после долгой паузы фон успевает смениться. Проверено:
+
+        полминуты, пять минут, полчаса -> связь есть
+        час, сутки                     -> связи нет
+
+    При содержательно НЕСВЯЗАННЫХ фразах — то есть достоинство механизма
+    (работать там, где поиск бессилен) сохранено, а прежняя слепота к
+    паузе убрана.
     """
     memory = Memory(":memory:", settings=MemorySettings(
         associate_recalled_limit=0, temporal_link_window=2))
     first = memory.observe("mira breeds pedigree spaniels", emotion=1.0,
                            timestamp=0.0).node_id
     second = memory.observe("the boiler needs descaling again", emotion=1.0,
-                            timestamp=3600.0).node_id
+                            timestamp=300.0).node_id
     assert first and second
 
     cursor = memory.graph.db._conn.cursor()
@@ -204,3 +216,25 @@ def test_temporal_linking_is_on_by_default():
     LongMemEval — ноль, R@1 97.2% в обоих случаях.
     """
     assert MemorySettings().temporal_link_window == 2
+
+
+def test_a_long_pause_breaks_the_temporal_link():
+    """
+    После долгой паузы соседство во времени перестаёт быть соседством.
+
+    Прежнее окно связывало две последние записи независимо от того, прошла
+    между ними минута или месяц, — то есть память не отличала продолжение
+    разговора от нового. Теперь фон дрейфует по паузе: ослабленный
+    предыдущий контекст перебивается новой репликой, и связь не ставится.
+    """
+    memory = Memory(":memory:", settings=MemorySettings(
+        associate_recalled_limit=0, temporal_link_window=2))
+    memory.observe("mira breeds pedigree spaniels", emotion=1.0, timestamp=0.0)
+    memory.observe("the boiler needs descaling again", emotion=1.0,
+                   timestamp=86400.0)
+
+    linked = memory.graph.db._conn.execute(
+        "SELECT COUNT(*) FROM edges WHERE edge_type = 'temporal'"
+    ).fetchone()[0]
+    assert linked == 0, "через сутки это уже не соседство во времени"
+    memory.close()

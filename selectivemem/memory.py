@@ -77,6 +77,7 @@ from selectivemem.plasticity import PlasticityDecision, PlasticityGate
 from selectivemem.reinforcement import ReinforcementLoop, ReinforcementOutcome
 from selectivemem.settings import MemorySettings
 from selectivemem.prefrontal import WorkingMemory
+from selectivemem.context import TemporalContext
 from selectivemem.interoception import Interoception, InternalState
 
 
@@ -172,6 +173,14 @@ class Memory:
         # новый узел надо с тем, что было активно ДО его появления.
         self._recently_recalled: List[int] = []
         self._recently_stored: List[int] = []
+        # ВРЕМЕННОЙ КОНТЕКСТ. Не сохраняется намеренно: это состояние, а
+        # не знание. Проснувшись, организм не помнит, о чём шла речь
+        # неделю назад, — как человек, вернувшийся к прерванному разговору.
+        self.context = TemporalContext(
+            half_life=self.settings.context_half_life)
+        # Недавние записи вместе с фоном, на котором они сделаны. Связь
+        # ставится по СХОЖЕСТИ ФОНОВ, а не по номеру в очереди.
+        self._recent_contexts: List[tuple] = []
         # Кратковременная память фасада. Была написана в пакете и не
         # использовалась им: консолидацию звала только витрина
         # (core/brain_session.py), поэтому библиотечный пользователь её не
@@ -246,6 +255,12 @@ class Memory:
         """
         ts = timestamp if timestamp is not None else self.clock()
 
+        # ВРЕМЯ ИДЁТ — даже когда никто ничего не говорил. Пауза ослабляет
+        # фон: через минуту разговор тот же, через неделю почти новый.
+        # Часов у библиотеки нет, дрейф считается от разницы переданных
+        # отметок.
+        self.context.advance(ts)
+
         surprise = self.graph.compute_surprise(text).total
 
         # ЗНАЧИМОСТЬ СОБЫТИЯ. Явно переданная всегда главнее: приложение
@@ -284,6 +299,13 @@ class Memory:
         # never reaches the density threshold; without this branch,
         # corrections never made it into memory at all — that was a live
         # bug, not a hypothesis.
+        # СОБЫТИЕ ВПИТЫВАЕТСЯ В ФОН ДО ЗАПИСИ. След привязывается к
+        # состоянию контекста, ВКЛЮЧАЮЩЕМУ его самого, — иначе у первой
+        # записи фона нет вовсе, и связаться с ней невозможно ничем.
+        # Проверено: первый узел уходил в базу с пустым контекстом, и
+        # временных связей не возникало ни одной.
+        self.context.absorb(self.graph._encode(text))
+
         superseded = self.graph.find_superseded(text, exclude_id=None)
 
         node_id = None
@@ -596,42 +618,63 @@ class Memory:
 
     def _associate_with_recent(self, node_id: Optional[int], timestamp: float) -> None:
         """
-        Связать новое воспоминание с тем, что записано НЕДАВНО ПО ВРЕМЕНИ,
-        независимо от содержания.
+        Связать новое с тем, что записано на ПОХОЖЕМ ФОНЕ.
 
-        ЗАЧЕМ ОТДЕЛЬНО ОТ СВЯЗЫВАНИЯ ПО ПРИПОМИНАНИЮ. То связывает с тем,
-        что ПОИСК сумел найти, — и потому глохнет ровно там, где нужнее
-        всего: при перегрузке ключа. Замер дозовой зависимости: когда одну
-        подсказку делят четыре записи вместо одной, связь завязывается в
-        3 случаях из 60 вместо 23. Механизм, который опирается на поиск,
-        не может починить провал поиска.
+        ЗАЧЕМ ОТДЕЛЬНО ОТ СВЯЗЫВАНИЯ ПО ПРИПОМИНАНИЮ. То опирается на
+        поиск и потому глохнет ровно там, где нужнее всего — при
+        перегрузке ключа: когда одну подсказку делят четыре записи,
+        связь завязывается в 3 случаях из 60 вместо 23. Механизм,
+        опирающийся на поиск, не может починить провал поиска.
 
-        Временная смежность от поиска не зависит вовсе. В свободном
-        припоминании человек, вспомнив один эпизод, чаще всего называет
-        следующим сосед по ВРЕМЕНИ, а не по смыслу — эффект устойчивый и
-        симметричный. Гиппокамп удерживает медленно меняющийся временной
-        контекст, и всё, что происходит в одном окне, привязывается к
-        одному состоянию этого контекста.
+        ЧТО ИЗМЕНИЛОСЬ. Раньше связывалось окно из двух последних записей
+        — независимо от того, прошла между ними минута или месяц. Теперь
+        решает схожесть ВРЕМЕННОГО КОНТЕКСТА: фон дрейфует по паузе, и
+        сказанное через неделю просто не окажется на том же фоне.
 
-        Вес здесь МЕНЬШЕ, чем у связи по припоминанию: соседство во
-        времени — свидетельство слабее, чем совместная активация. Ноль в
-        temporal_link_window выключает механизм.
+        Так это и работает в живом: вспомнив эпизод, человек чаще всего
+        следующим называет соседа по времени, потому что оба привязаны к
+        одному состоянию медленно меняющегося контекста.
+
+        Без кодировщика фона нет, и тогда работает прежнее окно — иначе
+        механизм молчал бы у всех, кто обходится без семантики.
         """
         window = self.settings.temporal_link_window
         if node_id is None or window <= 0:
             return
-        for source_id in reversed(self._recently_stored[-window:]):
+
+        here = self.context.snapshot()
+        threshold = self.settings.context_link_threshold
+
+        if here is None or threshold <= 0.0:
+            # Фона нет — связываем по очереди, как прежде.
+            partners = [(other, 1.0) for other in self._recently_stored[-window:]]
+        else:
+            partners = []
+            for other_id, other_context in self._recent_contexts[-window * 4:]:
+                closeness = self.context.similarity(other_context)
+                if closeness >= threshold:
+                    partners.append((other_id, closeness))
+            partners.sort(key=lambda pair: pair[1], reverse=True)
+            partners = partners[:window]
+
+        for source_id, closeness in reversed(partners):
             if source_id != node_id:
                 self.graph.connect_nodes(
                     source_id, node_id,
-                    weight_boost=self.settings.temporal_link_weight,
+                    # Чем ближе фоны, тем крепче связь: соседство во
+                    # времени — величина степенная, а не да/нет.
+                    weight_boost=self.settings.temporal_link_weight * closeness,
                     timestamp=timestamp,
                     edge_type="temporal",
                 )
+
         self._recently_stored.append(node_id)
-        # Список держится коротким: помнить надо ровно окно.
-        if len(self._recently_stored) > window * 2:
-            del self._recently_stored[:-window]
+        self._recent_contexts.append((node_id, here))
+        keep = max(window * 4, 8)
+        if len(self._recently_stored) > keep * 2:
+            del self._recently_stored[:-keep]
+        if len(self._recent_contexts) > keep * 2:
+            del self._recent_contexts[:-keep]
 
     def _tag(self, text: str, response: str, density: float, ts: float) -> None:
         """

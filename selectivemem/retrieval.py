@@ -602,7 +602,19 @@ class RetrievalMixin:
         activation: dict = {}
         sources: dict = {}
 
-        for source in top_matches:
+        # РАСТЕКАНИЕ ИДЁТ НЕ ТОЛЬКО ОТ ВОЗВРАЩАЕМЫХ УЗЛОВ.
+        #
+        # Раньше источниками служили ровно те k, что уходят наружу. Из-за
+        # этого достраивание зависело от порога поиска: понижаем порог —
+        # в top_k набивается больше прямых совпадений, ЯКОРЬ вылетает, и
+        # растекаться становится неоткуда. Замер дозой: 107/120 при пороге
+        # 0.20, 89 при 0.15, 43 при 0.10 — при том что сам порог улучшает
+        # внешний бенчмарк.
+        #
+        # Активация в живом расходится от всего достаточно возбуждённого,
+        # а не от того, что кто-то решил показать наружу.
+        sources_pool = scored[:max(top_k, self.settings.completion_source_pool)]
+        for source in sources_pool:
             neighbours = self.get_associated_nodes(
                 source.id,
                 min_weight=self.settings.edge_activation_threshold,
@@ -651,6 +663,12 @@ class RetrievalMixin:
             ))
 
         merged.sort(key=lambda m: m.similarity, reverse=True)
+        result = merged[:top_k]
+
+        # БРОНЬ МЕСТА ДЛЯ ДОСТРОЕННОГО ПРОБОВАЛАСЬ И НЕ ПОМОГЛА: при
+        # пониженном пороге поиска стенд давал те же 43/120 с ней и без
+        # неё. Беда была не в последнем отрезании, а в том, что якорь
+        # вылетал из кандидатов раньше. Код убран.
         return merged[:top_k]
 
     def _node_vector(self, row):
