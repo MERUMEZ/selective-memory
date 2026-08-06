@@ -344,6 +344,9 @@ class MemorySettings:
     #
     # Тот же разряд расхождения витрины с пакетом, что и с ассоциациями.
     consolidate_from_stm: bool = False
+    # Вес ребра «заменяет». Отношение записывается, чтобы поиск знал, чем
+    # устаревшее заменено, — вместо того чтобы портить сам узел.
+    supersede_edge_weight: float = 0.9
     contradiction_weight_penalty: float = 0.25
     decay_rate: float = 0.05
     # Fallback text for the "user model" meta-node. This is PERSONA

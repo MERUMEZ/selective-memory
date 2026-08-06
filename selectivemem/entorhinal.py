@@ -277,6 +277,10 @@ class EdgeStore:
     def for_node(self, node_id: int) -> List[Any]:
         return self._db.get_edges_for_node(node_id)
 
+    def superseded_by(self, node_ids: List[int]):
+        """Какие узлы заменены и чем: {старый: новый}."""
+        return self._db.fetch_superseded_by(node_ids)
+
     def between(self, node_ids: List[int]) -> List[Any]:
         return self._db.get_edges_between(node_ids)
 

@@ -239,3 +239,61 @@ def test_without_embeddings_nothing_is_superseded(mg, monkeypatch):
 
 def test_supersede_survives_missing_node(mg):
     mg.supersede_node(999999)  # не должно бросить
+
+
+# ---------------------------------------------------------------------------
+# ПЕРЕНАПРАВЛЕНИЕ ВМЕСТО ОСЛАБЛЕНИЯ
+# ---------------------------------------------------------------------------
+@requires_russian
+def test_superseded_node_is_not_damaged(mg):
+    """
+    Поправка НЕ ТРОГАЕТ вес старого узла — она записывает связь.
+
+    README обещает: «угасает путь к воспоминанию, а не само
+    воспоминание». Код делал обратное — снижал вес и сбрасывал
+    стабильность, то есть узел выпадал сразу из ВСЕХ запросов, а не
+    только из того, где случилась поправка. При ошибочной поправке — а
+    живой разговор дал семь ошибок из семи — верный факт повреждался
+    навсегда.
+    """
+    mg.settings.contradiction_weight_penalty = 0.0
+    remember(mg, "мою собаку зовут Рекс")
+    stale = [r for r in mg.gate.episodic.searchable()
+             if "Рекс" in (r["context"] or "")][0]
+    before = stale["weight"]
+
+    remember(mg, "мою собаку зовут Бобик")
+
+    after = [r for r in mg.gate.episodic.searchable()
+             if "Рекс" in (r["context"] or "")][0]
+    assert after["weight"] == before, "вес устаревшего узла не должен меняться"
+
+
+@requires_russian
+def test_supersede_relation_is_recorded(mg):
+    """Отношение «это заменило то» должно ХРАНИТЬСЯ, а не исчезать."""
+    remember(mg, "мой рейс в четверг")
+    remember(mg, "рейс перенесли на субботу")
+
+    rows = mg.db._conn.execute(
+        "SELECT COUNT(*) FROM edges WHERE edge_type = 'supersedes'"
+    ).fetchone()
+    assert rows[0] >= 1, "связь замены не записана"
+
+
+@requires_russian
+def test_stale_version_is_not_returned_when_the_fresh_one_exists(mg):
+    """
+    Перенаправление: устаревшее не отдаётся, если замена под рукой.
+
+    Отдельно проверяется, что достраивание не втащит его обратно — один
+    раз именно это и случилось: связь «заменяет» была прочитана как
+    обычное соседство.
+    """
+    mg.settings.contradiction_weight_penalty = 0.0
+    remember(mg, "мою собаку зовут Рекс")
+    remember(mg, "мою собаку зовут Бобик")
+
+    found = [m.context for m in mg.search("как зовут собаку", top_k=5)]
+    assert any("Бобик" in t for t in found), found
+    assert not any("Рекс" in t for t in found), found

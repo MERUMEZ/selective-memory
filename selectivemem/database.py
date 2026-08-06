@@ -849,6 +849,42 @@ class Database:
         cursor.execute("SELECT * FROM nodes WHERE node_type = 'episode_summary'")
         return cursor.fetchall()
 
+    def fetch_superseded_by(self, node_ids):
+        """
+        Какие из этих узлов кем-то ЗАМЕНЕНЫ: {старый: новый}.
+
+        Нужно поиску: устаревшее не ослабляется, а перенаправляется, и
+        решение принимается в момент выдачи, а не порчей самого узла.
+        Один запрос на поиск, а не по одному на кандидата.
+
+        НАПРАВЛЕНИЕ ВЫВОДИТСЯ ИЗ НОМЕРОВ, А НЕ ИЗ РЁБЕР. `upsert_edge`
+        нормализует пару по идентификатору — меньший номер всегда в
+        `node_from`, — то есть «кто кого заменил» в ребре не хранится.
+        Первая версия этого не учла и вычёркивала из выдачи как раз
+        АКТУАЛЬНЫЙ факт: два теста поймали это сразу.
+        
+        Номера выдаёт общий счётчик с автоинкрементом, поэтому у более
+        позднего узла номер всегда больше. Этого и достаточно: в паре
+        «заменяет» старший номер — замена.
+        """
+        if not node_ids:
+            return {}
+        marks = ",".join("?" * len(node_ids))
+        cursor = self._conn.cursor()
+        rows = cursor.execute(
+            f"SELECT node_from, node_to FROM edges "
+            f"WHERE edge_type = 'supersedes' "
+            f"AND (node_from IN ({marks}) OR node_to IN ({marks}))",
+            list(node_ids) + list(node_ids),
+        ).fetchall()
+        pairs = {}
+        for row in rows:
+            older, newer = row["node_from"], row["node_to"]
+            if older > newer:
+                older, newer = newer, older
+            pairs[older] = newer
+        return pairs
+
     def fetch_searchable_nodes(self) -> List[sqlite3.Row]:
         """
         Only the nodes fit for semantic search over conversational

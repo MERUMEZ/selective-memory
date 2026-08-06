@@ -455,49 +455,61 @@ class HippocampusMixin:
             )
         return found
 
-    def supersede_node(self, node_id: int, timestamp: Optional[float] = None) -> None:
+    def supersede_node(self, node_id: int, timestamp: Optional[float] = None,
+                       replacement_id: Optional[int] = None) -> None:
         """
-        Marks a memory as superseded: lowers its weight and RESETS its
-        stability, returning the node to the forgettable pile.
+        Пометить воспоминание устаревшим: связать его с тем, что пришло
+        на замену, и — если позволено настройкой — ослабить.
 
-        Weakening, deliberately, rather than deletion. If the fact was in
-        truth still valid — a false positive such as "I have a cat" against
-        "I have a dog" — the user will mention it again, the node will be
-        touched and its stability will grow back. Deletion would be
-        irreversible; here a mistake is cheap and repairs itself.
+        ПЕРЕНАПРАВЛЕНИЕ, А НЕ ОСЛАБЛЕНИЕ, и это исправление противоречия
+        внутри самого проекта. README обещает: «угасает ПУТЬ к
+        воспоминанию, а не само воспоминание». Здесь же делалось обратное
+        — снижался вес узла и сбрасывалась его стабильность.
+
+        Последствия были тяжёлыми и несимметричными:
+
+          * узел слабел ГЛОБАЛЬНО, то есть выпадал из всех запросов, а не
+            только из того, где случилась поправка;
+          * становился кандидатом на вытеснение по ёмкости;
+          * а при ошибке — и живой разговор дал семь ошибок из семи —
+            верный факт повреждался навсегда.
+
+        Само отношение при этом нигде не сохранялось: «это заменило то»
+        существовало одно мгновение и исчезало.
+
+        Теперь оно записывается ребром. Узел цел, вес не тронут, а при
+        выдаче поиск, встретив устаревшее, знает, чем оно заменено.
+        Ошибка стоит почти ничего: связь можно отменить, факт не пострадал.
+
+        `contradiction_weight_penalty = 0` оставляет чистое
+        перенаправление; ненулевое значение возвращает прежнее ослабление
+        вдобавок к нему.
         """
         row = self.gate.node.get(node_id)
         if row is None:
             return
 
-        new_weight = max(0.0, row["weight"] - self.settings.contradiction_weight_penalty)
-        stability = (row["stability"] or self.settings.stability_initial)
-        new_stability = max(
-            self.settings.stability_initial, stability * self.settings.contradiction_stability_factor
-        )
-
-        self.gate.node.set_weight(node_id, new_weight)
-        self.gate.node.set_stability(node_id, new_stability)
-
-        # ШТРАФ ОБЯЗАН ДОХОДИТЬ ДО ТОГО, ЧТО РЕШАЕТ ВЫДАЧУ. После перехода
-        # на модель интерференции ранжирование смотрит на накопленную силу,
-        # а вытеснение понижало только вес — и штраф перестал доходить.
-        #
-        # Тест поймал это сразу: на запрос "как зовут мою собаку" первым
-        # снова шёл устаревший "Рекс" вместо актуального "Бобика", то есть
-        # вернулась ровно та болезнь, ради которой механизм и написан.
-        if self.settings.use_relative_strength:
-            self.gate.node.add_strength(
-                node_id,
-                -self.settings.contradiction_weight_penalty,
-                self.settings.strength_max,
+        if replacement_id is not None and replacement_id != node_id:
+            # Ребро направлено ОТ НОВОГО К СТАРОМУ: «я заменяю его».
+            self.connect_nodes(
+                replacement_id, node_id,
+                weight_boost=self.settings.supersede_edge_weight,
+                timestamp=timestamp,
+                edge_type="supersedes",
             )
 
-        logger.info(
-            "[SUPERSEDED] Node %s replaced by a newer version: weight %.3f -> %.3f, "
-            "stability %.1f -> %.1f",
-            node_id, row["weight"], new_weight, stability, new_stability,
+        penalty = self.settings.contradiction_weight_penalty
+        if penalty <= 0.0:
+            return
+
+        new_weight = max(0.0, row["weight"] - penalty)
+        stability = (row["stability"] or self.settings.stability_initial)
+        new_stability = max(
+            self.settings.stability_initial,
+            stability * self.settings.contradiction_stability_factor,
         )
+        self.gate.node.set_weight(node_id, new_weight)
+        self.gate.node.set_stability(node_id, new_stability)
 
     def save_connection(
         self,
@@ -550,7 +562,8 @@ class HippocampusMixin:
                 "[CONTRADICTION] %r supersedes %r (similarity %.2f, shared words %.2f)",
                 context[:40], stale.context[:40], stale.similarity, stale.word_overlap,
             )
-            self.supersede_node(stale.id, timestamp=timestamp)
+            self.supersede_node(stale.id, timestamp=timestamp,
+                                replacement_id=node_id)
 
         logger.info(
             "[SPIKE DETECTED] New link stored id=%s weight=%.3f",

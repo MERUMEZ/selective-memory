@@ -394,6 +394,17 @@ class RetrievalMixin:
 
         scored.sort(key=lambda m: m.similarity, reverse=True)
         scored = self._rerank_by_importance(scored)
+        # УСТАРЕВШЕЕ ПЕРЕНАПРАВЛЯЕТСЯ, А НЕ ПОДАВЛЯЕТСЯ ПОРЧЕЙ УЗЛА.
+        #
+        # Поправка записывает ребро «новое заменяет старое» и НЕ трогает
+        # вес старого: узел цел, и ошибочная поправка не портит верный
+        # факт навсегда. Решение принимается здесь, в момент выдачи.
+        #
+        # Так это и обещано в README: угасает ПУТЬ к воспоминанию, а не
+        # само воспоминание. Прежде код делал обратное — снижал вес и
+        # сбрасывал стабильность, то есть узел выпадал сразу из ВСЕХ
+        # запросов, а не только из того, где случилась поправка.
+        scored = self._redirect_superseded(scored)
         top_matches = scored[:top_k]
 
         # ВНУТРЕННЯЯ ПРОВЕРКА — НЕ ИСПОЛЬЗОВАНИЕ. Поиск растит силу
@@ -527,7 +538,40 @@ class RetrievalMixin:
                 else:
                     top_matches = top_matches + associative_extras
 
+        # ПОВТОРНАЯ ПРОВЕРКА НА САМОМ ВЫХОДЕ, после всех стадий.
+        # Достраивание и ассоциации добавляют узлы уже ПОСЛЕ отбора и
+        # однажды вернули в выдачу ровно то, что было перенаправлено:
+        # «Узел 1 не отдан: его заменил 11», а следом «Node 11 -> Node 1».
+        # Первая версия этой проверки стояла до них и потому не спасала.
+        top_matches = self._redirect_superseded(top_matches)
         return top_matches
+
+    def _redirect_superseded(self, scored):
+        """
+        Убрать из выдачи то, что заменено, если замена уже здесь.
+
+        ЕСЛИ ЗАМЕНЫ В ВЫДАЧЕ НЕТ — устаревшее ОСТАЁТСЯ. Это намеренно:
+        поправка могла быть ошибочной, и лучше отдать старую версию, чем
+        не отдать ничего. Прежнее ослабление такого выбора не оставляло —
+        узел слабел глобально и пропадал отовсюду.
+        """
+        if not scored:
+            return scored
+        stale_to_fresh = self.gate.edges.superseded_by([m.id for m in scored])
+        if not stale_to_fresh:
+            return scored
+        present = {m.id for m in scored}
+        kept = []
+        for match in scored:
+            fresh = stale_to_fresh.get(match.id)
+            if fresh is not None and fresh in present:
+                logger.info(
+                    "[SUPERSEDED] Узел %s не отдан: его заменил %s",
+                    match.id, fresh,
+                )
+                continue
+            kept.append(match)
+        return kept
 
     def _complete_pattern(self, top_matches, scored, top_k, timestamp):
         """
@@ -871,7 +915,18 @@ class RetrievalMixin:
         effective_min_weight = min_weight if min_weight is not None else self.settings.edge_activation_threshold
 
         edge_rows = self.gate.edges.for_node(node_id)
-        strong_edges = [row for row in edge_rows if row["weight"] >= effective_min_weight]
+        # СВЯЗЬ «ЗАМЕНЯЕТ» — НЕ АССОЦИАЦИЯ, и растекаться по ней нельзя.
+        #
+        # Она означает «не ходи туда, иди сюда», а достраивание прочитало
+        # её как обычное соседство и втаскивало устаревшее обратно в
+        # выдачу — сразу после того, как перенаправление его убрало.
+        # Видно было прямо в логе: «Узел 1 не отдан: его заменил 11», а
+        # следом «Node 11 -> Node 1 (edge_weight=1.00)».
+        strong_edges = [
+            row for row in edge_rows
+            if row["weight"] >= effective_min_weight
+            and (row["edge_type"] if "edge_type" in row.keys() else None) != "supersedes"
+        ]
         strong_edges.sort(key=lambda r: r["weight"], reverse=True)
 
         if limit is not None:
