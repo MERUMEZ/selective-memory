@@ -514,15 +514,16 @@ class Database:
             cx = cursor.execute("SELECT COUNT(*) FROM cortex").fetchone()[0]
             if ep + cx != total:
                 logger.error(
-                    "[TWO STORES] Перенос неполон: было %d, стало %d + %d. "
-                    "Старая таблица не тронута, разъезд отменён.", total, ep, cx,
+                    "[TWO STORES] Migration incomplete: had %d, got %d + %d. "
+                    "The old table is untouched, the split is cancelled.",
+                    total, ep, cx,
                 )
                 cursor.execute("DELETE FROM episodes")
                 cursor.execute("DELETE FROM cortex")
                 self._conn.commit()
                 return
             logger.info(
-                "[TWO STORES] Разъезд: %d эпизодов, %d корковых узлов из %d",
+                "[TWO STORES] Split: %d episodes, %d cortical nodes out of %d",
                 ep, cx, total,
             )
 
@@ -577,7 +578,7 @@ class Database:
             "SELECT id, context, response FROM episodes"
         )
         self._conn.commit()
-        logger.info("[TWO STORES] nodes стал видом; индекс переехал на episodes")
+        logger.info("[TWO STORES] nodes is now a view; the index moved to episodes")
 
     def _migrate_meta_columns(self) -> None:
         """
@@ -1531,7 +1532,7 @@ class Database:
                 (node_id, theme, meaning, strength_step, strength_step, ts, ts, ts),
             )
             self._conn.commit()
-            logger.info("[CORTEX FACT] Тема %r выведена впервые", theme[:40])
+            logger.info("[CORTEX FACT] Theme %r derived for the first time", theme[:40])
             return node_id
 
         node_id = int(existing["id"])
@@ -1548,7 +1549,7 @@ class Database:
         )
         self._conn.commit()
         logger.info(
-            "[CORTEX FACT] Тема %r встречена %d раз, сила %.3f",
+            "[CORTEX FACT] Theme %r seen %d times, strength %.3f",
             theme[:40], seen, strength,
         )
         return node_id

@@ -235,8 +235,8 @@ class MemoryGraph(
         if embeddings.is_available():
             return False
         logger.info(
-            "[ВОСПРИЯТИЕ] Готовой модели нет — организм будет выводить "
-            "смыслы из собственного опыта"
+            "[PERCEPTION] No ready-made model — the organism will derive "
+            "meaning from its own experience"
         )
         return True
 
@@ -263,8 +263,8 @@ class MemoryGraph(
                 self.perception.observe(tokens)
         if self.perception.exposures:
             logger.info(
-                "[PERCEPTION] Восстановлено из памяти: %d слов, %d показов, "
-                "зрелость %.2f",
+                "[PERCEPTION] Restored from storage: %d words, %d exposures, "
+                "maturity %.2f",
                 self.perception.vocabulary, self.perception.exposures,
                 self.perception.maturity(self.settings.perception_maturity_target),
             )

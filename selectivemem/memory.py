@@ -393,26 +393,31 @@ class Memory:
         стал хуже» до того, как его зададут.
 
             >>> print(memory.describe_setup())
-            смысл: potion-base-8M | значимость: своя | пишет: при плотности >= 0.25
+            meaning: potion-base-8M | significance: intrinsic | write threshold: 0.25
+
+        СТРОКА АНГЛИЙСКАЯ, как и всё, что пакет печатает наружу. Комментарии
+        остаются русскими: они для того, кто правит код, а эта строка — для
+        того, кто его ЗАПУСКАЕТ.
         """
         from selectivemem import embeddings
 
         if self.graph.encoder is not None:
-            meaning = "кодировщик приложения"
+            meaning = "encoder supplied by the application"
         elif self.graph.perception is not None:
             grown = self.graph.perception
-            meaning = (f"выращенное восприятие "
-                       f"(показов {grown.exposures}, словарь {grown.vocabulary})")
+            meaning = (f"grown perception "
+                       f"(exposures {grown.exposures}, vocabulary {grown.vocabulary})")
         else:
             meaning = embeddings.describe()
 
-        significance = ("своя, из внутренней среды" if self.settings.intrinsic_emotion
-                        else "только переданная приложением")
+        significance = ("intrinsic, from the internal state"
+                        if self.settings.intrinsic_emotion
+                        else "only what the application passes")
         capacity = (f"{self.settings.memory_capacity}" if self.settings.memory_capacity
-                    else "без предела")
-        return (f"смысл: {meaning} | значимость: {significance} | "
-                f"порог записи: {self.settings.base_plasticity_threshold} | "
-                f"ёмкость: {capacity}")
+                    else "unbounded")
+        return (f"meaning: {meaning} | significance: {significance} | "
+                f"write threshold: {self.settings.base_plasticity_threshold} | "
+                f"capacity: {capacity}")
 
     def feel(self) -> InternalState:
         """
@@ -566,7 +571,7 @@ class Memory:
 
         reviewed = self.graph.review_cortex_facts()
         if reviewed:
-            logger.info("[SLEEP] Снято тем, оказавшихся оборотами: %d", reviewed)
+            logger.info("[SLEEP] Themes withdrawn as figures of speech: %d", reviewed)
 
         return SleepReport(
             edges_pruned=report.edges_pruned,
@@ -885,7 +890,7 @@ class Memory:
             cap=self.settings.strength_max,
             timestamp=ts,
         )
-        logger.info("[О ПОЛЬЗОВАТЕЛЕ] %r", text[:60])
+        logger.info("[ABOUT THE USER] %r", text[:60])
 
     def profile(self, limit: int = 10) -> List[MemoryMatch]:
         """

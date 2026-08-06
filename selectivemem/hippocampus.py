@@ -165,8 +165,8 @@ class HippocampusMixin:
                 known = self._familiarity(shared)
                 if not any(known.get(w, 0.0) <= ceiling for w in shared):
                     logger.info(
-                        "[SUPERSEDE] Отклонено: общие слова частые, "
-                        "предмета нет — %r против %r",
+                        "[SUPERSEDE] Rejected: shared words are common, "
+                        "no subject — %r against %r",
                         text[:40], (row["context"] or "")[:40],
                     )
                     continue

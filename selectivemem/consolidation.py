@@ -258,7 +258,7 @@ class ConsolidationMixin:
                 self.gate.node.delete(fact["id"])
                 dropped += 1
                 logger.info(
-                    "[CORTEX REVIEW] Тема оказалась оборотом речи: %r",
+                    "[CORTEX REVIEW] Theme turned out to be a figure of speech: %r",
                     fact["text"],
                 )
         return dropped

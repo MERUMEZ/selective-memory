@@ -73,7 +73,7 @@ def test_setup_reports_itself():
     """
     memory = Memory(":memory:", encoder=lambda text: None)
     line = memory.describe_setup()
-    assert "смысл:" in line and "значимость:" in line
+    assert "meaning:" in line and "significance:" in line
     memory.close()
 
 

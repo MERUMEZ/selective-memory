@@ -408,17 +408,21 @@ def describe() -> str:
     модели — то же самое. Замер показывает разницу между этими режимами в
     три раза (9/16 против 3/16 на английском стенде), а узнать, в каком ты
     режиме, можно было только по логам при подходящем уровне.
+
+    СТРОКА АНГЛИЙСКАЯ — её читает тот, кто запускает пакет.
     """
     if not _settings.embeddings_enabled:
-        return "семантика выключена настройкой (embeddings_enabled=False)"
+        return "semantics disabled by setting (embeddings_enabled=False)"
     if _settings.embedding_model_path:
         model = _load_model()
         if model is None:
-            return f"модель не загрузилась: {_settings.embedding_model_path}"
+            return f"model failed to load: {_settings.embedding_model_path}"
         return f"navec: {_settings.embedding_model_path}"
     try:
         from model2vec import StaticModel  # noqa: F401
     except ImportError:
-        return ("model2vec не установлен — организм отрастит восприятие сам "
-                "(pip install selective-memory[semantic] даёт готовую модель)")
-    return "potion-base-8M" if _load_model() is not None else "potion-base-8M не загрузилась"
+        return ("model2vec is not installed — the organism will grow its own "
+                "perception (pip install selective-memory[semantic] for a "
+                "ready-made model)")
+    return ("potion-base-8M" if _load_model() is not None
+            else "potion-base-8M failed to load")

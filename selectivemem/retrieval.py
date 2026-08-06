@@ -603,7 +603,7 @@ class RetrievalMixin:
             if (fresh is not None and fresh in rank
                     and rank[fresh] >= match.similarity - margin):
                 logger.info(
-                    "[SUPERSEDED] Узел %s не отдан: его заменил %s",
+                    "[SUPERSEDED] Node %s withheld: superseded by %s",
                     match.id, fresh,
                 )
                 hidden.add(match.id)

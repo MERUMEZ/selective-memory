@@ -205,5 +205,5 @@ def test_receptivity_is_reported_to_the_application(settings):
     memory = Memory(":memory:", settings=settings)
     state = memory.feel()
     assert 0.0 <= state.receptivity <= 1.0
-    assert "восприимчивость" in state.describe()
+    assert "receptivity" in state.describe()
     memory.close()

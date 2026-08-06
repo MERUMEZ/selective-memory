@@ -96,8 +96,9 @@
     с внутренней средой     записано 25.9% реплик, R@1 96.0%, R@10 96.2%
 
 Записей на 41% меньше ценой 0.8 пункта. Для библиотеки, вся суть которой
-в избирательности, это выгодный размен — но это РАЗМЕН, а не чистое
-улучшение, поэтому по умолчанию выключено (`intrinsic_emotion`).
+в избирательности, это выгодный размен, и поэтому оно ВКЛЮЧЕНО по
+умолчанию (`intrinsic_emotion=True`). Но это именно РАЗМЕН, а не чистое
+улучшение: кому полнота важнее объёма — выключайте.
 
 СИНТЕТИЧЕСКИЙ СТЕНД ЭТОГО НЕ ПОКАЗАЛ, и понять почему важнее самого
 замера. `tools/compare_interoception.py` давал ноль разницы в четырёх
@@ -192,16 +193,23 @@ class InternalState:
     """
 
     def describe(self) -> str:
-        """Человекочитаемо — для /status и отладки."""
-        mood = "лучше" if self.valence > 0.05 else (
-            "хуже" if self.valence < -0.05 else "ровно")
+        """
+        Human-readable, for status commands and debugging.
+
+        ENGLISH, like everything this package prints. Comments and
+        docstrings here are Russian because they are for whoever edits the
+        code; this string is for whoever RUNS it, and the package ships
+        with an English README and an English default model.
+        """
+        mood = "better" if self.valence > 0.05 else (
+            "worse" if self.valence < -0.05 else "level")
         return (
-            f"теснота {self.crowding:.2f}, удивление "
-            f"{self.mean_surprise:.2f}, непостижимость "
-            f"{self.comprehensibility_error:.2f}, рассогласованность "
-            f"{self.coherence_error:.2f} -> срочность {self.urgency:.2f}, "
-            f"напряжение {self.strain:.2f}, "
-            f"{mood} ({self.valence:+.2f}), восприимчивость "
+            f"crowding {self.crowding:.2f}, surprise "
+            f"{self.mean_surprise:.2f}, incomprehension "
+            f"{self.comprehensibility_error:.2f}, incoherence "
+            f"{self.coherence_error:.2f} -> urgency {self.urgency:.2f}, "
+            f"strain {self.strain:.2f}, "
+            f"{mood} ({self.valence:+.2f}), receptivity "
             f"{self.receptivity:.2f}"
         )
 
@@ -361,5 +369,5 @@ class Interoception:
             arousal=arousal,
             valence=valence,
         )
-        logger.debug("[ВНУТРЕННЕЕ СОСТОЯНИЕ] %s", self._state.describe())
+        logger.debug("[INTERNAL STATE] %s", self._state.describe())
         return self._state
