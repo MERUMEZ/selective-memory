@@ -134,13 +134,25 @@ sed -i 's/0\.1\.0/0.1.0.dev1/' selectivemem/__init__.py   # только для 
 Потом вернуть обратно, чтобы на боевой PyPI первый релиз уехал чистой
 версией `0.1.0`.
 
-Проверить, что получилось, в чистом окружении:
+Проверить, что получилось, в чистом окружении — **и не из каталога
+репозитория**:
 
 ```bash
 python -m venv /tmp/check && /tmp/check/bin/pip install \
   -i https://test.pypi.org/simple/ selective-memory
-/tmp/check/bin/python -c "from selectivemem import Memory; print(Memory(':memory:').stats())"
+cd /tmp && /tmp/check/bin/python -c \
+  "import selectivemem; print(selectivemem.__file__); print(selectivemem.__version__)"
 ```
+
+**`cd /tmp` — это смысл команды, а не украшение.** Python кладёт рабочий
+каталог в путь поиска, поэтому запуск рядом с папкой `selectivemem/`
+импортирует исходник с диска вместо только что выложенного пакета. Это
+уже случалось здесь: установка упала с «No matching distribution found»,
+следующая же строка напечатала бодрый баннер, и при этом не было
+установлено ничего.
+
+Отличает одно от другого печать `__file__`. Она обязана указывать внутрь
+`/tmp/check/lib/`, а не в репозиторий.
 
 И глазами посмотреть страницу пакета: как отрисовался README, верны ли
 ссылки, на месте ли лицензия.

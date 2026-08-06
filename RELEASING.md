@@ -135,13 +135,25 @@ sed -i 's/0\.1\.0/0.1.0.dev1/' selectivemem/__init__.py   # test only
 Then put it back before the real upload, so the first release goes out as
 a clean `0.1.0`.
 
-Check the result in a clean environment:
+Check the result in a clean environment — **and not from the repository
+directory**:
 
 ```bash
 python -m venv /tmp/check && /tmp/check/bin/pip install \
   -i https://test.pypi.org/simple/ selective-memory
-/tmp/check/bin/python -c "from selectivemem import Memory; print(Memory(':memory:').stats())"
+cd /tmp && /tmp/check/bin/python -c \
+  "import selectivemem; print(selectivemem.__file__); print(selectivemem.__version__)"
 ```
+
+**`cd /tmp` IS THE POINT OF THE COMMAND, not decoration.** Python puts the
+working directory on the import path, so run this next to the
+`selectivemem/` folder and you import the source tree on disk instead of
+the package you just published. It has already happened here: an install
+failed with "No matching distribution found", the very next line printed a
+healthy-looking banner, and nothing at all had been installed.
+
+Printing `__file__` is what tells the two apart. It must point inside
+`/tmp/check/lib/`, never into the repository.
 
 And look at the project page with your own eyes: how the README rendered,
 whether the links work, whether the licence is in place.
