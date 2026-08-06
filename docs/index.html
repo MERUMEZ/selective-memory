@@ -132,7 +132,7 @@ details.doc[open] > summary::before { content:"▾ "; }
 <pre><code>==============================================================================
  ИЗБИРАТЕЛЬНАЯ ПАМЯТЬ: ЧТО ПРОИСХОДИТ НА САМОМ ДЕЛЕ
 ==============================================================================
- смысл: potion-base-8M | значимость: своя, из внутренней среды | порог записи: 0.25 | ёмкость: без предела
+ meaning: potion-base-8M | significance: intrinsic, from the internal state | write threshold: 0.25 | capacity: unbounded
 
  1. РАЗГОВОР. Память решает по каждой реплике, стоит ли её держать.
 ------------------------------------------------------------------------------
@@ -205,7 +205,7 @@ details.doc[open] > summary::before { content:"▾ "; }
 
  4. САМОЧУВСТВИЕ. Значимость события организм выводит сам.
 ------------------------------------------------------------------------------
-   теснота 0.00, удивление 0.52, непостижимость 0.04, рассогласованность 0.06 -&gt; срочность 0.24, напряжение 0.02, лучше (+0.07), восприимчивость 1.00
+   crowding 0.00, surprise 0.52, incomprehension 0.04, incoherence 0.06 -&gt; urgency 0.24, strain 0.02, better (+0.07), receptivity 1.00
    Приложение может передать эмоцию явно — тогда главнее она.
 ==============================================================================</code></pre>
 
@@ -364,7 +364,7 @@ memory.context_for(&quot;what am I allergic to&quot;)
 <pre><code>pip install selective-memory              # core, zero dependencies
 pip install selective-memory[semantic]    # + meaning-based search (English)
 pip install selective-memory[semantic-ru] # + meaning-based search (Russian)</code></pre>
-<p>86 KB wheel, standard library and sqlite3. The name on PyPI is free; no release has been published yet.</p>
+<p>208 KB wheel, standard library and sqlite3. The name on PyPI is free; no release has been published yet.</p>
 <p><strong>Pick the extra that matches your language — the difference is not subtle.</strong> <code>[semantic]</code> brings potion-base-8M, which fetches itself on first use (30 MB) and is an <em>English</em> model. Measured on four related and four unrelated word pairs:</p>
 <table><tr><th></th><th>related pairs</th><th>unrelated pairs</th><th>separation</th></tr><tr><td>English</td><td>0.651</td><td>0.013</td><td><strong>+0.638</strong></td></tr><tr><td>Russian</td><td>0.685</td><td>0.661</td><td><strong>+0.024</strong></td></tr></table>
 <p>In English the model tells <code>cat</code>/<code>kitten</code> (0.686) from <code>cat</code>/<code>concrete</code> (0.009) cleanly. In Russian it rates <code>кот</code>/<code>бетон</code> at 0.803 — <em>higher</em> than <code>кот</code>/<code>кошка</code> at 0.643. That is not weak performance, it is noise: for Russian text this model is worse than no model, because the lexical fallback at least never claims a false match. Use <code>[semantic-ru]</code>, which brings navec, or attach your own encoder.</p>
@@ -407,7 +407,7 @@ now[0] += 30 * 86400          # fast-forward a month
 memory.forget()</code></pre>
 <p>Forgetting is computed on that scale. For games this also buys <strong>determinism</strong>: the same input yields byte-identical results, which is what replays, saves and QA require.</p>
 <h3 id="the-encoder-sets-the-language-and-a-mismatched-one-corrupts-">The encoder sets the language — and a mismatched one CORRUPTS memory</h3>
-<p>The bundled one is navec, Russian static vectors (51 MB, no torch). For another language or another domain, pass your own function:</p>
+<p>The default is potion-base-8M, brought by <code>[semantic]</code>: 30 MB, fetched on first use, no torch — and ENGLISH. <code>[semantic-ru]</code> brings navec instead (51 MB quantised, Russian, wants <code>embedding_model_path</code> pointed at the downloaded file). For another language or another domain, pass your own function:</p>
 <pre><code>from sentence_transformers import SentenceTransformer
 model = SentenceTransformer(&quot;all-MiniLM-L6-v2&quot;)
 memory = Memory(&quot;brain.db&quot;, encoder=lambda text: model.encode(text))</code></pre>
@@ -434,7 +434,7 @@ python tools/probe_semantic.py --lang en --grown   # as a bare install
 python tools/probe_semantic.py --lang ru           # Russian set</code></pre>
 <p>This bench and the one above disagree about grown perception, and the disagreement is instructive: sixteen isolated facts give it nothing to learn from, while a benchmark haystack is hundreds of turns in the very vocabulary the questions use. Perception grown from experience is good at the language it has actually seen and knows nothing of the rest.</p>
 <p><strong>For Russian take <code>[semantic-ru]</code>.</strong> The default model is English; on Russian it scores &quot;cat ~ concrete&quot; 0.803 against &quot;cat ~ kitty&quot; 0.643, and three tests in this repository skip themselves when they detect it.</p>
-<p>A working replacement, if 1.6 GB of RAM is acceptable:A working replacement, if 1.6 GB of RAM is acceptable:</p>
+<p>A working replacement, if 1.6 GB of RAM is acceptable:</p>
 <pre><code>from model2vec import StaticModel
 from selectivemem import Memory
 
@@ -478,7 +478,7 @@ memory = Memory(&quot;brain.db&quot;, settings=MemorySettings(decay_rate=0.02, a
 <p>Across three seeds selectivemem holds 94% on &quot;all&quot; with rare between 83% and 100%; the random sample swings 61–78% and 33–50%. Questions are phrased as a person would ask them, not as the stored sentence — an earlier version probed with the stored text verbatim and produced a meaningless 100% everywhere.</p>
 <hr>
 <h2 id="how-it-works">How it works</h2>
-<table><tr><th>Mechanism</th><th>What it does</th></tr><tr><td><strong>Spike gate</strong></td><td>Stores when <code>surprise * (1 + emotion) / 2 &gt;= threshold</code>. Emotion MULTIPLIES the plasticity novelty has opened, rather than being averaged with it. The threshold rises under load.</td></tr><tr><td><strong>Its own surprise</strong></td><td>Prediction error against its own graph of words and their pairings, not the entropy of a string. Experience lowers it; a short utterance surprises less, because it carries less information.</td></tr><tr><td><strong>Two memory parameters</strong></td><td><code>weight</code> — how vividly it is remembered now; <code>stability</code> — how slowly it fades. Stability grows on every recall.</td></tr><tr><td><strong>Dopamine</strong></td><td>Reinforcement by reward prediction error (Rescorla–Wagner): expected praise barely moves the weight, unexpected praise moves it a lot.</td></tr><tr><td><strong>Supersession</strong></td><td>A contradiction with something known is itself a reason to store. The stale version is weakened, not deleted.</td></tr><tr><td><strong>Decay floor</strong></td><td>Reinforced memories dim but do not vanish: they decay towards a floor whose height is earned by approval. Unreinforced ones go as before.</td></tr></table>
+<table><tr><th>Mechanism</th><th>What it does</th></tr><tr><td><strong>Spike gate</strong></td><td>Stores when <code>surprise * (1 + emotion) / 2 &gt;= threshold</code>. Emotion MULTIPLIES the plasticity novelty has opened, rather than being averaged with it. The threshold rises under load.</td></tr><tr><td><strong>Its own surprise</strong></td><td>Prediction error against its own graph of words and their pairings, not the entropy of a string. Experience lowers it; a short utterance surprises less, because it carries less information.</td></tr><tr><td><strong>Two memory parameters</strong></td><td><code>weight</code> — how vividly it is remembered now; <code>stability</code> — how slowly it fades. Stability grows on every recall.</td></tr><tr><td><strong>Dopamine</strong></td><td>Reinforcement by reward prediction error (Rescorla–Wagner): expected praise barely moves the weight, unexpected praise moves it a lot.</td></tr><tr><td><strong>Supersession</strong></td><td>A contradiction with something known is itself a reason to store. The stale version is neither deleted nor weakened: a <code>supersedes</code> edge is written and retrieval hides what it points at. A wrong correction therefore costs nothing permanent — the node is intact and comes back when the newer one stops fitting the question better.</td></tr><tr><td><strong>Decay floor</strong></td><td>Reinforced memories dim but do not vanish: they decay towards a floor whose height is earned by approval. Unreinforced ones go as before.</td></tr></table>
 <p>The floor deserves a note of its own, because it defines product behaviour. Stability grows on recall — so a fact the user called important but never returned to used to sink to zero along with the routine. For an assistant that was told &quot;I am allergic to penicillin&quot;, that is unacceptable.</p>
 <table><tr><th>times praised</th><th>after a year</th></tr><tr><td>0</td><td>forgotten</td></tr><tr><td>1</td><td>0.075</td></tr><tr><td>2</td><td>0.128</td></tr><tr><td>5</td><td>0.343</td></tr></table>
 <p>Praise applies both to what was just written and to what was <strong>recalled</strong> — with an assistant, approval usually lands on a good answer built from memory. Switch it off with <code>MemorySettings(memory_floor_max=0.0)</code>.</p>
@@ -489,7 +489,7 @@ memory = Memory(&quot;brain.db&quot;, settings=MemorySettings(decay_rate=0.02, a
 <pre><code>selectivemem/  the memory package — the only thing pip installs
 core/          showcase: persona, mood, speech stages
 tools/         benchmarks and the memory inspector
-tests/         287 tests
+tests/         345 tests
 AUDIT.md       what was measured, what was refuted, what is left undone
 RELEASING.md   how to cut a release</code></pre>
 <p>Documentation in Russian: <a href="https://github.com/MERUMEZ/selective-memory/blob/master/README.ru.md">README.ru.md</a>.</p>
