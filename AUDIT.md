@@ -1250,6 +1250,167 @@ too. A change that touches the SCHEMA must be checked against a file
 database opened a second time. Otherwise a whole class of breakage stays
 invisible until the first live run.
 
+### 2.35 Memory cannot notice its own ignorance
+
+An idea was proposed and tested that has a name in memory research:
+**a question is a gate to remembering**. A state of curiosity strengthens
+hippocampal encoding, and what happens to be nearby is retained better
+along with what was sought. So an answer that fills a gap deserves to be
+stored whether or not it surprises.
+
+The occasion was live and convincing. The assistant asked "what is your dog
+called", the user answered "Levi" — one familiar word, novelty 0.06 — and
+the name was NEVER stored. The assistant later said, honestly: "you have a
+dog, but I do not know its name".
+
+**FIRST CHECK: DOES THE IMPORTANT MORE OFTEN FOLLOW A QUESTION?**
+
+    turns in sessions WITH evidence      after a question  13.7%
+    turns in other sessions                                 8.5%
+
+Encouraging — but SESSIONS are being compared, and sessions with evidence
+are simply more interactive. The sharper check, inside those same sessions:
+
+    turns CARRYING the answer            after a question  11.0%
+    other turns of the same session                       13.5%
+
+The answer-bearing turn follows a question LESS often. On this benchmark
+the hypothesis does not hold.
+
+An honest caveat: LongMemEval dialogues are model-generated, and the
+assistant there asks out of politeness — "which blend do you prefer?" That
+is not a claim on knowledge. The hypothesis is about a question asked
+BECAUSE something needs to be known.
+
+**SECOND CHECK: CAN MEMORY SPOT THE GAP ITSELF?** A better formulation
+followed: the gate is not the question but the acknowledged lack, and that
+is visible from inside — search returned little or nothing. The mechanism
+was built: `recall` marks a gap, the next event gets a boost, the gap
+closes.
+
+**IT NEVER FIRED ONCE.** Not in thirty-six turns of conversation, nor on
+the live dog-name case. The reason turned out to be structural:
+
+    the search for "what is the dog called" returned
+        0.776  "I have a dog"
+        0.726  "why is he so loud"
+
+Memory FOUND something — confidently, and wrong. It was looking for a name,
+returned two close matches, and had no idea it had not answered. No
+confidence threshold separates those: 0.776 sits behind a wrong answer.
+
+**THE CONCLUSION MATTERS MORE THAN THE MECHANISM.** Memory cannot judge
+whether its answer was an answer. It measures similarity, not whether a
+need was met. So the signal "I looked and did not learn" is UNAVAILABLE
+inside the library — only the one who asked knows it: the application, or
+the model standing in its loop.
+
+That also justifies the boundary the library has held from the start:
+significance arrives from outside not through neglect, but because in
+places there is nowhere inside to take it from. The mechanism was reverted
+in full.
+
+### 2.36 Continuous context — and reverting my own change an hour later
+
+**CONTINUITY.** The gap between turns was used only in decay: for
+everything else three minutes and three days were the same thing. Temporal
+links were made through a window of the last two writes — across any gap,
+even a month.
+
+A temporal context was built (`context.py`): a state each event nudges and
+each pause weakens. The Howard–Kahana model. Temporal links now depend on
+CONTEXT SIMILARITY:
+
+| gap | link |
+|---|---|
+| half a minute, five minutes, half an hour | yes |
+| an hour, a day | **no** |
+
+With content-UNRELATED phrases — so the mechanism keeps its virtue and
+loses its blindness to pauses.
+
+**THE NON-OBVIOUS PART OF DRIFT.** Closeness is a cosine, and a cosine does
+not depend on vector length: weakening alone does not change direction. A
+pause works differently — a weakened context is more easily overridden by
+the next event, and when almost nothing is left it resets entirely. Drift
+is produced by EVENTS; the pause only decides how much power they have.
+The first draft of the docstring did not understand this and promised more.
+
+**TWO BREAKAGES ALONG THE WAY.** The context snapshot was taken BEFORE the
+event was absorbed, so the first write had no context at all and nothing
+could link to it. And `similarity` returned `numpy.float32`: SQLite does
+not know that type and silently stored the edge weight as BYTES — which
+blew up far from the mistake, at the first comparison of weight against a
+threshold.
+
+**AND NOW THE MAIN THING, WHICH IS ABOUT ME.** An hour earlier I had
+lowered the search threshold 0.20 -> 0.10, measured on the full set:
+
+    threshold 0.20   R@1 67.0%  R@5 79.0%  R@10 81.0%
+    threshold 0.10   R@1 68.4%  R@5 82.6%  R@10 86.6%
+
+A free win at the same write rate. The change went into the defaults.
+
+While checking continuity on the multi-hop stand I saw 43/120 where it had
+been 108. The cause was not continuity:
+
+    threshold 0.20   107/120        threshold 0.12    67/120
+    threshold 0.18   101/120        threshold 0.10    43/120
+    threshold 0.15    89/120
+
+The lower the threshold, the more weak direct matches crowd the result, and
+the answer completed through links is squeezed out — it is weaker by
+definition, its score having trickled in along edges.
+
+**NOTHING RESCUED IT.** Reserving a slot for the completed node gave the
+same 43/120. Widening the pool of spreading sources made it WORSE — 18/120:
+more sources, more junk trickling in, the right answer diluted. Both
+attempts were removed rather than kept unproven.
+
+The threshold went back to 0.20. Trading the ability to answer multi-hop
+questions for 5.6 points of R@10 is not worth it: the first is what
+completion was built for.
+
+**WHAT SURVIVED THE ATTEMPT.** The spreading source pool was measured and
+raised from top_k to six: 107/120 -> **110/120** at the original threshold.
+
+**THE LESSON.** A change measured on one stand broke a different capability,
+and I noticed by accident while checking a third. Five stands exist for a
+reason: mechanisms interact in ways none of them shows alone.
+
+### 2.37 The node's axes checked: no disentangling needed
+
+The plan item "disentangle what weight means" is closed by a CHECK rather
+than a change — and it retracts a claim of my own.
+
+I had said: "a node's weight means everything at once — importance,
+freshness, correctness, usage — so the mechanisms overwrite each other."
+Said from memory, without checking. The inventory showed otherwise:
+
+| axis | meaning | fades with the clock | who reads it |
+|---|---|---|---|
+| `weight` | strength of the trace now | yes | decay, floor |
+| `strength` | accumulated by reward and use | no | **ranking, eviction** |
+| `stability` | resistance to fading | no | decay |
+| `spike_strength` | significance at the moment of writing | no | decay floor |
+| `reward_expectation` | expected approval | no | reinforcement |
+
+The separation was made deliberately and long ago — the eviction code says
+so outright: "age does not leak in here, because the clock does not touch
+strength".
+
+**CHECKED BY EXPERIMENT, NOT BY READING.** Praise raises `strength` 1.0 ->
+1.65 — the very axis ranking reads. Across thirty-six turns all 22 nodes
+have `strength` populated with meaningfully different values (0.37–0.50),
+so there is no hidden trouble where some nodes rank on one scale and some
+on a fallback.
+
+**WHAT WAS RIGHT IN THE ORIGINAL OBSERVATION.** A specific case was
+pointed out: a correction said "this fact is outdated" and wrote "this fact
+is less important". There the conflation was real, and it was removed by
+the `supersedes` link (2.34). What was wrong was generalising that one case
+to the whole system — and the generalisation was mine, not the observer's.
+
 ## 3. What remains
 
 ### 3.1 Defects
