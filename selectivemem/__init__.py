@@ -32,4 +32,4 @@ from selectivemem.settings import MemorySettings
 
 __all__ = ["Memory", "MemoryStats", "Observation", "MemorySettings",
            "InternalState"]
-__version__ = "0.1.0"
+__version__ = "0.1.1.dev1"
