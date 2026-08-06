@@ -15,15 +15,39 @@ release to the real PyPI.
 
 ## One-time setup
 
+**We publish with no token at all.** Trusted Publishing: PyPI trusts a
+specific workflow in a specific repository rather than a secret, verified
+through an OIDC credential GitHub mints for that run and which lives for
+minutes. There is nothing to revoke, because no secret exists — not in the
+repository, not in the settings, not on the author's machine.
+
 1. Create accounts on https://pypi.org and on https://test.pypi.org —
    these are **different** sites with different passwords.
 2. Enable two-factor authentication (PyPI will not let you upload
    without it).
-3. Create an API token: Account settings → API tokens → Add API token.
-   For the first upload use account-wide scope; afterwards recreate it
-   scoped to this project only.
+3. On each site: Your projects → Publishing → Add a new pending
+   publisher, filled in exactly like this:
 
-A token looks like `pypi-AgEIcHlwaS5vcmc...`. It must never enter the
+   | field | value |
+   |---|---|
+   | PyPI Project Name | `selective-memory` |
+   | Owner | `MERUMEZ` |
+   | Repository name | `selective-memory` |
+   | Workflow name | `publish.yml` |
+   | Environment name | `pypi` (`testpypi` on TestPyPI) |
+
+   A "pending publisher" is a rule for a project that does not exist
+   yet — the first publish is what creates it.
+4. In GitHub: Settings → Environments → create `pypi` and `testpypi`.
+   The names must match what you entered on PyPI, or publishing is
+   refused.
+
+From then on [.github/workflows/publish.yml](.github/workflows/publish.yml)
+does the publishing: a manual run targets TestPyPI, and only a `v*` tag
+reaches the real PyPI.
+
+A token remains possible as a fallback (`twine upload`); if you have one
+it looks like `pypi-AgEIcHlwaS5vcmc...` and it must never enter the
 repository in any form.
 
 ## Checks before every release
@@ -81,6 +105,12 @@ rm -rf build dist
 A separate server. Names and versions there reserve **nothing** on the
 real PyPI, so experiment freely.
 
+GitHub → Actions → Publish → Run workflow, `target = testpypi`. The build,
+the tests and `twine check` all run there; the upload is done by a job
+that holds the signing permission and no secrets at all.
+
+The fallback, if Actions are unavailable:
+
 ```bash
 export TWINE_USERNAME=__token__
 export TWINE_PASSWORD=pypi-YOUR_TESTPYPI_TOKEN
@@ -118,19 +148,19 @@ whether the links work, whether the licence is in place.
 
 ## Then the real PyPI
 
-```bash
-export TWINE_USERNAME=__token__
-export TWINE_PASSWORD=pypi-YOUR_PYPI_TOKEN
-./venv/bin/python -m twine upload dist/*
-```
-
-Install from there into a clean environment and confirm it works. Then
-tag it:
+Here the tag IS the release — there is no separate upload command:
 
 ```bash
 git tag -a v0.1.0 -m "First release"
 git push origin v0.1.0
 ```
+
+A `v*` tag triggers the same workflow, which targets the real PyPI. Then
+install from there into a clean environment and confirm it works.
+
+The order matters: the tag CREATES the release rather than marking one
+already made. Otherwise the tag and the uploaded artefact drift apart, and
+later nobody can tell what the package people installed was built from.
 
 ## When something goes wrong
 
