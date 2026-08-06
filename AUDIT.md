@@ -1411,6 +1411,50 @@ is less important". There the conflation was real, and it was removed by
 the `supersedes` link (2.34). What was wrong was generalising that one case
 to the whole system — and the generalisation was mine, not the observer's.
 
+### 2.38 Receptivity: state drives behaviour, not just writing
+
+The point was put like this: if the assistant asks something, it does so
+only when its plasticity threshold is low and it is ready to record the
+answer; otherwise it talks dryly and closed off. The observation is exact,
+and it closes the loop.
+
+**WHAT IT WAS.** The internal state affected the GATE only. The assistant
+asked questions regardless of whether it was in any state to absorb an
+answer — and `fills_gap` looked like an external crutch.
+
+**WHAT IT IS.** `feel()` reports receptivity as a number. Memory produces
+no speech and cannot ask; the decision belongs to the application, its job
+is to report the state.
+
+The loop closes: the assistant asks BECAUSE memory is receptive, and for
+the same reason the answer deserves to be stored.
+
+**A FAULT CAUGHT BY MEASUREMENT RIGHT AFTER BUILDING IT.** The first
+version computed receptivity as "one minus strain":
+
+    a dull routine      receptivity 0.43
+    an incoherent flood receptivity 0.40
+
+Nearly identical for OPPOSITE states. The cause: comprehensibility is
+two-sided (both chaos and routine are far from the optimum) while strain is
+one-sided — boredom and overload fell into the same bucket.
+
+**The sides were separated.** Only overload feeds strain; boredom raises
+receptivity instead — there is nothing to learn, so it is the moment to
+ask. That is curiosity as it is actually described: an attraction to
+MANAGEABLE novelty, not to novelty as such.
+
+| environment | strain | receptivity |
+|---|---:|---:|
+| dull routine | 0.00 | 1.00 |
+| varied | 0.00 | 1.00 |
+| incoherent flood | 0.60 | 0.40 |
+| crowded | 1.00 | 0.49 |
+
+The last row is a contradictory state and should be: crowding says "no
+room", boredom says "nothing to learn". A number in the middle reports the
+conflict honestly rather than hiding it.
+
 ## 3. What remains
 
 ### 3.1 Defects

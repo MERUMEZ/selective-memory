@@ -174,6 +174,23 @@ class InternalState:
     valence: float
     """Становится лучше (+) или хуже (-), [-1, 1]. Идёт в подкрепление."""
 
+    receptivity: float
+    """
+    Готов ли организм усваивать новое, [0, 1].
+
+    Не для гейта — для ПРИЛОЖЕНИЯ. Память речь не порождает и спрашивать
+    не умеет, но решение «спросить или отвечать коротко» должно опираться
+    на её состояние, а не приниматься вслепую.
+
+    Замысел прост и человеческий: спрашивают, когда готовы услышать
+    ответ. Организм под напряжением — в тесноте, в непонятной среде — не
+    лезет с уточнениями: ему некуда класть.
+
+    Это замыкает петлю. Ассистент спрашивает, ПОТОМУ ЧТО память
+    восприимчива, — и потому же ответ на его вопрос заслуживает записи
+    (`observe(..., fills_gap=True)`).
+    """
+
     def describe(self) -> str:
         """Человекочитаемо — для /status и отладки."""
         mood = "лучше" if self.valence > 0.05 else (
@@ -184,7 +201,8 @@ class InternalState:
             f"{self.comprehensibility_error:.2f}, рассогласованность "
             f"{self.coherence_error:.2f} -> срочность {self.urgency:.2f}, "
             f"напряжение {self.strain:.2f}, "
-            f"{mood} ({self.valence:+.2f})"
+            f"{mood} ({self.valence:+.2f}), восприимчивость "
+            f"{self.receptivity:.2f}"
         )
 
 
@@ -209,7 +227,7 @@ class Interoception:
         self._crowding: float = 0.0
         # Прошлое суммарное отклонение — из него берётся ЗНАК.
         self._previous_error: Optional[float] = None
-        self._state = InternalState(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        self._state = InternalState(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
 
     # ------------------------------------------------------------------
     @property
@@ -245,6 +263,20 @@ class Interoception:
         target = self.settings.interoception_surprise_setpoint
         span = max(target, 1.0 - target)
         comprehensibility_error = min(1.0, abs(self._mean_surprise - target) / span)
+
+        # СТОРОНА ОТКЛОНЕНИЯ ВАЖНЕЕ ЕГО ВЕЛИЧИНЫ, и первая версия это
+        # потеряла. Переменная двусторонняя, а канал напряжения
+        # односторонний — скука и перегрузка попадали в одно ведро.
+        #
+        # Замер поймал: спокойный уклад давал восприимчивость 0.43,
+        # бессвязный поток 0.40. Почти одно и то же при противоположных
+        # состояниях.
+        #
+        # Стороны разные и по смыслу: хаос требует беречь себя, скука —
+        # наоборот, искать нового. Это и есть любопытство: влечение к
+        # посильной новизне, а не к новизне вообще.
+        overload = max(0.0, self._mean_surprise - target) / span
+        boredom = max(0.0, target - self._mean_surprise) / span
 
         # 2. СОГЛАСОВАННОСТЬ. Та же бегущая оценка по доле противоречий.
         self._contradiction_rate += smoothing * (
@@ -291,9 +323,10 @@ class Interoception:
         #
         # Стрессоры не усредняются, они складываются: одного тяжёлого
         # достаточно, и сытость не отменяет боли.
+        # В НАПРЯЖЕНИЕ ИДЁТ ТОЛЬКО ПЕРЕГРУЗКА, не скука.
         strain = min(1.0, (
             w.interoception_crowding_weight * self._crowding
-            + w.interoception_comprehensibility_weight * comprehensibility_error
+            + w.interoception_comprehensibility_weight * overload
         ))
 
         # ВАЛЕНТНОСТЬ — знак ИЗМЕНЕНИЯ отклонения. Стало хуже -> минус.
@@ -308,7 +341,17 @@ class Interoception:
             valence = max(-1.0, min(1.0, -delta * gain))
         self._previous_error = error
 
+        # ВОСПРИИМЧИВОСТЬ — обратная сторона напряжения, но не его
+        # зеркало: срочность её поднимает. Организм, чья модель мира
+        # разъехалась, ХОЧЕТ спрашивать, даже если ему тесно.
+        # СКУКА ВОСПРИИМЧИВОСТЬ ПОДНИМАЕТ. Организму нечему учиться —
+        # значит самое время спросить. Срочность действует так же: модель
+        # мира разъехалась, и он ХОЧЕТ спрашивать, даже если ему тесно.
+        receptivity = max(0.0, min(
+            1.0, 1.0 - strain + boredom * 0.5 + urgency * 0.5))
+
         self._state = InternalState(
+            receptivity=receptivity,
             crowding=self._crowding,
             mean_surprise=self._mean_surprise,
             comprehensibility_error=comprehensibility_error,

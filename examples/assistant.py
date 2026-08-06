@@ -92,7 +92,8 @@ SYSTEM = (
 )
 
 
-def ask_model(profile: str, context: str, question: str) -> str:
+def ask_model(profile: str, context: str, question: str,
+              receptivity: float = 1.0) -> str:
     """Запрос к модели. Без ключа — честная заглушка, а не выдумка."""
     if not API_KEY:
         return "(ключа нет — отвечает заглушка; память при этом настоящая)"
@@ -106,8 +107,23 @@ def ask_model(profile: str, context: str, question: str) -> str:
             # Живой разговор показал, зачем: на «может ещё что-то?»
             # ассистент ответил «больше ничего не знаю» при двадцати
             # записях в памяти — запрос не совпал ни с чем.
+            # ВОСПРИИМЧИВОСТЬ УПРАВЛЯЕТ ПОВЕДЕНИЕМ, а не только записью.
+            #
+            # Спрашивают, когда готовы услышать ответ. Организм под
+            # напряжением — в тесноте, в непонятной среде — не лезет с
+            # уточнениями: ему некуда класть. Скучающий, наоборот,
+            # спрашивает охотно.
+            #
+            # Это замыкает петлю: ассистент спрашивает ПОТОМУ ЧТО память
+            # восприимчива, и потому же ответ на его вопрос заслуживает
+            # записи (fills_gap).
             {"role": "system",
              "content": SYSTEM
+                        + ("\n\nТы сейчас расположен узнавать новое: можешь "
+                           "задать один уточняющий вопрос, если он к месту."
+                           if receptivity >= 0.6 else
+                           "\n\nТы сейчас перегружен: отвечай коротко и НЕ "
+                           "задавай уточняющих вопросов.")
                         + ("\n\nЧто известно о человеке:\n" + profile
                            if profile else "")
                         + ("\n\nПодходящее к вопросу:\n" + context
@@ -174,7 +190,9 @@ def main() -> None:
             continue
 
         # 2. ОТВЕТИТЬ.
-        answer = ask_model(profile, context, question)
+        state = memory.feel()
+        answer = ask_model(profile, context, question,
+                           receptivity=state.receptivity)
         print(f"\nассистент: {answer}")
 
         # 3. ПОКАЗАТЬ ПАМЯТИ. Она сама решит, стоит ли это хранить, —
@@ -207,6 +225,8 @@ def main() -> None:
             parts.append(f"по вопросу {len(context.splitlines())}")
         if parts:
             print(f"   [подмешано: {', '.join(parts)}]")
+        print(f"   [восприимчивость {state.receptivity:.2f} — "
+              f"{'спрашивает' if state.receptivity >= 0.6 else 'бережёт себя'}]")
 
     memory.close()
     print("\nпамять сохранена в assistant.db — при следующем запуске всё на месте")

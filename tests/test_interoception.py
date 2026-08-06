@@ -161,3 +161,49 @@ def test_interoception_is_on_by_default():
     библиотеки.
     """
     assert MemorySettings().intrinsic_emotion is True
+
+
+def test_boredom_and_overload_pull_receptivity_apart(settings):
+    """
+    Скука и перегрузка — противоположные состояния, и путать их нельзя.
+
+    Первая версия считала непостижимость по МОДУЛЮ отклонения и отправляла
+    её целиком в напряжение. Замер поймал: спокойный уклад давал
+    восприимчивость 0.43, бессвязный поток 0.40 — почти одно и то же при
+    противоположных состояниях.
+
+    Теперь стороны разведены: хаос требует беречь себя, скука — наоборот,
+    искать нового. Это и есть любопытство как влечение к ПОСИЛЬНОЙ
+    новизне.
+    """
+    rng = random.Random(7)
+
+    bored = Memory(":memory:", settings=settings)
+    for _ in range(40):
+        bored.observe(familiar(rng))
+    calm_state = bored.feel()
+    bored.close()
+
+    flooded = Memory(":memory:", settings=settings)
+    for _ in range(40):
+        flooded.observe(nonsense(rng))
+    wild_state = flooded.feel()
+    flooded.close()
+
+    assert calm_state.receptivity > wild_state.receptivity + 0.3, (
+        f"скука {calm_state.receptivity:.2f} против хаоса "
+        f"{wild_state.receptivity:.2f} — состояния не различаются"
+    )
+    assert wild_state.strain > calm_state.strain, "хаос обязан напрягать"
+
+
+def test_receptivity_is_reported_to_the_application(settings):
+    """
+    Память речь не порождает — решение «спросить или промолчать» за
+    приложением. Её дело отдать состояние числом.
+    """
+    memory = Memory(":memory:", settings=settings)
+    state = memory.feel()
+    assert 0.0 <= state.receptivity <= 1.0
+    assert "восприимчивость" in state.describe()
+    memory.close()
