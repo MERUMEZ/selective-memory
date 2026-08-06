@@ -95,7 +95,7 @@ pip install selective-memory[semantic]    # + meaning-based search (English)
 pip install selective-memory[semantic-ru] # + meaning-based search (Russian)
 ```
 
-86 KB wheel, standard library and sqlite3. The name on PyPI is free; no
+208 KB wheel, standard library and sqlite3. The name on PyPI is free; no
 release has been published yet.
 
 **Pick the extra that matches your language — the difference is not
@@ -234,8 +234,11 @@ what replays, saves and QA require.
 
 ### The encoder sets the language — and a mismatched one CORRUPTS memory
 
-The bundled one is navec, Russian static vectors (51 MB, no torch). For
-another language or another domain, pass your own function:
+The default is potion-base-8M, brought by `[semantic]`: 30 MB, fetched on
+first use, no torch — and ENGLISH. `[semantic-ru]` brings navec instead
+(51 MB quantised, Russian, wants `embedding_model_path` pointed at the
+downloaded file). For another language or another domain, pass your own
+function:
 
 ```python
 from sentence_transformers import SentenceTransformer
@@ -336,7 +339,7 @@ the language it has actually seen and knows nothing of the rest.
 Russian it scores "cat ~ concrete" 0.803 against "cat ~ kitty" 0.643, and
 three tests in this repository skip themselves when they detect it.
 
-A working replacement, if 1.6 GB of RAM is acceptable:A working replacement, if 1.6 GB of RAM is acceptable:
+A working replacement, if 1.6 GB of RAM is acceptable:
 
 ```python
 from model2vec import StaticModel
@@ -516,7 +519,7 @@ meaningless 100% everywhere.
 | **Its own surprise** | Prediction error against its own graph of words and their pairings, not the entropy of a string. Experience lowers it; a short utterance surprises less, because it carries less information. |
 | **Two memory parameters** | `weight` — how vividly it is remembered now; `stability` — how slowly it fades. Stability grows on every recall. |
 | **Dopamine** | Reinforcement by reward prediction error (Rescorla–Wagner): expected praise barely moves the weight, unexpected praise moves it a lot. |
-| **Supersession** | A contradiction with something known is itself a reason to store. The stale version is weakened, not deleted. |
+| **Supersession** | A contradiction with something known is itself a reason to store. The stale version is neither deleted nor weakened: a `supersedes` edge is written and retrieval hides what it points at. A wrong correction therefore costs nothing permanent — the node is intact and comes back when the newer one stops fitting the question better. |
 | **Decay floor** | Reinforced memories dim but do not vanish: they decay towards a floor whose height is earned by approval. Unreinforced ones go as before. |
 
 The floor deserves a note of its own, because it defines product
@@ -552,7 +555,7 @@ in [DEMO.md](https://github.com/MERUMEZ/selective-memory/blob/master/DEMO.md) (i
 selectivemem/  the memory package — the only thing pip installs
 core/          showcase: persona, mood, speech stages
 tools/         benchmarks and the memory inspector
-tests/         287 tests
+tests/         345 tests
 AUDIT.md       what was measured, what was refuted, what is left undone
 RELEASING.md   how to cut a release
 ```
