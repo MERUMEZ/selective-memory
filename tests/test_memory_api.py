@@ -17,6 +17,7 @@ import pytest
 from selectivemem import Memory
 from selectivemem import embeddings
 from selectivemem.settings import MemorySettings
+from conftest import requires_russian
 
 # Проверка опирается на СЕМАНТИКУ: запрос сформулирован другими словами,
 # чем сохранённый текст. Без модели поиск честно отвечает пустотой и сам
@@ -95,6 +96,7 @@ def test_recall_finds_what_was_stored(memory):
     assert "Мурзик" in found[0].context
 
 
+@requires_russian
 def test_context_for_is_empty_when_nothing_relevant(memory):
     """
     Пустая строка — законный ответ. Память, которая всегда что-то
@@ -125,6 +127,7 @@ def test_time_comes_from_outside():
     m.close()
 
 
+@requires_russian
 def test_recall_resists_forgetting():
     """
     Вспоминание — не бесплатное чтение: оно повышает стабильность узла.

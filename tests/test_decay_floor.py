@@ -23,6 +23,7 @@ import pytest
 
 from selectivemem import Memory, MemorySettings
 from selectivemem import embeddings
+from conftest import requires_russian
 
 # Проверка опирается на СЕМАНТИКУ: запрос сформулирован другими словами,
 # чем сохранённый текст. Без модели поиск честно отвечает пустотой и сам
@@ -158,6 +159,7 @@ def test_floor_can_be_switched_off():  # noqa: D401
 # ---------------------------------------------------------------------------
 
 @requires_model
+@requires_russian
 def test_praise_reaches_recalled_nodes():
     """
     У ассистента похвала следует за хорошим ответом, построенным на
@@ -205,6 +207,7 @@ def test_praise_reaches_both_written_and_recalled():
 
 
 @requires_model
+@requires_russian
 def test_praise_boosts_the_weight_of_recalled_nodes():
     """
     Похвала должна не только делать вспомненное ДОЛГОВЕЧНЕЕ (через пол),

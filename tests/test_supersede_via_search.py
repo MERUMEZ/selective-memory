@@ -34,6 +34,7 @@ import pytest
 
 from selectivemem import Memory, MemorySettings
 from selectivemem import embeddings
+from conftest import requires_russian
 
 # Проверка опирается на СЕМАНТИКУ: запрос сформулирован другими словами,
 # чем сохранённый текст. Без модели поиск честно отвечает пустотой и сам
@@ -130,6 +131,7 @@ def test_the_known_limit_is_recorded_not_hidden():
 
 
 @requires_model
+@requires_russian
 def test_zero_threshold_restores_the_old_path():
     """Путь отката должен работать: ноль возвращает прежнее поведение."""
     memory = _memory(threshold=0.0)

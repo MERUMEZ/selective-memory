@@ -1,5 +1,7 @@
 # selectivemem
 
+[![Publish](https://github.com/MERUMEZ/selective-memory/actions/workflows/publish.yml/badge.svg)](https://github.com/MERUMEZ/selective-memory/actions/workflows/publish.yml)
+
 **Memory that decides what is worth keeping — and what to hand back first.**
 
 Your assistant meets the user from scratch every time. Dumping everything
@@ -555,7 +557,7 @@ in [DEMO.md](https://github.com/MERUMEZ/selective-memory/blob/master/DEMO.md) (i
 selectivemem/  the memory package — the only thing pip installs
 core/          showcase: persona, mood, speech stages
 tools/         benchmarks and the memory inspector
-tests/         345 tests
+tests/         334 tests
 AUDIT.md       what was measured, what was refuted, what is left undone
 RELEASING.md   how to cut a release
 ```

@@ -31,6 +31,7 @@ config = _LibrarySettings()
 from selectivemem.database import Database
 from selectivemem.graph_memory import MemoryGraph
 from selectivemem import embeddings
+from conftest import requires_russian
 
 requires_model = pytest.mark.skipif(
     not embeddings.is_available(),
@@ -54,6 +55,7 @@ def score(graph, query):
 # Главная инверсия, ради которой всё делалось
 # ---------------------------------------------------------------------------
 @requires_model
+@requires_russian
 def test_synonym_beats_lookalike(mg):
     """
     "кот" — синоним, "кожа" — случайное совпадение букв. Раньше побеждала
@@ -73,6 +75,7 @@ def test_paraphrase_is_found_at_all(mg):
 
 
 @requires_model
+@requires_russian
 def test_distant_paraphrase_is_beyond_the_light_model():
     """
     ЗАФИКСИРОВАННОЕ ОГРАНИЧЕНИЕ, а не забытый случай.
@@ -103,6 +106,7 @@ def test_distant_paraphrase_is_beyond_the_light_model():
 
 
 @requires_model
+@requires_russian
 def test_lookalike_is_not_presented_as_confident(mg):
     """
     Случайное буквенное совпадение может попасть в выдачу, но обязано
@@ -120,6 +124,7 @@ def test_exact_match_still_wins(mg):
 
 
 @requires_model
+@requires_russian
 def test_unrelated_query_is_not_found(mg):
     assert score(mg, "квантовая хромодинамика") < config.memory_search_threshold
 
@@ -178,6 +183,7 @@ def test_search_works_without_embeddings(mg, monkeypatch):
     )
 
 
+@requires_russian
 def test_encode_handles_degenerate_input():
     for text in ("", "   ", "!!!", "…"):
         assert embeddings.encode(text) is None
@@ -188,6 +194,7 @@ def test_cosine_is_safe_on_missing_vectors():
     assert embeddings.similarity("привет", None) == 0.0
 
 
+@requires_russian
 def test_built_in_model_is_blind_to_professional_domains():
     """
     ЗАФИКСИРОВАННОЕ ОГРАНИЧЕНИЕ ДОМЕНА, а не размера модели.
