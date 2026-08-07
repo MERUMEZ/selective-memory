@@ -97,8 +97,8 @@ pip install selective-memory[semantic]    # + meaning-based search (English)
 pip install selective-memory[semantic-ru] # + meaning-based search (Russian)
 ```
 
-208 KB wheel, standard library and sqlite3. The name on PyPI is free; no
-release has been published yet.
+208 KB wheel, standard library and sqlite3. Published on PyPI as
+[`selective-memory`](https://pypi.org/project/selective-memory/).
 
 **Pick the extra that matches your language — the difference is not
 subtle.** `[semantic]` brings potion-base-8M, which fetches itself on

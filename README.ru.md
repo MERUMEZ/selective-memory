@@ -97,8 +97,8 @@ pip install selective-memory[semantic]    # + поиск по смыслу (ан
 pip install selective-memory[semantic-ru] # + поиск по смыслу (русский)
 ```
 
-Колесо 208 КБ, стандартная библиотека и sqlite3. Имя на PyPI свободно,
-публикации пока не было.
+Колесо 208 КБ, стандартная библиотека и sqlite3. Выложено на PyPI как
+[`selective-memory`](https://pypi.org/project/selective-memory/).
 
 **Берите extra под свой язык — разница не в оттенках.** `[semantic]`
 ставит potion-base-8M: 30 МБ, скачивается сам при первом обращении,
