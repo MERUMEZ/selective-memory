@@ -25,6 +25,16 @@ import pytest
 from selectivemem.database import Database
 from selectivemem.graph_memory import MemoryGraph
 from selectivemem.settings import MemorySettings
+from selectivemem import embeddings
+
+# Проверка опирается на СЕМАНТИКУ: запрос сформулирован другими словами,
+# чем сохранённый текст. Без модели поиск честно отвечает пустотой и сам
+# об этом предупреждает в логе — это заявленная деградация, а не поломка.
+requires_model = pytest.mark.skipif(
+    not embeddings.is_available(),
+    reason="запрос сформулирован иначе, чем запись: нужна семантическая модель",
+)
+
 
 WORDS = (
     "кот собака дом работа книга город море еда музыка друг "
@@ -77,6 +87,7 @@ def test_prefilter_agrees_with_exhaustive_search():
     assert not disagreements, f"отбор изменил ответы: {disagreements}"
 
 
+@requires_model
 def test_prefilter_agrees_on_top_three():
     """То же самое для тройки лучших — порядок тоже не должен разъезжаться."""
     fast = _build(MemorySettings())

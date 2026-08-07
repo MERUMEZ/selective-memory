@@ -157,6 +157,7 @@ def test_floor_can_be_switched_off():  # noqa: D401
 # Подкрепление должно доставать до ВСПОМНЕННОГО, а не только до записанного
 # ---------------------------------------------------------------------------
 
+@requires_model
 def test_praise_reaches_recalled_nodes():
     """
     У ассистента похвала следует за хорошим ответом, построенным на
@@ -203,6 +204,7 @@ def test_praise_reaches_both_written_and_recalled():
     memory.close()
 
 
+@requires_model
 def test_praise_boosts_the_weight_of_recalled_nodes():
     """
     Похвала должна не только делать вспомненное ДОЛГОВЕЧНЕЕ (через пол),

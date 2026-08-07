@@ -129,6 +129,7 @@ def test_the_known_limit_is_recorded_not_hidden():
     memory.close()
 
 
+@requires_model
 def test_zero_threshold_restores_the_old_path():
     """Путь отката должен работать: ноль возвращает прежнее поведение."""
     memory = _memory(threshold=0.0)

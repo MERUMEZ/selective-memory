@@ -21,6 +21,18 @@
 
 from selectivemem import Memory
 from selectivemem.settings import MemorySettings
+from selectivemem import embeddings
+
+import pytest
+
+# Проверка опирается на СЕМАНТИКУ: запрос сформулирован другими словами,
+# чем сохранённый текст. Без модели поиск честно отвечает пустотой и сам
+# об этом предупреждает в логе — это заявленная деградация, а не поломка.
+requires_model = pytest.mark.skipif(
+    not embeddings.is_available(),
+    reason="запрос сформулирован иначе, чем запись: нужна семантическая модель",
+)
+
 
 
 def _ask_about_the_dog(memory):
@@ -46,6 +58,7 @@ def test_short_answer_is_lost_without_the_signal():
     memory.close()
 
 
+@requires_model
 def test_short_answer_is_kept_when_the_caller_declares_it():
     memory = Memory(":memory:")
     _ask_about_the_dog(memory)

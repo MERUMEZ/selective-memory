@@ -26,6 +26,16 @@
 import pytest
 
 from selectivemem import Memory, MemorySettings
+from selectivemem import embeddings
+
+# Проверка опирается на СЕМАНТИКУ: запрос сформулирован другими словами,
+# чем сохранённый текст. Без модели поиск честно отвечает пустотой и сам
+# об этом предупреждает в логе — это заявленная деградация, а не поломка.
+requires_model = pytest.mark.skipif(
+    not embeddings.is_available(),
+    reason="запрос сформулирован иначе, чем запись: нужна семантическая модель",
+)
+
 
 
 @pytest.fixture
@@ -218,6 +228,7 @@ def test_temporal_linking_is_on_by_default():
     assert MemorySettings().temporal_link_window == 2
 
 
+@requires_model
 def test_a_long_pause_breaks_the_temporal_link():
     """
     После долгой паузы соседство во времени перестаёт быть соседством.
